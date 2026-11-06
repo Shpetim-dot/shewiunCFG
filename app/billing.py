@@ -269,13 +269,20 @@ def revenue(request: Request) -> dict[str, Any]:
     price = PLANS[plan]["price_eur"] or 0
     status = (row["status"] if row else "active") or "active"
     invoice_status = (row["last_invoice_status"] if row and "last_invoice_status" in row.keys() else None)
+    from app import auth as A
+    if A.user_count() == 0 and not row:
+        # Demo workspace without an organisation: no billing row exists yet, so show the
+        # honest zero state instead of pretending "active".
+        status, note = "demo", "Demo-Instanz ohne Organisation: Umsatz erscheint, sobald du einen Workspace registrierst."
+    else:
+        note = "Derived from the plan price and subscription status; invoices stay in Stripe."
     return {"org": pf.org(), "plan": plan, "plan_name": PLANS[plan]["name"], "currency": "EUR",
             "price_eur": PLANS[plan]["price_eur"], "seats": seats, "mrr_eur": price * 1 if status in ("active", "trialing") else 0,
             "arr_eur": (price * 12) if status in ("active", "trialing") else 0,
             "status": status, "last_invoice_status": invoice_status,
             "period_end": row["period_end"] if row else None, "grace_until": row["grace_until"] if row else None,
             "customer_since": org["created_at"] if org else None,
-            "note": "Derived from the plan price and subscription status; invoices stay in Stripe."}
+            "note": note}
 
 
 @router.get("/api/admin/revenue")

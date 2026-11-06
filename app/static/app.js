@@ -950,10 +950,15 @@
         await loadOrg();
       }), 'btn primary')) : h('p', { class: 'muted' }, 'Nur Owner und Admins laden Mitglieder ein.');
     const rev = o.revenue;
-    const money = rev ? h('div', { class: 'cards', style: 'margin-bottom:14px' },
+    const money = rev ? h('div', { style: 'margin-bottom:14px' }, h('div', { class: 'cards' },
       ['plan', 'mrr_eur', 'arr_eur', 'seats'].map((k) => h('div', { class: 'card stat' },
         h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / Monat', arr_eur: 'ARR / Jahr', seats: 'Seats' })[k]),
-        h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))) : null;
+        h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))),
+      h('div', { class: 'row2', style: 'margin-top:8px' },
+        h('span', { class: 'chip ' + (rev.status === 'active' ? 'ok' : 'warn') }, rev.status === 'active' ? 'Active' : rev.status === 'demo' ? 'Demo' : String(rev.status || 'n/a')),
+        rev.customer_since ? h('span', { class: 'muted', style: 'font-size:12px' }, 'Kunde seit ' + when(rev.customer_since)) : null),
+      h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0 0' }, rev.note || 'MRR = Planpreis x bezahlte Seats (keine Buchhaltungs-Ledger).'),
+      rev.status === 'demo' ? h('div', { style: 'margin-top:10px' }, btn('Workspace registrieren fuer echte Umsaetze', () => { S.auth = true; S.setup = true; render(); }, 'btn primary')) : null) : emptyState('coins', 'Keine Umsatzdaten', 'Sobald eine Organisation existiert, zeigt dieser Block Plan, MRR, ARR und Seats.');
     const anIn = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Titel, z.B. Wartungsfenster Sonntag 02:00', maxlength: 120 }), body: h('input', { class: 'field', id: 'an-body', placeholder: 'Nachricht an dein Team', maxlength: 500 }) };
     const annCard = canAdmin ? h('div', { class: 'card', style: 'padding:12px;margin-bottom:10px' },
       h('b', {}, 'Mitteilung an das Team'), h('div', { style: 'height:6px' }), anIn.title, h('div', { style: 'height:6px' }), anIn.body,
