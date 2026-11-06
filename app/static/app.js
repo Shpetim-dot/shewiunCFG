@@ -347,7 +347,7 @@
     s.addEventListener('pointerup', up); s.addEventListener('pointerleave', up); kick(); return s;
   }
   function bigGraph() {
-    const wrap = h('div', { class: 'gwrap dark' }, h('p', { style: 'padding:12px' }, 'Loading graph…'));
+    const wrap = h('div', { class: 'gwrap dark' }, h('div', { style: 'padding:12px' }, h('div', { class: 'skel' })));
     (async () => {
       try {
         const g = await api('/api/brain/graph'), reads = new Set(), wrote = new Set(), bot = S.graphAgent ? botBy(S.graphAgent) : null;
@@ -452,7 +452,7 @@
           n.status === 'draft' ? btn('Reject', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/reject`, { method: 'POST' }); await reload(); })) : null),
         h('details', { style: 'margin-top:20px' }, h('summary', { class: 'muted' }, `Version history (${S.versions.length})`), S.versions.map((v) => h('div', { class: 'card', style: 'margin:8px 0' }, h('span', { class: 'mono' }, `v${v.version} · ${when(v.created_at)} · ${v.actor} · ${v.reason} · ${v.status}`), h('div', { class: 'muted' }, v.body.slice(0, 120)),
           btn('Roll back to this version', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/rollback`, { method: 'POST', body: { version: v.version } }); await reload(); }), 'link')))));
-    } else mid = h('p', { class: 'muted' }, 'Select a note.');
+    } else mid = S.notes.length ? h('p', { class: 'muted' }, 'Select a note.') : emptyState('graph', 'Dein Brain ist leer', 'Erstelle Notizen oder lade die Demo-Workspace, um das Gedaechtnis der Agenten zu sehen.', btn([icon('plus', 16), 'New note'], () => { S.newNote = true; render(); }, 'btn primary'));
     return h('div', { class: 'brain' }, left, h('div', {}, mid), h('div', { id: 'brain-side' }, noteSide(S.note)));
   }
 
@@ -556,7 +556,7 @@
           h('div', { class: 'row2' }, t.members.map((m) => h('span', { class: 'row2' }, tile(m, 24), m.name))), h('div', { class: 'muted' }, `${t.notes} team note(s)`),
           h('div', { class: 'row2' }, h('span', { class: 'row2' }, btn('Channels', () => run(() => openChannels(t)), 'btn'), S.chanCounts && S.chanCounts[t.id] ? badge(S.chanCounts[t.id]) : null), btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(t.members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'), btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); })),
           h('details', {}, h('summary', { class: 'muted' }, 'Edit members'), h('div', { style: 'margin-top:8px' }, eb), h('div', { class: 'row2' }, btn('Save', () => run(async () => { await api('/api/teams/' + t.id, { method: 'PUT', body: { name: t.name, mission: t.mission, members: picked(eb) } }); await Promise.all([loadTeams(), loadBots()]); }), 'btn'), btn('Delete team', () => run(async () => { await api('/api/teams/' + t.id, { method: 'DELETE' }); await Promise.all([loadTeams(), loadBots()]); }), 'link'))));
-      })), S.teams.length ? null : h('p', { class: 'muted' }, 'No teams yet. Create one below or load the demo workspace.'),
+      })), S.teams.length ? null : emptyState('teams', 'Noch keine Teams', 'Ein Team ist eine Einheit mit eigenem Gedaechtnis. Erstelle eins oder lade die Demo-Workspace.', btn('Load demo workspace', loadDemo, 'btn')),
       h('h2', {}, 'New team'), nm, h('div', { style: 'height:8px' }), ms, h('div', { style: 'margin:10px 0' }, boxes),
       pickers, btn([icon('plus', 16), 'Create team'], () => run(async () => { await api('/api/teams', { method: 'POST', body: { name: S.tnew.name, mission: S.tnew.mission, members: picked(boxes), icon: S.tnew.icon, color: S.tnew.color } }); S.tnew = { name: '', icon: 'teams', color: '#2F5BD3', mission: '', members: [] }; await Promise.all([loadTeams(), loadBots()]); }), 'btn primary')));
   }
@@ -862,6 +862,7 @@
     } catch (e) { S.tokenErr = e.message; render(); }
   }
   const storageWarn = (S.health && S.health.storage === 'ephemeral_sqlite') ? h('p', { class: 'warn-text', style: 'font-size:12px;margin-top:10px' }, 'Demo-Host: Diese Instanz hat keinen dauerhaften Speicher - Accounts und Daten koennen bei jedem Neustart verschwinden. Fuer dauerhafte Accounts: Render oder Fly mit Volume (docs/VERCEL.md).') : null;
+  const emptyState = (ic, title, text, act) => h('div', { class: 'empty' }, icon(ic, 34), h('h3', {}, title), h('p', { class: 'muted' }, text), act || null);
   function loginView() {
     if (S.setup) {
       const email = h('input', { class: 'field', id: 'auth-email', type: 'email', placeholder: 'you@company.com', autocomplete: 'email', 'aria-label': 'Email' });
@@ -989,7 +990,7 @@
       o.members.map(memberCard), inviteBtn,
       o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Offene Einladungen: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
       h('h3', { style: 'margin-top:18px' }, 'Announcements'),
-      annCard, notices.length ? notices : h('p', { class: 'muted' }, 'Keine Mitteilungen vorhanden.'),
+      annCard, notices.length ? notices : emptyState('chat', 'Keine Mitteilungen', 'Announcements erreichen dein Engineering-Team direkt in der Plattform.'),
       danger));
   }
 
@@ -1008,8 +1009,9 @@
           h('span', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner'), h('small', {}, S.me && S.me.user ? S.me.user.email + ' · ' + S.me.role : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')), h('small', {}, hd.model_configured ? 'Model connected' : 'No model, demo replies'), h('small', {}, `v${hd.version || '?'}${hd.build ? ' · ' + hd.build : ''}`)))));
     const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
+    const viewChanged = S._v !== S.view; S._v = S.view;
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
-      h('main', { class: 'main' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,
+      h('main', { class: 'main', style: viewChanged ? 'animation:cfaFade .22s ease' : '' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,
         warn ? h('div', { class: 'banner', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
       ...(S.drawer ? drawer() : []), S.modal === 'apps' ? appsModal() : null, S.modal === 'agent' ? agentModal() : null, S.modal === 'onboard' ? onboardModal() : null, S.modal === 'upsell' ? upsellModal() : null, S.modal === 'lead' ? leadModal() : null);
     const sc = document.getElementById('scroll'); if (sc) sc.scrollTop = sc.scrollHeight;

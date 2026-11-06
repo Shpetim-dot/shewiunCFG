@@ -185,3 +185,17 @@ h2{border-left:3px solid var(--accent);padding-left:10px}
 .tile { border-radius: 9px; }
 .field, textarea.field, select.field { border-radius: 10px; }
 .side, .drawer { backdrop-filter: blur(6px); }
+
+
+/* --- v15 design system: tokens, skeletons, empty states, view motion --- */
+:root { --rad: 12px; --rad-sm: 8px; --shadow-1: 0 1px 2px rgba(15,39,64,.06); --shadow-2: 0 8px 22px rgba(15,39,64,.10);
+        --fs-xs: 11px; --fs-sm: 13px; --fs-md: 15px; --fs-lg: 20px; --fs-xl: 26px; }
+.card, .modal, .drawer { border-radius: var(--rad); }
+.btn, .field, textarea.field, select.field, .chip { border-radius: var(--rad-sm); }
+.skel { display:block; background: linear-gradient(90deg, rgba(140,160,200,.14) 25%, rgba(140,160,200,.32) 50%, rgba(140,160,200,.14) 75%);
+        background-size: 200% 100%; animation: cfaShimmer 1.2s infinite; border-radius: var(--rad-sm); }
+@keyframes cfaShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.empty { text-align:center; padding:40px 12px; color: var(--muted, #7C8BA5); }
+.empty svg { opacity:.45; margin-bottom:10px; }
+.empty h3 { margin:4px 0; color: var(--text, #0F2740); }
+.gwrap .skel { height: 520px; }
