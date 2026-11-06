@@ -855,7 +855,7 @@ async def _run_call(item: CallIn, p: dict[str, Any], bots: dict[str, Any], used:
     run_mode = "live" if all(flags) else ("demo" if not any(flags) else "mixed")
     is_live = run_mode != "demo"
     names = {b: bots[b]["name"] for b in item.bot_ids}
-    yield {"type": "start", "mode": run_mode, "agents": [{"id": b, "name": names[b]} for b in item.bot_ids]}
+    yield {"type": "start", "mode": run_mode, "rounds": item.rounds, "agents": [{"id": b, "name": names[b], "color": (bots[b].get("color") or "#5B6B88"), "icon": (bots[b].get("icon") or "spark")} for b in item.bot_ids]}
     for b in item.bot_ids:
         if used[b]:
             yield {"type": "activity", "text": f"{names[b]} read {len(used[b])} verified note(s): " + ", ".join(r["title"] for r in used[b])}
