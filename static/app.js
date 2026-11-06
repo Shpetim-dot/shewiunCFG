@@ -745,7 +745,7 @@
       h('div', { class: 'cards' }, S.presets.map((p) => h('div', { class: 'card appcard preset' }, h('div', { class: 'stack' }, p.agents.slice(0, 4).map((a) => tile(a, 40))), h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, p.name), h('span', { class: 'chip' }, p.level), h('span', { class: 'chip ' + (p.plan === 'free' ? 'ok' : 'warn') }, p.plan === 'free' ? 'Free' : (p.plan === 'starter' ? 'Starter' : 'Professional'))), h('div', { class: 'muted' }, p.tagline), h('div', { class: 'muted', style: 'font-size:12px' }, 'For: ' + p.audience),
         h('div', { class: 'pflow' }, p.flow),
         h('ul', { class: 'pfacts' }, (p.features || []).map((f) => h('li', {}, f)), h('li', {}, `${p.agents.length} agents: ${p.agents.map((a) => a.name).join(', ')}`), h('li', {}, `${p.notes} starter notes in a shared team memory`)),
-        btn('Use this preset', () => applyPreset(p.id), 'btn primary')))),
+        h('p', { class: 'muted', style: 'font-size:12px;margin:8px 0 2px' }, p.plan === 'free' ? 'Im Free-Plan enthalten.' : 'Enthalten im ' + (p.plan === 'starter' ? 'Starter' : 'Professional') + '-Plan - siehe Plans & usage.'), btn('Use this preset', () => applyPreset(p.id), 'btn primary')))),
       h('div', { class: 'row2', style: 'margin-top:16px' }, btn('Load the demo workspace instead', () => { S.modal = null; loadDemo(); }), btn('Skip for now', () => { S.skipOnb = true; S.modal = null; api('/api/onboarding/complete', { method: 'POST' }).catch(() => {}); render(); }, 'link'))));
   }
   function upsellModal() {
@@ -1004,8 +1004,8 @@
       if (st.auth_required) { S.me = await api('/api/auth/me').catch(() => null); }
     } catch (e) { S.err = e.message; }
     try { S.health = await api('/api/health'); } catch (e) { S.err = e.message; }
-    // First start: no account exists yet. Show the setup form instead of the open workspace.
-    if (S.setup) { S.auth = true; S.tokenErr = ''; render(); return; }
+    // No forced login/setup screen: a fresh (or demo) workspace opens directly.
+    // The sign-in view only appears when the API actually answers 401.
     if (S.auth) { render(); return; }
     try {
       S.bots = await api('/api/bots'); S.bot = S.bots[0]; const t = await api('/api/templates'); S.caps = (t.find((x) => x.capabilities) || {}).capabilities || [];
