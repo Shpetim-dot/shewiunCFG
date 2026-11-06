@@ -836,9 +836,52 @@
       group('Govern', [it('Control', 'Approvals, tool calls, audit, incident switch', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage'), it('Self-test', 'Prove the boundaries, share the evidence', 'flask', 'control'), it('OWASP coverage', 'What is covered, what is not', 'check', 'control')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
+      group('Organisation', [it('Organisation', 'Members, roles, revenue, notices', 'teams', 'org', null, null)]),
       group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
       h('p', { class: 'muted', style: 'font-size:12px;margin:18px 10px' }, `Shewiun v${S.health.version || '?'}${S.health.build ? ' · build ' + S.health.build : ''}`))];
   }
+
+  // ---------- organisation ----------
+  async function orgView() {
+    const [m, rev, ann] = await Promise.all([
+      api('/api/org/members').catch(() => ({ members: [], invitations: [] })),
+      api('/api/org/revenue').catch(() => null),
+      api('/api/announcements').catch(() => ({ announcements: [] })),
+    ]);
+    const role = (S.me && S.me.role) || '';
+    const canAdmin = ['owner', 'admin', 'super_admin'].indexOf(role) >= 0;
+    const meId = S.me && S.me.user ? S.me.user.id : '';
+    const members = (m.members || []).map((u) => h('div', { class: 'card', style: 'padding:12px;margin-bottom:8px' },
+      h('b', {}, u.name || u.email), ' ', h('span', { class: 'muted' }, u.email),
+      h('div', { class: 'muted', style: 'font-size:12px' }, 'Rolle: ' + u.role + (u.id === meId ? ' · das bist du' : ''))));
+    const invites = (m.invitations || []).map((i) => h('div', { class: 'muted', style: 'font-size:13px' }, 'Offene Einladung: ' + i.email + ' (' + i.role + ', 7 Tage)'));
+    const emailInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'kollege@firma.de', style: 'flex:1' });
+    const inviteBtn = canAdmin ? h('div', { style: 'display:flex;gap:8px;margin-top:10px;align-items:center' }, emailInp,
+      btn('Einladen', () => run(async () => {
+        const email = (document.getElementById('inv-email') || {}).value || '';
+        const r = await api('/api/org/invitations', { method: 'POST', body: { email: email, role: 'developer' } });
+        S.info = r && r.token ? 'Einladung erstellt. Token (dev): ' + r.token : 'Einladung per E-Mail verschickt.';
+        S.view = 'org'; render();
+      }), 'btn primary')) : h('p', { class: 'muted', style: 'font-size:12px' }, 'Nur Owner und Admins können Mitglieder einladen.');
+    const money = rev ? h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' },
+      h('div', { class: 'row2' },
+        h('div', {}, h('div', { class: 'muted' }, 'Plan'), h('b', {}, rev.plan_name || rev.plan)),
+        h('div', {}, h('div', { class: 'muted' }, 'MRR'), h('b', {}, (rev.mrr_eur || 0) + ' EUR')),
+        h('div', {}, h('div', { class: 'muted' }, 'ARR'), h('b', {}, (rev.arr_eur || 0) + ' EUR')),
+        h('div', {}, h('div', { class: 'muted' }, 'Seats'), h('b', {}, String(rev.seats || 0)))),
+      h('p', { class: 'muted', style: 'font-size:12px;margin:8px 0 0' }, rev.note || '')) : null;
+    const notices = (ann.announcements || []).map((a) => h('div', { class: 'card', style: 'padding:10px;margin-bottom:6px' },
+      h('b', {}, a.title), ' ', h('span', { class: 'chip' }, a.level), h('p', { class: 'muted', style: 'margin:6px 0 0' }, a.body)));
+    return h('div', { style: 'padding:18px' },
+      h('h2', {}, 'Organisation'),
+      h('p', { class: 'muted' }, 'Mitglieder, Rollen, Umsatz und Mitteilungen für dein Team.'),
+      money,
+      h('h3', {}, 'Mitglieder (' + (m.members || []).length + ')'),
+      members, invites, inviteBtn,
+      h('h3', { style: 'margin-top:18px' }, 'Announcements'),
+      notices.length ? notices : h('p', { class: 'muted' }, 'Keine Mitteilungen vorhanden.'));
+  }
+
   function render() {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
@@ -852,7 +895,7 @@
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct', type: 'button', 'aria-expanded': S.menu, onclick: () => { S.menu = !S.menu; render(); } }, h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
           h('span', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner'), h('small', {}, S.me && S.me.user ? S.me.user.email + ' · ' + S.me.role : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')), h('small', {}, hd.model_configured ? 'Model connected' : 'No model, demo replies'), h('small', {}, `v${hd.version || '?'}${hd.build ? ' · ' + hd.build : ''}`)))));
-    const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView }[S.view]();
+    const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
       h('main', { class: 'main' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,
