@@ -841,6 +841,7 @@
       await init();
     } catch (e) { S.tokenErr = e.message; render(); }
   }
+  const storageWarn = (S.health && S.health.storage === 'ephemeral_sqlite') ? h('p', { class: 'warn-text', style: 'font-size:12px;margin-top:10px' }, 'Demo-Host: Diese Instanz hat keinen dauerhaften Speicher - Accounts und Daten koennen bei jedem Neustart verschwinden. Fuer dauerhafte Accounts: Render oder Fly mit Volume (docs/VERCEL.md).') : null;
   function loginView() {
     if (S.setup) {
       const email = h('input', { class: 'field', id: 'auth-email', type: 'email', placeholder: 'you@company.com', autocomplete: 'email', 'aria-label': 'Email' });
@@ -853,14 +854,14 @@
         h('p', { class: 'muted' }, 'This is the first start of this installation. The account you create now owns the organisation.'),
         email, name, org, pw, S.tokenErr ? h('p', { class: 'warn-text', role: 'alert' }, S.tokenErr) : null,
         h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Create workspace', () => submitAuth('register'), 'btn primary')),
-        h('p', { class: 'muted', style: 'font-size:12px;margin-top:16px' }, 'Passwords are hashed with Argon2id. Invite teammates later from Settings.')));
+        h('p', { class: 'muted', style: 'font-size:12px;margin-top:16px' }, 'Passwords are hashed with Argon2id. Invite teammates later from Settings.'), storageWarn)));
     }
     const email = h('input', { class: 'field', id: 'auth-email', type: 'email', placeholder: 'you@company.com', autocomplete: 'username', 'aria-label': 'Email' });
     const pw = h('input', { class: 'field', id: 'auth-password', type: 'password', placeholder: 'Password', autocomplete: 'current-password', 'aria-label': 'Password' });
     [email, pw].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth('login'); }));
     return h('div', { class: 'login' }, h('div', { class: 'card login-card' }, h('div', { class: 'logo' }, 'Shewiun'), h('h2', { style: 'margin-top:18px' }, 'Sign in'), h('p', { class: 'muted' }, 'Use the email address and password of your Shewiun account.'),
       email, pw, S.tokenErr ? h('p', { class: 'warn-text', role: 'alert' }, S.tokenErr) : null, h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Sign in', () => submitAuth('login'), 'btn primary')),
-      h('p', { class: 'muted', style: 'font-size:12px;margin-top:16px' }, 'Forgot your password? Ask an admin to send a reset link, or use the API: POST /api/auth/password/forgot.')));
+      h('p', { class: 'muted', style: 'font-size:12px;margin-top:16px' }, 'Forgot your password? Ask an admin to send a reset link, or use the API: POST /api/auth/password/forgot.'), storageWarn)));
   }
   const logout = async () => { try { await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders('POST'), credentials: 'same-origin' }); } catch {} sessionStorage.removeItem('cfa_token'); token = ''; S.auth = true; location.reload(); };
   const refreshSum = async () => { try { S.sum = await api('/api/summary'); if (S.drawer) render(); } catch {} };
