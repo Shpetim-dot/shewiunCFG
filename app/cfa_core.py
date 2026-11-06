@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 router = APIRouter()
 WIKI = re.compile(r"\[\[([^\[\]]{1,120})\]\]")
-VERSION = "0.6.0"
+VERSION = "0.14.0"
 PUBLIC = ("/api/health", "/api/playbooks/", "/api/reviews/", "/api/public")
 PUBLIC_POST = ("/api/leads", "/api/events", "/api/billing/webhook")
 DEMO = "DEMO (scripted text, not analysis): "

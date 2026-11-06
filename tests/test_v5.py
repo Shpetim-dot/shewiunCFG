@@ -92,4 +92,4 @@ def test_summary_counts_and_health_version(tmp_path, monkeypatch):
     c.post("/api/bots/strategist/messages", json={"content": "payments question"})
     s = c.get("/api/summary").json()
     assert s["agents"] == 8 and s["apps"] == 3 and s["teams"] == 2 and s["drafts"] >= 1 and s["pending_approvals"] == 0
-    assert c.get("/api/health").json()["version"] == "0.6.0"
+    assert c.get("/api/health").json()["version"] == "0.14.0"

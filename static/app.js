@@ -870,6 +870,8 @@
       if (st.auth_required) { S.me = await api('/api/auth/me').catch(() => null); }
     } catch (e) { S.err = e.message; }
     try { S.health = await api('/api/health'); } catch (e) { S.err = e.message; }
+    // First start: no account exists yet. Show the setup form instead of the open workspace.
+    if (S.setup) { S.auth = true; S.tokenErr = ''; render(); return; }
     if (S.auth) { render(); return; }
     try {
       S.bots = await api('/api/bots'); S.bot = S.bots[0]; const t = await api('/api/templates'); S.caps = (t.find((x) => x.capabilities) || {}).capabilities || [];
