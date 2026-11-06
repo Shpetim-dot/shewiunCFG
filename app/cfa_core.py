@@ -49,7 +49,8 @@ MIGRATIONS = [("bots", "scopes", "TEXT"), ("bots", "spaces", "TEXT"), ("bots", "
               ("bots", "source", "TEXT DEFAULT 'builtin'"), ("bots", "trust", "TEXT DEFAULT 'verified'"), ("bots", "created_at", "TEXT"), ("bots", "source_ref", "TEXT"), ("bots", "owner", "TEXT"), ("selftests", "share_token", "TEXT"),
               ("notes", "space", "TEXT DEFAULT 'shared'"), ("notes", "flags", "TEXT DEFAULT '[]'"),
               ("bot_messages", "used", "TEXT DEFAULT '[]'"), ("pending_calls", "payload_hash", "TEXT"), ("pending_calls", "expires_at", "TEXT"), ("pending_calls", "policy_version", "TEXT"),
-              ("bots", "sponsor", "TEXT"), ("bots", "purpose", "TEXT")]
+              ("bots", "sponsor", "TEXT"), ("bots", "purpose", "TEXT"),
+              ("teams", "icon", "TEXT DEFAULT 'teams'"), ("teams", "color", "TEXT DEFAULT '#2F5BD3'")]
 CORE_ICONS = {"strategist": "compass", "skeptic": "lens", "builder": "wrench", "chair": "scales"}
 INTERNAL = uuid4().hex  # lets the in-process self-test bypass the rate limiter
 DEFAULT_SCOPES = {"strategist": ["memory.read", "memory.write", "call.join"], "skeptic": ["memory.read", "memory.write", "call.join"],
@@ -130,7 +131,8 @@ REBUILD_DDL = {
         org_id TEXT NOT NULL, UNIQUE (org_id, title))""",
     "teams": """CREATE TABLE teams_v8 (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, mission TEXT, space TEXT, created_by TEXT,
-        created_at TEXT, org_id TEXT NOT NULL, UNIQUE (org_id, name))""",
+        created_at TEXT, icon TEXT DEFAULT 'teams', color TEXT DEFAULT '#2F5BD3',
+        org_id TEXT NOT NULL, UNIQUE (org_id, name))""",
 }
 
 

@@ -342,7 +342,7 @@ def _set_spaces(con, bot_id: str, spaces: list[str]) -> None:
     con.execute("UPDATE bots SET spaces=? WHERE id=? AND org_id=?", (json.dumps(spaces), bot_id, pf.org()))
 
 
-def _make_team(con, name: str, mission: str, members: list[str], actor: str) -> dict[str, Any]:
+def _make_team(con, name: str, mission: str, members: list[str], actor: str, icon: str = "teams", color: str = "#2F5BD3") -> dict[str, Any]:
     # teams.id is still a global primary key (legacy schema), so an id already used by another
     # organisation gets a suffix; the team name itself is only unique within the organisation.
     tid = _slug(name)
@@ -350,15 +350,15 @@ def _make_team(con, name: str, mission: str, members: list[str], actor: str) -> 
         tid = f"{tid[:26]}-{uuid4().hex[:4]}"
         name = f"{name[:26]} {uuid4().hex[:4]}"
     space = f"team:{tid}"
-    con.execute("INSERT INTO teams (id,name,mission,space,created_by,created_at,org_id) VALUES (?,?,?,?,?,?,?)",
-                (tid, name, mission, space, actor, pf._m().now(), pf.org()))
+    con.execute("INSERT INTO teams (id,name,mission,space,created_by,created_at,org_id,icon,color) VALUES (?,?,?,?,?,?,?,?,?)",
+                (tid, name, mission, space, actor, pf._m().now(), pf.org(), icon, color))
     for b in members:
         sp = _spaces(con, b)
         if space not in sp:
             sp.insert(1, space)  # keep the agent's own space last: it is the write space
             _set_spaces(con, b, sp)
         con.execute("UPDATE bots SET team=? WHERE id=? AND org_id=?", (name, b, pf.org()))
-    return {"id": tid, "name": name, "space": space}
+    return {"id": tid, "name": name, "space": space, "icon": icon, "color": color}
 
 
 def _drop_team(con, t) -> None:
@@ -373,13 +373,16 @@ def _drop_team(con, t) -> None:
 def _team_out(con, t) -> dict[str, Any]:
     members = [r for r in con.execute("SELECT id,name,icon,color,role FROM bots WHERE spaces LIKE ? AND org_id=?", (f'%"{t["space"]}"%', pf.org()))]
     return {"id": t["id"], "name": t["name"], "mission": t["mission"], "space": t["space"], "members": [dict(m) for m in members],
-            "notes": con.execute("SELECT COUNT(*) FROM notes WHERE space=? AND org_id=?", (t["space"], pf.org())).fetchone()[0]}
+            "notes": con.execute("SELECT COUNT(*) FROM notes WHERE space=? AND org_id=?", (t["space"], pf.org())).fetchone()[0],
+            "icon": t["icon"] if "icon" in t.keys() else "teams", "color": t["color"] if "color" in t.keys() else "#2F5BD3"}
 
 
 class TeamIn(BaseModel):
     name: str = Field(min_length=2, max_length=40)
     mission: str = Field(default="", max_length=300)
     members: list[str] = Field(default_factory=list, max_length=12)
+    icon: str = Field(default="teams", max_length=30)
+    color: str = Field(default="#2F5BD3", max_length=20)
 
 
 @router.get("/api/teams")
@@ -397,7 +400,7 @@ def create_team(item: TeamIn, request: Request) -> dict[str, Any]:
             raise HTTPException(422, "unknown agent")
         if con.execute("SELECT 1 FROM teams WHERE (name=? OR id=?) AND org_id=?", (item.name, _slug(item.name), pf.org())).fetchone():
             raise HTTPException(409, "a team with this name exists")
-        t = _make_team(con, item.name.strip(), item.mission, item.members, p["name"])
+        t = _make_team(con, item.name.strip(), item.mission, item.members, p["name"], item.icon, item.color)
         con.commit()
         out = _team_out(con, con.execute("SELECT * FROM teams WHERE id=? AND org_id=?", (t["id"], pf.org())).fetchone())
     pf._m().append_audit("team.created", p["name"], {"team": t["id"], "members": item.members})
@@ -424,7 +427,7 @@ def update_team(team_id: str, item: TeamIn, request: Request) -> dict[str, Any]:
                 sp.insert(1, t["space"])
                 _set_spaces(con, b, sp)
             con.execute("UPDATE bots SET team=? WHERE id=? AND org_id=?", (t["name"], b, pf.org()))
-        con.execute("UPDATE teams SET mission=? WHERE id=? AND org_id=?", (item.mission, team_id, pf.org()))
+        con.execute("UPDATE teams SET mission=?, icon=?, color=? WHERE id=? AND org_id=?", (item.mission, item.icon, item.color, team_id, pf.org()))
         con.commit()
         out = _team_out(con, con.execute("SELECT * FROM teams WHERE id=? AND org_id=?", (team_id, pf.org())).fetchone())
     pf._m().append_audit("team.updated", p["name"], {"team": team_id, "before": before, "after": item.members})
