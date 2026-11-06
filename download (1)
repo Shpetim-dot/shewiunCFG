@@ -1,8 +1,0 @@
-tests
-docs
-tools
-data
-.github
-.pytest_cache
-platform-changes.patch
-*.db
