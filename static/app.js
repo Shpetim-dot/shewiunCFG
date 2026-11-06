@@ -980,7 +980,7 @@
           else S.info = 'Abgebrochen.';
         }, 'btn')) ) : null;
     return h('div', { class: 'body' }, h('div', { class: 'wide' },
-      h('div', { class: 'card', style: 'padding:18px;margin-bottom:14px' },
+      h('div', { class: 'card hero', style: 'padding:18px;margin-bottom:14px' },
         h('div', { class: 'row2' }, h('div', {}, h('h2', { style: 'margin:0' }, me.org ? me.org.name : 'Organisation'), h('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Dein Workspace: Mitglieder, Rollen, Umsatz und Mitteilungen.')),
           h('span', { class: 'chip ok' }, role || '–')),
         money,
