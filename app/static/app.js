@@ -793,7 +793,12 @@
     try {
       const r = await fetch(kind === 'register' ? '/api/auth/register' : '/api/auth/login',
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); S.tokenErr = typeof d.detail === 'string' ? d.detail : 'Sign-in failed'; render(); return; }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        const detail = typeof d.detail === 'string' ? d.detail : 'Sign-in failed';
+        if (r.status === 409 && /no account/i.test(detail)) { S.setup = true; }
+        S.tokenErr = detail; render(); return;
+      }
       S.auth = false; S.setup = false; token = ''; sessionStorage.removeItem('cfa_token');
       await init();
     } catch (e) { S.tokenErr = e.message; render(); }

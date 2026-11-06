@@ -440,6 +440,10 @@ def register(item: RegisterIn, request: Request, response: Response) -> dict[str
 def login(item: LoginIn, request: Request, response: Response) -> dict[str, Any]:
     email = (item.email or "").strip().lower()
     ip = _client_ip(request)
+    if user_count() == 0:
+        # A fresh (or wiped) database has no account to check the password against. Saying
+        # "incorrect password" there sends people in circles; tell them what is actually true.
+        raise HTTPException(409, "There is no account in this workspace yet. Create your workspace first.")
     _throttle("login:" + ip, limit=int(os.getenv("CFA_AUTH_ATTEMPTS", "10")))
     _throttle("login:" + email, limit=int(os.getenv("CFA_AUTH_ATTEMPTS", "10")))
     with db() as con:

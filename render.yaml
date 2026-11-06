@@ -1,23 +1,22 @@
-# Render blueprint (single instance with a persistent disk). Check against the current Render docs.
 services:
   - type: web
     name: shewiun-cfa
     runtime: docker
-    plan: starter
+    plan: starter          # a disk requires the starter plan
     healthCheckPath: /api/health/ready
+    autoDeploy: true
     disk:
       name: cfa-data
       mountPath: /data
-      sizeGB: 5
+      sizeGB: 1
     envVars:
-      - { key: CFA_ENV, value: production }
-      - { key: CFA_DATABASE_PATH, value: /data/cfa.db }
-      - { key: CFA_BILLING, value: "on" }
-      - { key: FORWARDED_ALLOW_IPS, value: "*" }
-      - { key: CFA_API_KEYS, sync: false }      # token:admin:Name
-      - { key: CFA_SECRET_KEY, sync: false }    # a Fernet key, see .env.example
-      - { key: HF_TOKEN, sync: false }
-      - { key: STRIPE_SECRET_KEY, sync: false }
-      - { key: STRIPE_WEBHOOK_SECRET, sync: false }
-      - { key: STRIPE_PRICE_PRO, sync: false }
-      - { key: STRIPE_PRICE_TEAM, sync: false }
+      - key: CFA_ENV
+        value: production
+      - key: CFA_DATABASE_PATH
+        value: /data/cfa.db
+      - key: CFA_ALLOW_SIGNUP
+        value: "1"          # first start only, then set to 0
+      - key: CFA_SECRET_KEY
+        sync: false         # paste a Fernet key (see docs/BILLING.md)
+      - key: CFA_BILLING
+        value: "off"
