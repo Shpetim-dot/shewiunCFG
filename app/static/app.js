@@ -21,7 +21,7 @@
   const KIND = { rule: 'shield', fact: 'book', decision: 'scales', lesson: 'compass', chat: 'chat', hypothesis: 'lens', note: 'doc' };
   const SPACE_COLOR = (s) => (s === 'shared' ? '#8FB1FF' : s === 'finance' ? '#4FC3D9' : (s || '').startsWith('team:') ? '#6EE7B7' : '#F4B860');
   const S = { usage: { models: [], by_kind: {}, budget: { monthly_cap: null, spent_this_month_known_cost: 0 }, note: 'Loading…', cost_is_partial: false, fallback_models: [] }, provs: [], prices: [], cu: { status: 'unconfigured', problems: [], note: '' }, invSum: null, pnew: { id: '', base_url: '', api_key: '' }, ptest: {}, pr: { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }, fb: '', cap: '', chans: {}, chan: null, cmsgs: [], cdraft: '', cbusy: '', invEdit: null, bs: { q: '', res: null }, view: 'chat', bots: [], bot: null, msgs: [], health: {}, drawer: false, menu: false, modal: null, panel: true, tab: 'overview', draft: '', busy: false,
-    notes: [], note: null, versions: [], edit: false, q: '', filter: '', space: '', graph: true, graphAgent: '', newNote: false, activity: [], seen: new Set(), pulse: {}, actSince: '',
+    notes: [], note: null, versions: [], edit: false, q: '', filter: '', space: '', graph: true, graphAgent: '', gStatus: '', gSpace: '', gzoom: 1, newNote: false, activity: [], seen: new Set(), pulse: {}, actSince: '',
     calls: [], room: null, topic: '', picked: null, rounds: 1, planDone: {}, approvals: [], audit: [], policies: [], test: null, demo: null, verify: '', toolCalls: [], auth: false, tokenErr: '', bill: null, onb: null, presets: [], upsell: null, models: null, keys: null, newKey: null, backups: [], ready: null, leads: [], funnel: null, lead: { name: '', email: '', company: '', message: '' }, mtest: { model: '', out: '' }, ret: 90, skipOnb: false, sum: {}, cov: null, panicArm: false, menuQ: '', screen: { bot: '', events: [], ctrl: null, seen: new Set() },
     apps: [], appQ: '', appCat: 'All', appOpen: null, mcp: { name: '', url: '', token: '' }, tcall: { bot: '', tool: '', args: '{}', out: '' }, tmpl: [], caps: [],
     ag: { template: 'finance-analyst', name: '', team: '', icon: '', color: '' }, teams: [], tnew: { name: '', mission: '', members: [] }, inv: [], invQ: '', invRisk: '',
@@ -353,7 +353,12 @@
         const g = await api('/api/brain/graph'), reads = new Set(), wrote = new Set(), bot = S.graphAgent ? botBy(S.graphAgent) : null;
         if (bot) (await api('/api/brain/activity?bot=' + S.graphAgent)).events.forEach((e) => (e.kind === 'read' ? reads : wrote).add(e.note_id));
         let nodes = g.nodes; if (bot) nodes = nodes.filter((n) => n.owner === bot.id || wrote.has(n.id) || reads.has(n.id) || (bot.spaces || []).filter((x) => x !== 'shared').includes(n.space));
-        const ids = new Set(nodes.map((n) => n.id)); stopSim(); wrap.replaceChildren(buildGraph(nodes, g.edges.filter((e) => ids.has(e.from) && ids.has(e.to))));
+        if (S.gStatus) nodes = nodes.filter((n) => n.status === S.gStatus);
+        if (S.gSpace) nodes = nodes.filter((n) => n.space === S.gSpace);
+        const ids = new Set(nodes.map((n) => n.id)); stopSim();
+        const svgEl = buildGraph(nodes, g.edges.filter((e) => ids.has(e.from) && ids.has(e.to)));
+        svgEl.style.transform = 'scale(' + (S.gzoom || 1) + ')'; svgEl.style.transformOrigin = 'top left';
+        wrap.style.overflow = 'auto'; wrap.style.maxHeight = '640px'; wrap.replaceChildren(svgEl);
         const cap = document.getElementById('gcap'); if (cap) cap.textContent = bot ? `Brain of ${bot.name}: ${nodes.length} notes (${nodes.filter((n) => n.owner === bot.id).length} written, ${reads.size} read, spaces: ${bot.spaces.join(', ')})` : `${nodes.length} notes and ${sim ? sim.edges.length : 0} connections`;
       } catch (e) { wrap.textContent = e.message; }
     })();
@@ -428,7 +433,12 @@
       mid = h('div', {}, h('h2', {}, 'New note'), t, h('div', { style: 'height:8px' }), b, h('div', { class: 'row2', style: 'margin-top:8px' }, k, btn('Save note', () => run(async () => { const r = await api('/api/brain/notes', { method: 'POST', body: { title: t.value, body: b.value, kind: k.value } }); await loadNotes(); S.newNote = false; await openNote(r.id, true); }), 'btn primary')));
     } else if (S.graph) {
       const sel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Whose brain', onchange: (e) => { S.graphAgent = e.target.value; render(); } }, h('option', { value: '' }, 'All agents and people'), S.bots.map((b) => h('option', { value: b.id, selected: S.graphAgent === b.id }, `Brain of ${b.name}`)));
-      mid = h('div', {}, h('h2', {}, 'Live brain'), h('div', { class: 'row2', style: 'margin-bottom:8px' }, sel, h('span', { class: 'muted', id: 'gcap' }, '')),
+      const stSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Status filter', onchange: (e) => { S.gStatus = e.target.value; render(); } }, [['', 'Alle Status'], ['verified', 'Verifiziert'], ['draft', 'Entwürfe']].map(([v, l]) => h('option', { value: v, selected: S.gStatus === v }, l)));
+      const spaces = [...new Set(S.notes.map((x) => x.space))];
+      const spSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Space filter', onchange: (e) => { S.gSpace = e.target.value; render(); } }, [['', 'Alle Spaces'], ...spaces.map((x) => [x, x])].map(([v, l]) => h('option', { value: v, selected: S.gSpace === v }, l)));
+      const zoom = (d) => { S.gzoom = Math.max(0.5, Math.min(2, (S.gzoom || 1) + d)); render(); };
+      const zbtns = h('div', { class: 'row2', style: 'width:auto' }, btn('−', () => zoom(-0.2), 'chip', { 'aria-label': 'Zoom out' }), btn('+', () => zoom(0.2), 'chip', { 'aria-label': 'Zoom in' }));
+      mid = h('div', {}, h('h2', {}, 'Live brain'), h('div', { class: 'row2', style: 'margin-bottom:8px' }, sel, stSel, spSel, zbtns, h('span', { class: 'muted', id: 'gcap' }, '')),
         h('div', { class: 'legend' }, h('span', {}, 'Filled = verified, hollow = draft'), h('span', {}, 'Color = the agent that wrote it'), h('span', {}, 'Drag a neuron. A halo means an agent just read or wrote it.')), bigGraph());
     } else if (n) {
       const flagged = n.flags.includes('instruction_like') && !n.flags.includes('acknowledged'), ta = h('textarea', { class: 'field', rows: 10 }); ta.value = n.body;
