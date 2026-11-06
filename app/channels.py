@@ -2,17 +2,21 @@
 from notes in their own spaces. Every agent message records whether it was live or demo."""
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import cfa_core as pf
 
 router = APIRouter()
 MAX_REPLIES = 2
+POLL_SECONDS = 1.2
 
 
 def _team(con, tid: str):
@@ -34,14 +38,21 @@ def _ensure_general(con, t) -> None:
 
 
 @router.get("/api/teams/{team_id}/channels")
-def list_channels(team_id: str) -> list[dict[str, Any]]:
+def list_channels(team_id: str, since: str = "") -> list[dict[str, Any]]:
+    """Channels of a team with their message count; `since` (ISO) also returns how many messages came after it (unread badge)."""
     with pf.db() as con:
         t = _team(con, team_id)
         _ensure_general(con, t)
-        return [{"id": r["id"], "name": r["name"], "topic": r["topic"], "messages": r["n"], "last": r["last"]} for r in con.execute(
+        out = []
+        for r in con.execute(
             "SELECT c.*, (SELECT COUNT(*) FROM channel_messages m WHERE m.channel_id=c.id AND m.org_id=c.org_id) n, "
-            "(SELECT MAX(created_at) FROM channel_messages m WHERE m.channel_id=c.id AND m.org_id=c.org_id) last "
-            "FROM channels c WHERE c.team_id=? AND c.org_id=? ORDER BY name", (team_id, pf.org()))]
+            "(SELECT MAX(created_at) FROM channel_messages m WHERE m.channel_id=c.id AND m.org_id=c.org_id) last, "
+            "(SELECT COUNT(*) FROM channel_messages m WHERE m.channel_id=c.id AND m.org_id=c.org_id AND m.created_at > ?) after "
+            "FROM channels c WHERE c.team_id=? AND c.org_id=? ORDER BY name", (since or pf._m().now()[:10], team_id, pf.org())):
+            row = dict(r)
+            out.append({"id": row["id"], "name": row["name"], "topic": row["topic"], "messages": row["n"],
+                        "last": row["last"], "after": row["after"]})
+        return out
 
 
 class ChannelIn(BaseModel):
@@ -72,6 +83,46 @@ def messages(channel_id: str, limit: int = 60) -> list[dict[str, Any]]:
                            "WHERE channel_id=? AND org_id=? ORDER BY created_at DESC LIMIT ?",
                            (channel_id, pf.org(), max(1, min(limit, 200)))).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+@router.get("/api/channels/{channel_id}/stream")
+async def channel_stream(channel_id: str, request: Request, after: str = "") -> StreamingResponse:
+    """Server-sent events for one channel.
+
+    A lightweight live feed: the server polls the database for messages newer than `after` and
+    emits them as they appear. Heartbeat comments keep the connection alive on proxies. This is
+    the Slack-style live update for stage 1 - a push broker can replace the poll loop later
+    without changing the event format.
+    """
+    with pf.db() as con:
+        if not con.execute("SELECT 1 FROM channels WHERE id=? AND org_id=?", (channel_id, pf.org())).fetchone():
+            raise HTTPException(404, "channel not found")
+    cursor = after
+
+    async def gen():
+        async def pull() -> list[dict[str, Any]]:
+            nonlocal cursor
+            with pf.db() as con:
+                rows = con.execute(
+                    "SELECT id,channel_id,author_kind,author_id,author_name,content,mode,created_at FROM channel_messages "
+                    "WHERE channel_id=? AND org_id=? AND created_at > ? ORDER BY created_at LIMIT 100",
+                    (channel_id, pf.org(), cursor)).fetchall()
+            out = [dict(r) for r in rows]
+            if out:
+                cursor = out[-1]["created_at"]
+            return out
+
+        while True:
+            try:
+                fresh = await pull()
+                if fresh:
+                    yield f"data: {json.dumps({'messages': fresh}, ensure_ascii=False)}\n\n"
+            except Exception:
+                yield ": keepalive\n\n"
+            await asyncio.sleep(POLL_SECONDS)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 class MessageIn(BaseModel):

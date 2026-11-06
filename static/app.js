@@ -137,6 +137,14 @@
   const loadNotes = async () => { S.notes = await api('/api/brain/notes'); };
   const loadApps = async () => { S.apps = await api('/api/apps'); };
   const loadTeams = async () => { S.teams = await api('/api/teams'); };
+  const seenN = (cid) => { try { return parseInt(localStorage.getItem('cfa_seen_n_' + cid) || '0', 10); } catch { return 0; } };
+  const setSeenN = (cid, n) => { try { localStorage.setItem('cfa_seen_n_' + cid, String(n)); } catch {} };
+  const unreadOf = (c) => Math.max(0, (c.messages || 0) - seenN(c.id));
+  const loadChannelIndex = async () => { S.chanCounts = {}; await Promise.all((S.teams || []).map(async (t) => {
+    const l = await api(`/api/teams/${t.id}/channels`).catch(() => []);
+    S.chans[t.id] = l;
+    S.chanCounts[t.id] = l.reduce((s, c) => s + unreadOf(c), 0);
+  })); };
 
   // ---------- navigation ----------
   const stopSim = () => { if (sim && sim.raf) cancelAnimationFrame(sim.raf); sim = null; };
@@ -147,7 +155,8 @@
       if (view === 'brain') { await loadNotes(); await loadBots(); S.graph = S.notes.length > 0; if (!S.note && S.notes[0]) await openNote(S.notes[0].id, true); S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
       if (view === 'council') S.calls = await api('/api/calls');
       if (view === 'research') S.rlist = await api('/api/research');
-      if (view === 'teams') { await Promise.all([loadTeams(), loadBots()]); }
+      if (view === 'org') { await loadOrg(); if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; } }
+      if (view === 'teams') { await Promise.all([loadTeams(), loadBots()]); await loadChannelIndex(); } else if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; }
       if (view === 'plans') S.bill = await api('/api/billing');
       if (view === 'settings') { for (const [k, u] of [['models', '/api/models'], ['keys', '/api/admin/keys'], ['backups', '/api/admin/backups']]) { try { S[k] = await api(u); } catch (e) { S.err = e.message; } } try { S.ready = await (await fetch('/api/health/ready')).json(); } catch {} }
       if (view === 'control') { try { S.leads = await api('/api/leads'); S.funnel = await api('/api/events/summary'); } catch {} }
@@ -467,8 +476,37 @@
   function memberBoxes(sel) { return S.bots.filter((b) => b.id !== 'chair' || true).map((b) => h('label', { class: 'row' }, h('input', { type: 'checkbox', value: b.id, checked: sel.includes(b.id) }), tile(b, 20), b.name)); }
   const picked = (boxes) => boxes.map((l) => l.firstChild).filter((i) => i.checked).map((i) => i.value);
   async function openChannels(t, cid) {
+    if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; }
     const list = await api(`/api/teams/${t.id}/channels`), ch = list.find((c) => c.id === cid) || list[0];
     S.chans[t.id] = list; S.chan = { team: t, ch }; S.cmsgs = await api(`/api/channels/${ch.id}/messages`);
+    setSeenN(ch.id, (list.find((c) => c.id === ch.id) || {}).messages || 0);
+    startChannelStream();
+  }
+  function startChannelStream() {
+    if (!S.chan) return;
+    const ch = S.chan.ch, team = S.chan.team;
+    const ctrl = new AbortController();
+    S.cstream = { ch: ch.id, ctrl };
+    const known = new Set((S.cmsgs || []).map((m) => m.id));
+    const loop = async () => {
+      while (!ctrl.signal.aborted) {
+        try {
+          await streamGet(`/api/channels/${ch.id}/stream`, ctrl.signal, (ev) => {
+            const fresh = ((ev && ev.messages) || []).filter((m) => !known.has(m.id));
+            fresh.forEach((m) => known.add(m.id));
+            if (!fresh.length || !S.chan || S.chan.ch.id !== ch.id) return;
+            S.cmsgs = [...(S.cmsgs || []), ...fresh];
+            const row = (S.chans[team.id] || []).find((c) => c.id === ch.id);
+            if (row) { row.messages = (row.messages || 0) + fresh.length; row.last = fresh[fresh.length - 1].created_at; }
+            setSeenN(ch.id, (S.cmsgs || []).length);
+            render();
+          });
+        } catch {}
+        if (ctrl.signal.aborted) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    };
+    loop();
   }
   function channelPanel() {
     const { team, ch } = S.chan, list = S.chans[team.id] || [], inp = h('input', { class: 'field', placeholder: `Message #${ch.name}. Mention an agent with @Name`, maxlength: 2000, value: S.cdraft, 'aria-label': 'Channel message' });
@@ -478,8 +516,8 @@
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
     const nn = h('input', { class: 'field', style: 'max-width:180px', placeholder: 'new-channel', maxlength: 30, 'aria-label': 'New channel name' });
     const bot = (id) => team.members.find((m) => m.id === id) || S.bots.find((b) => b.id === id);
-    return h('div', { class: 'card chan' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, `${team.name} channels`), btn('Close', () => { S.chan = null; render(); }, 'link')),
-      h('div', { class: 'row2', style: 'flex-wrap:wrap;margin:8px 0' }, list.map((c) => btn('# ' + c.name, () => run(() => openChannels(team, c.id)), 'chip' + (c.id === ch.id ? ' ok' : ''), { 'aria-pressed': c.id === ch.id })), nn,
+    return h('div', { class: 'card chan' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, `${team.name} channels`), btn('Close', () => { if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; } S.chan = null; render(); }, 'link')),
+      h('div', { class: 'row2', style: 'flex-wrap:wrap;margin:8px 0' }, list.map((c) => { const u = c.id === ch.id ? 0 : unreadOf(c); return btn('# ' + c.name + (u ? ' · ' + u : ''), () => run(() => openChannels(team, c.id)), 'chip' + (c.id === ch.id ? ' ok' : ''), { 'aria-pressed': c.id === ch.id }); }), nn,
         btn('Add', () => run(async () => { await api(`/api/teams/${team.id}/channels`, { method: 'POST', body: { name: nn.value.trim() } }); await openChannels(team); }), 'btn')),
       h('div', { class: 'muted', style: 'font-size:12px;margin-bottom:6px' }, ch.topic || 'Agents only answer when you @mention them, and only from notes in their own spaces.'),
       h('div', { class: 'cmsgs', role: 'log', 'aria-live': 'polite' }, S.cmsgs.length ? S.cmsgs.map((m) => h('div', { class: 'cmsg ' + m.author_kind }, m.author_kind === 'agent' ? tile(bot(m.author_id) || { id: m.author_id, name: m.author_name }, 28) : h('span', { class: 'cdot' }),
@@ -496,7 +534,7 @@
       h('div', { class: 'cards' }, S.teams.map((t) => { const eb = memberBoxes(t.members.map((m) => m.id));
         return h('div', { class: 'card appcard' }, h('div', { class: 'row2' }, icon('teams', 20), h('b', { style: 'flex:1' }, t.name), h('span', { class: 'chip' }, t.space)), h('div', { class: 'muted' }, t.mission || 'No mission set'),
           h('div', { class: 'row2' }, t.members.map((m) => h('span', { class: 'row2' }, tile(m, 24), m.name))), h('div', { class: 'muted' }, `${t.notes} team note(s)`),
-          h('div', { class: 'row2' }, btn('Channels', () => run(() => openChannels(t)), 'btn'), btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(t.members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'), btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); })),
+          h('div', { class: 'row2' }, h('span', { class: 'row2' }, btn('Channels', () => run(() => openChannels(t)), 'btn'), S.chanCounts && S.chanCounts[t.id] ? badge(S.chanCounts[t.id]) : null), btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(t.members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'), btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); })),
           h('details', {}, h('summary', { class: 'muted' }, 'Edit members'), h('div', { style: 'margin-top:8px' }, eb), h('div', { class: 'row2' }, btn('Save', () => run(async () => { await api('/api/teams/' + t.id, { method: 'PUT', body: { name: t.name, mission: t.mission, members: picked(eb) } }); await Promise.all([loadTeams(), loadBots()]); }), 'btn'), btn('Delete team', () => run(async () => { await api('/api/teams/' + t.id, { method: 'DELETE' }); await Promise.all([loadTeams(), loadBots()]); }), 'link'))));
       })), S.teams.length ? null : h('p', { class: 'muted' }, 'No teams yet. Create one below or load the demo workspace.'),
       h('h2', {}, 'New team'), nm, h('div', { style: 'height:8px' }), ms, h('div', { style: 'margin:10px 0' }, boxes),
@@ -793,7 +831,12 @@
     try {
       const r = await fetch(kind === 'register' ? '/api/auth/register' : '/api/auth/login',
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); S.tokenErr = typeof d.detail === 'string' ? d.detail : 'Sign-in failed'; render(); return; }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        const detail = typeof d.detail === 'string' ? d.detail : 'Sign-in failed';
+        if (r.status === 409 && /no account/i.test(detail)) { S.setup = true; S.tokenErr = ''; S.info = detail; }
+        else S.tokenErr = detail; render(); return;
+      }
       S.auth = false; S.setup = false; token = ''; sessionStorage.removeItem('cfa_token');
       await init();
     } catch (e) { S.tokenErr = e.message; render(); }
@@ -832,6 +875,7 @@
     return [h('div', { class: 'dscrim', onclick: () => { S.drawer = false; render(); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
       h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; render(); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
+      group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
       group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Agent screen', 'Watch what an agent does, live', 'panel', 'screen', () => { S.tab = 'screen'; S.panel = true; if (S.bot) pick(S.bot.id); else go('chat'); }), it('Teams', 'Units with shared memory', 'teams', 'teams', null, S.sum.teams), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
       group('Govern', [it('Control', 'Approvals, tool calls, audit, incident switch', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage'), it('Self-test', 'Prove the boundaries, share the evidence', 'flask', 'control'), it('OWASP coverage', 'What is covered, what is not', 'check', 'control')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
@@ -839,6 +883,95 @@
       group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
       h('p', { class: 'muted', style: 'font-size:12px;margin:18px 10px' }, `Shewiun v${S.health.version || '?'}${S.health.build ? ' · build ' + S.health.build : ''}`))];
   }
+
+  // ---------- organisation ----------
+  async function loadOrg() {
+    S.org = { members: [], invitations: [], revenue: null, announcements: [], metrics: null };
+    try {
+      const m = await api('/api/org/members');
+      S.org.members = (m && m.members) || [];
+      S.org.invitations = (m && m.invitations) || [];
+    } catch (e) { S.err = e.message; }
+    try { S.org.revenue = await api('/api/org/revenue'); } catch {}
+    try { S.org.announcements = ((await api('/api/announcements')).announcements) || []; } catch {}
+    try { S.org.metrics = await api('/api/admin/metrics'); } catch {}
+    render();
+  }
+  function orgView() {
+    const o = S.org || { members: [], invitations: [], revenue: null, announcements: [], metrics: null };
+    const me = S.me || {}, role = me.role || '', meId = me.user ? me.user.id : '';
+    const canAdmin = ['owner', 'admin', 'super_admin'].indexOf(role) >= 0;
+    const ROLES = ['viewer', 'developer', 'security_manager', 'admin', 'owner'];
+    const memberCard = (u) => {
+      const sel = h('select', { class: 'field', style: 'max-width:170px;font-size:12px', 'aria-label': 'Role of ' + (u.name || u.email) },
+        ROLES.map((r) => h('option', { value: r, selected: u.role === r }, r)));
+      sel.addEventListener('change', () => run(async () => {
+        await api(`/api/org/members/${u.id}`, { method: 'PATCH', body: { role: sel.value } });
+        S.info = 'Rolle von ' + (u.name || u.email) + ' geandert zu ' + sel.value + '.';
+        await loadOrg();
+      }));
+      const remove = (u.id !== meId && u.role !== 'owner') ? btn('Entfernen', () => run(async () => {
+        await api(`/api/org/members/${u.id}`, { method: 'DELETE' });
+        await loadOrg();
+      }), 'link') : null;
+      return h('div', { class: 'card', style: 'padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
+        h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
+        h('div', { style: 'flex:1;min-width:160px' }, h('b', {}, u.name || u.email), h('div', { class: 'muted', style: 'font-size:12px' }, u.email + (u.id === meId ? ' · das bist du' : ''))),
+        canAdmin ? sel : h('span', { class: 'chip' }, u.role), remove);
+    };
+    const inviteInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'kollege@firma.de', style: 'flex:1' });
+    const inviteBtn = canAdmin ? h('div', { style: 'display:flex;gap:8px;margin:10px 0;align-items:center' }, inviteInp,
+      btn('Einladen', () => run(async () => {
+        const email = (document.getElementById('inv-email') || {}).value || '';
+        const r = await api('/api/org/invitations', { method: 'POST', body: { email: email, role: 'developer' } });
+        S.info = r && r.token ? 'Einladung erstellt. Token (dev): ' + r.token : 'Einladung an ' + email + ' verschickt.';
+        await loadOrg();
+      }), 'btn primary')) : h('p', { class: 'muted' }, 'Nur Owner und Admins laden Mitglieder ein.');
+    const rev = o.revenue;
+    const money = rev ? h('div', { class: 'cards', style: 'margin-bottom:14px' },
+      ['plan', 'mrr_eur', 'arr_eur', 'seats'].map((k) => h('div', { class: 'card stat' },
+        h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / Monat', arr_eur: 'ARR / Jahr', seats: 'Seats' })[k]),
+        h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))) : null;
+    const anIn = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Titel, z.B. Wartungsfenster Sonntag 02:00', maxlength: 120 }), body: h('input', { class: 'field', id: 'an-body', placeholder: 'Nachricht an dein Team', maxlength: 500 }) };
+    const annCard = canAdmin ? h('div', { class: 'card', style: 'padding:12px;margin-bottom:10px' },
+      h('b', {}, 'Mitteilung an das Team'), h('div', { style: 'height:6px' }), anIn.title, h('div', { style: 'height:6px' }), anIn.body,
+      h('div', { style: 'margin-top:8px' }, btn('Veröffentlichen', () => run(async () => {
+        await api('/api/announcements', { method: 'POST', body: { title: anIn.title.value.trim(), body: anIn.body.value.trim(), level: 'info', audience: 'all' } });
+        anIn.title.value = ''; anIn.body.value = ''; await loadOrg();
+      }), 'btn'))) : null;
+    const notices = o.announcements.map((a) => h('div', { class: 'card', style: 'padding:10px;margin-bottom:6px' },
+      h('div', { class: 'row2' }, h('b', {}, a.title), h('span', { class: 'chip' }, a.level)),
+      h('p', { class: 'muted', style: 'margin:6px 0 0' }, a.body),
+      h('div', { class: 'muted', style: 'font-size:11px' }, a.published_at ? when(a.published_at) : '')));
+    const met = o.metrics;
+    const danger = role === 'owner' ? h('details', { style: 'margin-top:22px' },
+      h('summary', { class: 'muted' }, 'Gefahrenzone: Organisation löschen'),
+      h('div', { class: 'card', style: 'padding:12px;margin-top:8px' },
+        h('p', { class: 'muted' }, 'Löscht alle Agenten, Notizen, Calls, Audit-Logs und Mitglieder dieser Organisation. Das ist endgültig.'),
+        btn('Organisation löschen', () => {
+          const slug = (me.org && me.org.slug) || '';
+          const typed = window.prompt('Zum Löschen den Slug eingeben: ' + slug) || '';
+          if (typed.trim().toLowerCase() === slug) run(async () => {
+            await api('/api/org?confirm=' + encodeURIComponent(slug), { method: 'DELETE' });
+            location.reload();
+          });
+          else if (typed) S.info = 'Abgebrochen: Slug stimmt nicht überein.';
+          else S.info = 'Abgebrochen.';
+        }, 'btn')) ) : null;
+    return h('div', { class: 'body' }, h('div', { class: 'wide' },
+      h('div', { class: 'card', style: 'padding:18px;margin-bottom:14px' },
+        h('div', { class: 'row2' }, h('div', {}, h('h2', { style: 'margin:0' }, me.org ? me.org.name : 'Organisation'), h('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Dein Workspace: Mitglieder, Rollen, Umsatz und Mitteilungen.')),
+          h('span', { class: 'chip ok' }, role || '–')),
+        money,
+        met ? h('p', { class: 'muted', style: 'font-size:12px' }, 'Agenten ' + met.counts.agents + ' · Notizen ' + met.counts.notes + ' · Calls ' + met.counts.calls + ' · offene Approvals ' + met.counts.approvals_pending + ' · Audit-Events ' + met.counts.audit_events) : null),
+      h('h3', {}, 'Mitglieder (' + o.members.length + ')'),
+      o.members.map(memberCard), inviteBtn,
+      o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Offene Einladungen: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
+      h('h3', { style: 'margin-top:18px' }, 'Announcements'),
+      annCard, notices.length ? notices : h('p', { class: 'muted' }, 'Keine Mitteilungen vorhanden.'),
+      danger));
+  }
+
   function render() {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
@@ -852,7 +985,7 @@
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct', type: 'button', 'aria-expanded': S.menu, onclick: () => { S.menu = !S.menu; render(); } }, h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
           h('span', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner'), h('small', {}, S.me && S.me.user ? S.me.user.email + ' · ' + S.me.role : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')), h('small', {}, hd.model_configured ? 'Model connected' : 'No model, demo replies'), h('small', {}, `v${hd.version || '?'}${hd.build ? ' · ' + hd.build : ''}`)))));
-    const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView }[S.view]();
+    const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
       h('main', { class: 'main' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,

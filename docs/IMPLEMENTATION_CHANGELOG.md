@@ -1,3 +1,30 @@
+# Implementation changelog (v14)
+
+Tests: `python -m pytest -q` -> **176 passed** (173 + 3 new in `tests/test_channels_stream.py`).
+
+## Slack stage 1: live channels and unread badges
+- `GET /api/channels/{id}/stream` (SSE): delivers messages newer than `?after=` with heartbeats,
+  polling the database in the process (a push broker can replace the loop without changing the
+  event format). Scoped to the organisation, 404 for unknown channels.
+- `GET /api/teams/{id}/channels?since=` now returns `after` (messages since the timestamp) so
+  clients can compute unread counts server-side.
+- UI: the teams view subscribes to the open channel stream and appends incoming messages;
+  unread counts per channel (localStorage) show on channel chips and on team cards in a new
+  channel index. Leaving the view closes the stream.
+
+## Organisation view (featured)
+- Fixed a render bug: `orgView` was async and `replaceChildren` showed "[object Promise]".
+  It is now synchronous, fed by `loadOrg()` on navigation.
+- The Organisation entry moved to the top of the drawer (shield icon, member count badge).
+- The view now contains: member list with role select (owner/admin), remove member, invite
+  form, open invitations, revenue cards (plan, MRR, ARR, seats), metrics line, an announcement
+  composer for admins and the announcement feed, and an owner-only danger zone to delete the
+  whole organisation with slug confirmation.
+
+## Auth wording
+- Login against a database without any account answers 409 "no account yet" and the UI switches
+  to the setup form showing it as a hint instead of a red error (was: "incorrect password").
+
 # Implementation changelog (v13)
 
 Tests: `python -m pytest -q` -> **171 passed** (160 + 5 GDPR/storage + 6 hardening).
