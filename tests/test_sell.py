@@ -169,9 +169,14 @@ def test_presets_create_a_team_with_agents_notes_and_respect_limits(tmp_path, mo
     assert c.post("/api/presets/nope/apply").status_code == 404
     assert c.post("/api/selftest").json()["failed"] == 0
     (tmp_path / "second").mkdir()
-    d = client(tmp_path / "second", monkeypatch, CFA_BILLING="on")  # a fresh workspace
-    assert d.post("/api/presets/startup/apply").status_code == 201  # a preset fits the free plan
-    assert d.post("/api/presets/developer/apply").status_code == 402  # a second preset would exceed 4 own agents
+    d = client(tmp_path / "second", monkeypatch, CFA_BILLING="on")  # a fresh workspace on the free plan
+    assert d.post("/api/presets/freelancer/apply").status_code == 201  # free-tier preset fits the free plan
+    assert d.post("/api/presets/startup/apply").status_code == 402  # Starter preset needs the Starter plan
+    (tmp_path / "third").mkdir()
+    e = client(tmp_path / "third", monkeypatch, CFA_BILLING="on", CFA_PLAN="starter")
+    assert e.post("/api/presets/startup/apply").status_code == 201  # Starter preset fits the Starter plan
+    assert e.post("/api/presets/developer/apply").status_code == 201  # 8 agents still within the 10-agent limit
+    assert e.post("/api/presets/freelancer/apply").status_code == 402  # 11 agents would exceed it
 
 
 def test_static_assets_revalidate_and_logo_cdn_is_configurable(tmp_path, monkeypatch):
