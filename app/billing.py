@@ -64,6 +64,14 @@ def canonical(plan: str | None) -> str:
     return p if p in PLANS else "free"
 
 
+PLAN_RANK = {"free": 0, "starter": 1, "professional": 2, "enterprise": 3}
+
+
+def plan_at_least(current: str, required: str) -> bool:
+    """True when the current plan covers the required tier (free < starter < professional < enterprise)."""
+    return PLAN_RANK.get(canonical(current), 0) >= PLAN_RANK.get(canonical(required), 0)
+
+
 def limits_for(plan: str) -> dict[str, int]:
     return PLANS[canonical(plan)]["limits"]
 
