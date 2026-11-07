@@ -553,8 +553,8 @@ const overlayRoot = (() => {
   async function startResearch() {
     S.rs = { activity: [], sources: [], questions: [], report: null, running: true, done: [], prog: { done: 0, total: 1 }, agent: null }; render();
     try { await stream('/api/research/stream', { question: S.rq, depth: S.rdepth, web: S.rweb, context: S.rctx }, (ev) => { const r = S.rs;
-      if (ev.type === 'agent') r.agent = ev.agent; else if (ev.type === 'progress') r.prog = { done: ev.done, total: ev.total }; else if (ev.type === 'plan') { r.questions = ev.questions; r.activity.push(`Planned ${ev.questions.length} sub-questions`); } else if (ev.type === 'activity') r.activity.push(ev.text); else if (ev.type === 'source') { r.sources.push(ev); r.activity.push(`Read source [${ev.n}] ${ev.title.slice(0, 60)}`); }
-      else if (ev.type === 'search') { r.done.push(ev.index); r.activity.push(`Searched: ${ev.question.slice(0, 70)} (${ev.found} new source(s))`); } else if (ev.type === 'done') { r.report = ev.report; r.id = ev.id; r.mode = ev.mode; } else if (ev.type === 'error') S.err = ev.detail; render(); }); }
+      if (ev.type === 'agent') r.agent = ev.agent; else if (ev.type === 'progress') r.prog = { done: ev.done, total: ev.total }; else if (ev.type === 'plan') { r.questions = ev.questions; r.qfound = {}; r.activity.push(`Planned ${ev.questions.length} sub-questions`); } else if (ev.type === 'activity') r.activity.push(ev.text); else if (ev.type === 'source') { r.sources.push(ev); r.cur = ev; r.activity.push(`Read source [${ev.n}] ${ev.title.slice(0, 60)}`); }
+      else if (ev.type === 'search') { r.done.push(ev.index); r.qfound = r.qfound || {}; r.qfound[ev.index] = ev.found; r.qtext = r.qtext || {}; r.qtext[ev.index] = ev.question; r.activity.push(`Searched: ${ev.question.slice(0, 70)} (${ev.found} new source(s))`); } else if (ev.type === 'done') { r.report = ev.report; r.id = ev.id; r.mode = ev.mode; } else if (ev.type === 'error') S.err = ev.detail; render(); }); }
     catch (e) { S.err = e.message; }
     if (S.rs) S.rs.running = false; try { S.rlist = await api('/api/research'); } catch {} render();
   }
@@ -566,6 +566,40 @@ const overlayRoot = (() => {
     const DEPTHS = [['quick', 'Quick', '3 sub-questions, fast scan'], ['standard', 'Standard', '6 sub-questions, balanced depth'], ['thorough', 'Thorough', '9 sub-questions, deepest coverage']];
     const depthChips = DEPTHS.map(([v, l, d]) => h('button', { type: 'button', class: 'depth-card' + (S.rdepth === v ? ' on' : ''), 'aria-pressed': S.rdepth === v, onclick: () => { S.rdepth = v; render(); } }, h('b', {}, l), h('span', { class: 'muted' }, d)));
     const r = S.rs, rep = r && r.report;
+    const srcKinds = () => { const k = { brain: 0, web: 0, other: 0 }; (r ? r.sources : []).forEach((s) => { k[s.kind === 'brain' ? 'brain' : s.kind === 'web' ? 'web' : 'other'] += 1; }); return k; };
+    const kindDonut = () => {
+      const k = srcKinds(), tot = k.brain + k.web + k.other || 1, s = svg(150, 150), cx = 75, cy = 75, rr = 60;
+      const parts = [['brain', '#2F5BD3'], ['web', '#1B7F79'], ['other', '#7C8BA5']];
+      let ang = -Math.PI / 2;
+      parts.forEach(([key, color]) => {
+        const a = (k[key] / tot) * 2 * Math.PI;
+        const x1 = cx + rr * Math.cos(ang), y1 = cy + rr * Math.sin(ang), x2 = cx + rr * Math.cos(ang + a), y2 = cy + rr * Math.sin(ang + a);
+        if (k[key]) sadd(s, 'path', { d: `M ${cx} ${cy} L ${x1} ${y1} A ${rr} ${rr} 0 ${a > Math.PI ? 1 : 0} 1 ${x2} ${y2} Z`, fill: color });
+        ang += a;
+      });
+      sadd(s, 'circle', { cx: cx, cy: cy, r: rr * 0.55, fill: 'var(--panel, #fff)' });
+      sadd(s, 'text', { x: cx, y: cy + 4, 'text-anchor': 'middle', 'font-size': 12, fill: 'currentColor' }, String(tot));
+      return s;
+    };
+    const perQuestionBars = () => {
+      const qf = (r && r.qfound) || {}, entries = Object.keys(qf).sort((a, b) => +a - +b);
+      const max = Math.max(1, ...entries.map((i) => qf[i]));
+      return h('div', { style: 'display:flex;flex-direction:column;gap:6px' }, entries.length ? entries.map((i) => {
+        const q = ((r.qtext || {})[i] || ('Question ' + (+i + 1)));
+        return h('div', {}, h('div', { class: 'row2', style: 'align-items:baseline;gap:8px' }, h('span', { class: 'muted', style: 'font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, q), h('b', { style: 'font-size:12px' }, String(qf[i]))),
+          h('div', { class: 'stance-bar' }, h('i', { style: 'width:' + Math.round((qf[i] / max) * 100) + '%;background:#2F5BD3' })));
+      }) : h('p', { class: 'muted' }, 'No searches recorded yet.'));
+    };
+    const browserPanel = () => {
+      const s = r && r.cur;
+      return h('div', { class: 'card research-browser' },
+        h('div', { class: 'row2' }, h('b', {}, 'Agent browser'), h('span', { class: 'chip' + (s ? ' ok' : '') }, s ? 'reading' : 'idle'), h('span', { class: 'sp' }),
+          h('span', { class: 'muted mono', style: 'font-size:11px' }, s ? '[' + s.n + ']' : '')),
+        h('div', { class: 'browser-bar' }, h('span', { class: 'browser-dots' }, h('i'), h('i'), h('i')),
+          h('span', { class: 'browser-url mono' }, s ? String(s.ref).slice(0, 90) : 'about:blank')),
+        h('div', { class: 'browser-page' }, s ? [h('b', {}, s.title), h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:12px' }, String(s.snippet || '').slice(0, 260)),
+          h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:11px' }, 'kind: ' + s.kind + (s.kind === 'web' ? ' · live page' : ' · from your Brain'))] : h('p', { class: 'muted' }, 'The browser opens as soon as the agent reads the first source.')));
+    };
     const reportText = () => rep ? ('# ' + S.rq + '\n\n' + rep.markdown + '\n\n## Sources\n' + (rep.sources || []).map((s) => '[' + s.n + '] ' + s.title + ' - ' + s.ref).join('\n')) : '';
     const copyReport = () => { if (navigator.clipboard) navigator.clipboard.writeText(reportText()).then(() => { S.info = 'Report copied to the clipboard.'; render(); }); };
     const exportReport = () => { const b = new Blob([reportText()], { type: 'text/markdown' }); const a = h('a', { href: URL.createObjectURL(b), download: 'research-report.md' }); document.body.append(a); a.click(); a.remove(); };
@@ -583,6 +617,11 @@ const overlayRoot = (() => {
             h('span', { class: 'muted mono' }, (r.prog ? r.prog.done : 0) + ' / ' + (r.prog ? r.prog.total : 1))),
           h('div', { class: 'progress' }, h('i', { style: 'width:' + Math.round(((r.prog ? r.prog.done : 0) / Math.max(1, r.prog ? r.prog.total : 1)) * 100) + '%' })),
           h('div', { class: 'feed', style: 'margin-top:8px' }, [...(r.activity || [])].reverse().slice(0, 6).map((a) => h('div', {}, '· ' + a)))) : null,
+        browserPanel(),
+        (r.sources || []).length ? h('div', { class: 'cards', style: 'margin:12px 0' },
+          h('div', { class: 'card', style: 'padding:12px' }, h('b', {}, 'Evidence mix'), h('div', { class: 'row2', style: 'align-items:center' }, kindDonut(),
+            h('div', {}, [['brain', 'Brain notes', '#2F5BD3'], ['web', 'Web pages', '#1B7F79'], ['other', 'Other', '#7C8BA5']].map(([k, l, c]) => h('div', { class: 'muted', style: 'font-size:12px;display:flex;gap:6px;align-items:center' }, h('span', { style: 'width:8px;height:8px;border-radius:50%;background:' + c }), l + ': ' + srcKinds()[k]))))),
+          h('div', { class: 'card', style: 'padding:12px' }, h('b', {}, 'Sources per sub-question'), perQuestionBars())) : null,
         r.questions.length ? [h('h2', {}, 'Plan'), h('ul', { class: 'steps', style: 'padding:0' }, r.questions.map((x, i) => h('li', {}, icon(r.done.includes(i) ? 'check' : 'search', 16), x)))] : null,
         rep ? [h('div', { class: 'card research-head' },
           h('div', { class: 'row2' }, h('span', { class: 'chip ok' }, 'Report'), h('span', { class: 'chip' }, rep.mode || r.mode || 'demo'),
