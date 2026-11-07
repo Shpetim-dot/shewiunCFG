@@ -567,3 +567,56 @@ html { scroll-behavior: smooth; }
   .use-legend { min-width: 130px; }
   .use-prov-grid { grid-template-columns: 1fr; }
 }
+
+
+/* ===== Batch 5 — Marketplace ===== */
+.mkt-tabs { margin: 12px 0; }
+.mkt-pane { display: block; }
+.mkt-toolbar { margin: 4px 0 10px; }
+.mkt-hf-search .field { flex: 1 1 260px; width: auto; max-width: 420px; }
+.mkt-search { max-width: 340px; }
+.mkt-filters { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.mkt-filter-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mkt-filter-label { font-size: 12px; min-width: 64px; }
+.mkt-count { margin-bottom: 10px; }
+.mkt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; align-items: stretch; }
+.mkt-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mkt-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.mkt-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; color: #fff; flex: none; }
+.mkt-ic-neu { background: var(--side); color: var(--ink); border: 1px solid var(--line); }
+.mkt-title { flex: 1; min-width: 0; }
+.mkt-name { display: block; line-height: 1.3; overflow-wrap: anywhere; }
+.mkt-name.mono { font-size: 13px; }
+.mkt-sub { display: block; font-size: 12px; }
+.mkt-head > .chip { flex: none; }
+.mkt-desc { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.mkt-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mkt-trust { display: inline-flex; align-items: center; gap: 4px; }
+.mkt-tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.mkt-tag { font-size: 11px; padding: 0 7px; }
+.mkt-more { font-size: 11px; }
+.mkt-more summary { cursor: pointer; color: var(--muted); }
+.mkt-more[open] { flex-basis: 100%; }
+.mkt-more .mkt-tags { margin-top: 4px; }
+.mkt-prev { border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px; }
+.mkt-prev summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.mkt-prev-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.mkt-kv { display: flex; gap: 8px; align-items: baseline; }
+.mkt-k { flex: none; min-width: 100px; color: var(--muted); }
+.mkt-note { font-size: 12px; margin: 4px 0 0; }
+.mkt-foot { display: flex; flex-direction: column; gap: 8px; align-items: stretch; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
+.mkt-foot .field { flex: none; width: 100%; min-width: 0; }
+.mkt-foot .btn { justify-content: center; }
+.mkt-link { align-self: flex-start; font-size: 13px; }
+.mkt-import-card { max-width: 680px; }
+.mkt-hint { padding: 16px; max-width: 680px; }
+.mkt-skel { height: 14px; margin-top: 6px; width: 70%; }
+.mkt-skel:first-child { height: 40px; width: 100%; margin-top: 0; }
+.mkt-skel-sm { width: 40%; }
+@media (max-width: 760px) {
+  .mkt-grid { grid-template-columns: 1fr; }
+  .mkt-search { max-width: none; }
+  .mkt-toolbar .btn { flex: 1; justify-content: center; }
+  .mkt-hf-search .field { flex: 1 1 100%; max-width: none; }
+  .mkt-k { min-width: 84px; }
+}

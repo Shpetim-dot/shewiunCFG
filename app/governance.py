@@ -654,7 +654,14 @@ async def _hf(path: str, params: dict[str, Any] | None = None) -> Any:
 
 @router.get("/api/marketplace")
 def marketplace() -> dict[str, Any]:
-    return {"curated": [{k: v for k, v in c.items() if k != "system"} | {"icon": c.get("icon") or TEMPLATES[c["template"]]["icon"], "scopes": TEMPLATES[c["template"]]["scopes"]} for c in MARKET]}
+    # role/color come from the template registry: an imported curated agent inherits both, so the
+    # catalog can show the real role and a stable colour. The system prompt stays private.
+    return {"curated": [{k: v for k, v in c.items() if k != "system"} | {
+        "role": TEMPLATES[c["template"]]["role"],
+        "icon": c.get("icon") or TEMPLATES[c["template"]]["icon"],
+        "color": c.get("color") or TEMPLATES[c["template"]]["color"],
+        "scopes": TEMPLATES[c["template"]]["scopes"],
+    } for c in MARKET]}
 
 
 @router.get("/api/marketplace/huggingface")
