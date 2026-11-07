@@ -1315,7 +1315,7 @@ const overlayRoot = (() => {
   }
 
   function syncOverlays(force) {
-    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '');
+    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '');
     if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
     S._ovlSig = sig;
     const parts = [];
@@ -1327,7 +1327,7 @@ const overlayRoot = (() => {
     else if (m === 'upsell') parts.push(upsellModal());
     else if (m === 'lead') parts.push(leadModal());
     else if (m === 'notif') parts.push(notifModal());
-    if (S.ctx) parts.push(agentCtx());
+    if (S.ctx) parts.push(...agentCtx());
     if (S.tmodal) parts.push(teamModal());
     if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);
   }
