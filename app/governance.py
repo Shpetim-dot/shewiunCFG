@@ -498,7 +498,7 @@ def inventory_summary() -> dict[str, Any]:
     rows = inventory()
     return {"total": len(rows), "ownerless": sum("no_owner" in r["accountability"] for r in rows), "no_sponsor": sum("no_sponsor" in r["accountability"] for r in rows),
             "no_purpose": sum("no_purpose" in r["accountability"] for r in rows), "suspended": sum(r["status"] == "suspended" for r in rows),
-            "high_risk": sum(r["risk"] in ("high", "critical") for r in rows)}
+            "high_risk": sum(r["risk"]["level"] == "high" for r in rows)}
 
 
 @router.get("/api/inventory")

@@ -824,25 +824,207 @@ const overlayRoot = (() => {
       h('div', { style: 'margin-top:8px' }, btn('Add price', () => run(async () => { await api('/api/prices', { method: 'PUT', body: { ...S.pr, input_per_mtok: Number(S.pr.input_per_mtok), output_per_mtok: Number(S.pr.output_per_mtok) } }); S.pr = { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }; await reload(); }), 'btn')),
       h('h3', {}, 'Computer use'), h('p', { class: 'muted' }, S.cu.note), h('div', { class: 'row2', style: 'flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.cu.status === 'ready' ? 'ok' : 'warn') }, S.cu.status), S.cu.problems.map((x) => h('span', { class: 'muted' }, x)))));
   }
+  // ---------- inventory: derived trust ring, rights panel, bulk actions ----------
+  // The trust score is derived only from fields the API returns; the formula is shown verbatim in the view.
+  const INV_TRUST_RULE = 'Trust score (derived, not stored): start at 100, minus 35 if unverified, minus 6 x risk score, minus 8 x accountability gap; a suspended agent scores 0 (clamped to 0-100).';
+  const INV_GREEN = '#3D7A4F', INV_AMBER = '#B7791F';
+  const INV_GAP_TEXT = { no_owner: 'no owner', no_sponsor: 'no sponsor', no_purpose: 'no purpose' };
+  const invScore = (a) => {
+    if (a.status === 'suspended') return 0;
+    const raw = 100 - (a.trust === 'unverified' ? 35 : 0) - 6 * ((a.risk && a.risk.score) || 0) - 8 * ((a.accountability || []).length);
+    return Math.max(0, Math.min(100, raw));
+  };
+  const invRingColor = (a, score) => (a.status === 'suspended' ? 'var(--muted)' : score >= 80 ? INV_GREEN : score >= 60 ? INV_AMBER : 'var(--bad)');
+  const invTrust = (a) => {
+    const score = invScore(a), why = [];
+    if (a.status === 'suspended') why.push('Suspended: every capability is off');
+    else {
+      if (a.trust === 'unverified') why.push('Unverified source: -35');
+      const rs = (a.risk && a.risk.score) || 0;
+      if (rs) why.push(`Risk score ${rs}: -${6 * rs}`);
+      const g = (a.accountability || []).length;
+      if (g) why.push(`${g} accountability gap${g === 1 ? '' : 's'}: -${8 * g}`);
+    }
+    const title = `Trust score ${score} of 100. ` + (why.length ? `Deductions: ${why.join('; ')}.` : 'No deductions.');
+    const total = 2 * Math.PI * 20, el = document.createElementNS(NS, 'svg');
+    for (const [k, v] of Object.entries({ viewBox: '0 0 48 48', width: 48, height: 48, role: 'img', class: 'inv-ring', 'aria-label': `Trust score ${score} of 100` })) el.setAttribute(k, v);
+    sadd(el, 'circle', { cx: 24, cy: 24, r: 20, fill: 'none', stroke: 'var(--line)', 'stroke-width': 5 });
+    if (score > 0) sadd(el, 'circle', { cx: 24, cy: 24, r: 20, fill: 'none', stroke: invRingColor(a, score), 'stroke-width': 5, 'stroke-linecap': 'round', 'stroke-dasharray': `${(total * score / 100).toFixed(2)} ${total.toFixed(2)}`, transform: 'rotate(-90 24 24)' });
+    sadd(el, 'text', { x: 24, y: 28.5, 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 600, fill: 'currentColor' }, String(score));
+    return h('span', { class: 'inv-trust', title }, el);
+  };
+  const invFact = (label, value, muted) => h('div', { class: 'inv-fact' }, h('span', { class: 'muted' }, label), h('span', { class: muted ? 'muted' : '' }, value));
+  const invFacts = (a) => h('div', { class: 'inv-facts' }, invFact('Owner', a.owner === 'system' ? 'no owner' : a.owner, a.owner === 'system'), invFact('Sponsor', a.sponsor || 'no sponsor', !a.sponsor), invFact('Purpose', a.purpose || 'no purpose', !a.purpose));
+  const invGapChips = (a) => ((a.accountability || []).length ? h('div', { class: 'row2 inv-gaps' }, a.accountability.map((g) => h('span', { class: 'chip warn', title: 'Accountability gap: the agent has ' + (INV_GAP_TEXT[g] || g) + '.' }, INV_GAP_TEXT[g] || g))) : null);
+  const invPrune = () => {
+    const ids = new Set((S.inv || []).map((a) => a.id));
+    if (S.invSel instanceof Set) for (const id of [...S.invSel]) if (!ids.has(id)) S.invSel.delete(id);
+    if (S.invPick && !ids.has(S.invPick)) { S.invPick = null; S.invRights = null; }
+    if (S.invEdit && !ids.has(S.invEdit.id)) S.invEdit = null;
+  };
+  const invRefresh = async () => {
+    [S.inv, S.invSum] = await Promise.all([api('/api/inventory'), api('/api/inventory/summary')]);
+    await loadBots();
+    invPrune();
+  };
+  const invAct = (a, path, body, method = 'POST') => run(async () => { await api(path, { method, body }); await invRefresh(); S.invRights = null; });
+  const invBulk = (kind) => {
+    const ids = [...(S.invSel || [])].filter((id) => (S.inv || []).some((a) => a.id === id));
+    if (!ids.length || S.invBulk) return;
+    const spec = {
+      suspend: { path: (id) => `/api/bots/${id}/status`, body: { status: 'suspended', reason: 'bulk inventory action' }, verb: 'suspended' },
+      resume: { path: (id) => `/api/bots/${id}/status`, body: { status: 'active', reason: 'bulk inventory action' }, verb: 'resumed' },
+      verify: { path: (id) => `/api/bots/${id}/trust`, body: { trust: 'verified' }, verb: 'marked verified' },
+    }[kind];
+    S.invBulk = true;
+    render();
+    run(async () => {
+      try {
+        const rs = await Promise.allSettled(ids.map((id) => api(spec.path(id), { method: 'POST', body: spec.body })));
+        const failed = rs.filter((r) => r.status === 'rejected');
+        await invRefresh();
+        S.invRights = null;
+        const first = failed[0] && failed[0].reason && failed[0].reason.message;
+        S.info = `${ids.length - failed.length} of ${ids.length} agent(s) ${spec.verb}.` + (failed.length ? ` ${failed.length} failed${first ? ': ' + first : '.'}` : '');
+      } finally { S.invBulk = false; }
+    });
+  };
   function accountabilityForm() {
     const e = S.invEdit, f = (k, ph, max) => { const i = h('input', { class: 'field', placeholder: ph, maxlength: max, value: e[k] || '', 'aria-label': ph }); i.addEventListener('input', () => { e[k] = i.value; }); return i; };
-    return h('div', { class: 'card', style: 'margin-bottom:12px' }, h('b', {}, `Who is accountable for ${e.name}?`), h('p', { class: 'muted', style: 'margin:4px 0 8px' }, 'Owner runs it day to day, sponsor approves that it should exist, purpose says what it is for. Admin only.'),
+    return h('div', { class: 'card inv-edit' }, h('b', {}, `Who is accountable for ${e.name}?`), h('p', { class: 'muted', style: 'margin:4px 0 8px' }, 'Owner runs it day to day, sponsor approves that it should exist, purpose says what it is for. Admin only.'),
       h('div', { class: 'rbox' }, f('owner', 'Owner (a person)', 80), f('sponsor', 'Sponsor (a person)', 80), f('purpose', 'Purpose, one sentence', 300)),
-      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Save', () => run(async () => { await api(`/api/bots/${e.id}/accountability`, { method: 'PATCH', body: { owner: e.owner || '', sponsor: e.sponsor || '', purpose: e.purpose || '' } }); S.invEdit = null; S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }), 'btn primary'), btn('Cancel', () => { S.invEdit = null; render(); }, 'btn')));
+      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Save', () => run(async () => { await api(`/api/bots/${e.id}/accountability`, { method: 'PATCH', body: { owner: e.owner || '', sponsor: e.sponsor || '', purpose: e.purpose || '' } }); S.invEdit = null; await invRefresh(); S.invRights = null; S.info = `Accountability saved for ${e.name}.`; }), 'btn primary'), btn('Cancel', () => { S.invEdit = null; render(); }, 'btn')));
   }
   function inventoryView() {
-    const q = h('input', { class: 'field', style: 'max-width:260px', placeholder: 'Search agents', value: S.invQ, 'aria-label': 'Search agents' }); q.addEventListener('input', () => { S.invQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
-    const rows = S.inv.filter((a) => (!S.invQ || (a.name + a.team + a.source).toLowerCase().includes(S.invQ.toLowerCase())) && (!S.invRisk || a.risk.level === S.invRisk));
-    const act = (a, path, body, method = 'POST') => run(async () => { await api(path, { method, body }); S.inv = await api('/api/inventory'); await loadBots(); });
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Agent inventory'), h('p', { class: 'muted' }, 'Every agent in this workspace with its source, owner, trust and risk. Suspending an agent switches off all of its capabilities at once.'),
-      S.invSum ? h('div', { class: 'row2', style: 'margin-bottom:10px;flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.invSum.ownerless ? 'warn' : 'ok') }, `${S.invSum.ownerless} without owner`), h('span', { class: 'chip ' + (S.invSum.no_sponsor ? 'warn' : 'ok') }, `${S.invSum.no_sponsor} without sponsor`), h('span', { class: 'chip ' + (S.invSum.no_purpose ? 'warn' : 'ok') }, `${S.invSum.no_purpose} without purpose`), h('span', { class: 'chip' }, `${S.invSum.high_risk} high risk`)) : null,
-      S.invEdit ? accountabilityForm() : null,
-      h('div', { class: 'row2', style: 'margin-bottom:10px' }, q, ['', 'high', 'medium', 'low', 'suspended'].map((r) => btn(r || 'All risks', () => { S.invRisk = r; render(); }, 'chip' + (S.invRisk === r ? ' ok' : ''), { 'aria-pressed': S.invRisk === r })), h('span', { class: 'muted' }, `${rows.length} of ${S.inv.length}`)),
-      h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Agent', 'Team', 'Source', 'Trust', 'Owner / sponsor', 'Last active', 'Criticality', 'Risk', 'Status', ''].map((c) => h('th', {}, c)))),
-        h('tbody', {}, rows.map((a) => h('tr', {}, h('td', {}, h('span', { class: 'row2' }, tile(a, 28), h('b', {}, a.name))), h('td', {}, a.team), h('td', {}, a.source + (a.source_ref ? ` (${a.source_ref})` : '')), h('td', {}, h('span', { class: 'chip ' + (a.trust === 'unverified' ? 'warn' : 'ok') }, a.trust)), h('td', {}, h('div', {}, a.owner === 'system' ? h('span', { class: 'muted' }, 'no owner') : a.owner), h('div', { class: 'muted', style: 'font-size:12px' }, a.sponsor ? 'Sponsor: ' + a.sponsor : 'no sponsor'), h('div', {}, btn(a.accountability.length ? 'Assign' : 'Edit', () => { S.invEdit = { id: a.id, name: a.name, owner: a.owner === 'system' ? '' : a.owner, sponsor: a.sponsor, purpose: a.purpose }; render(); }, 'link'))), h('td', { class: 'mono' }, a.last_activity ? when(a.last_activity) : 'never'),
-          h('td', {}, h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Criticality ' + a.name, onchange: (e) => act(a, `/api/bots/${a.id}/meta`, { criticality: e.target.value }, 'PUT') }, ['low', 'medium', 'high'].map((v) => h('option', { value: v, selected: a.criticality === v }, v)))),
-          h('td', {}, h('span', { class: 'chip risk-' + a.risk.level, title: a.risk.reasons.join('; ') }, a.risk.level)), h('td', {}, a.status),
-          h('td', {}, h('span', { class: 'row2' }, btn(a.status === 'suspended' ? 'Resume' : 'Suspend', () => act(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory' }), 'link'), a.trust === 'unverified' ? btn('Mark reviewed', () => act(a, `/api/bots/${a.id}/trust`, { trust: 'verified' }), 'link') : null)))))))));
+    if (S.invTrust === undefined) S.invTrust = '';
+    if (S.invStatus === undefined) S.invStatus = '';
+    if (S.invPick === undefined) S.invPick = null;
+    if (S.invRights === undefined) S.invRights = null;
+    if (!(S.invSel instanceof Set)) S.invSel = new Set();
+    if (S.invBulk === undefined) S.invBulk = false;
+    const known = new Set((S.inv || []).map((a) => a.id));
+    for (const id of [...S.invSel]) if (!known.has(id)) S.invSel.delete(id);
+    let picked = S.invPick ? S.inv.find((a) => a.id === S.invPick) : null;
+    if (S.invPick && !picked) { S.invPick = null; S.invRights = null; }
+    if (S.invPick && !S.invRights) {
+      S.invRights = { loading: true };
+      const id = S.invPick;
+      run(async () => {
+        try {
+          const [bots, apps, tmpl] = await Promise.all([api('/api/bots'), api('/api/apps'), api('/api/templates')]);
+          if (S.invPick !== id) return;
+          const bot = (bots || []).find((b) => b.id === id) || null;
+          const caps = (tmpl.find((t) => t.capabilities) || {}).capabilities || [];
+          const grants = [];
+          for (const ap of apps || []) {
+            const tools = (((ap.grants || {})[id]) || []).map((name) => ({ name, risk: (((ap.tools || []).find((t) => t.name === name)) || {}).risk || 'read' }));
+            if (tools.length) grants.push({ id: ap.id, name: ap.name, connected: !!ap.connected, tools });
+          }
+          S.invRights = { bot, caps, grants };
+        } catch (e) { S.invRights = { error: e.message || 'Could not load rights data.' }; throw e; }
+      });
+    }
+    const loading = !S.invSum && !S.inv.length;
+    if (loading) return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Agent inventory'), h('p', { class: 'muted' }, 'Loading agents…')));
+    const q = h('input', { class: 'field inv-search', placeholder: 'Search agents', value: S.invQ, 'aria-label': 'Search agents' }); q.addEventListener('input', () => { S.invQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
+    const needle = S.invQ.trim().toLowerCase();
+    const rows = S.inv.filter((a) => {
+      if (needle && ![a.name, a.team, a.source, a.owner, a.sponsor, a.purpose].join(' ').toLowerCase().includes(needle)) return false;
+      if (S.invRisk && a.risk.level !== S.invRisk) return false;
+      if (S.invTrust && a.trust !== S.invTrust) return false;
+      if (S.invStatus && a.status !== S.invStatus) return false;
+      return true;
+    });
+    const filtered = !!(needle || S.invRisk || S.invTrust || S.invStatus);
+    const clearFilters = () => { S.invQ = ''; S.invRisk = ''; S.invTrust = ''; S.invStatus = ''; render(); };
+    const chipRow = (label, key, values) => h('div', { class: 'inv-filter-row' }, h('span', { class: 'muted inv-filter-label' }, label),
+      h('div', { class: 'row2' }, [''].concat(values).map((v) => btn(v ? v : 'All', () => { S[key] = v; render(); }, 'chip' + (S[key] === v ? ' ok' : ''), { 'aria-pressed': S[key] === v ? 'true' : 'false' }))));
+    const filteredIds = rows.map((a) => a.id);
+    const allSelected = filteredIds.length > 0 && filteredIds.every((id) => S.invSel.has(id));
+    const master = h('input', { type: 'checkbox', class: 'inv-master-check', checked: allSelected, disabled: !filteredIds.length, 'aria-label': 'Select all filtered agents' });
+    master.addEventListener('click', (e) => { e.stopPropagation(); const on = e.target.checked; filteredIds.forEach((id) => (on ? S.invSel.add(id) : S.invSel.delete(id))); render(); });
+    const stats = S.invSum ? h('div', { class: 'inv-stats' }, [['Agents', S.invSum.total, ''], ['Without owner', S.invSum.ownerless, 'warn'], ['Without sponsor', S.invSum.no_sponsor, 'warn'], ['Without purpose', S.invSum.no_purpose, 'warn'], ['Suspended', S.invSum.suspended, 'warn'], ['High risk', S.invSum.high_risk, 'warn']].map(([label, value, cls]) => h('div', { class: 'inv-stat' + (cls && value ? ' ' + cls : '') }, h('span', { class: 'muted' }, label), h('b', {}, String(value == null ? 0 : value))))) : null;
+    const openRights = (a) => { if (S.invEdit && S.invEdit.id !== a.id) S.invEdit = null; S.invPick = S.invPick === a.id ? null : a.id; S.invRights = null; render(); };
+    const editFor = (a) => { S.invPick = a.id; S.invEdit = { id: a.id, name: a.name, owner: a.owner === 'system' ? '' : a.owner, sponsor: a.sponsor || '', purpose: a.purpose || '' }; render(); };
+    const closePanel = () => { S.invPick = null; S.invRights = null; S.invEdit = null; render(); };
+    const toggle = (e, id) => { e.stopPropagation(); if (e.target.checked) S.invSel.add(id); else S.invSel.delete(id); render(); };
+    const card = (a) => h('div', { class: 'card inv-card' + (S.invPick === a.id ? ' pick' : ''), onclick: () => openRights(a) },
+      h('div', { class: 'inv-head' }, h('input', { type: 'checkbox', class: 'inv-check', checked: S.invSel.has(a.id), 'aria-label': 'Select ' + a.name, onclick: (e) => toggle(e, a.id) }),
+        tile(a, 40), h('div', { class: 'inv-title' }, h('b', {}, a.name), h('div', { class: 'muted inv-sub' }, `${a.role || 'Agent'} · ${a.team}`)), invTrust(a)),
+      h('div', { class: 'row2 inv-chips' },
+        h('span', { class: 'chip', title: a.source_ref ? `Source reference: ${a.source_ref}` : 'No source reference recorded.' }, a.source),
+        h('span', { class: 'chip ' + (a.status === 'suspended' ? 'warn' : 'ok') }, a.status),
+        h('span', { class: 'chip' + (a.criticality === 'high' ? ' warn' : '') }, `criticality ${a.criticality}`),
+        h('span', { class: 'chip risk-' + a.risk.level, title: (a.risk.reasons || []).length ? a.risk.reasons.join('; ') : 'No risk reasons recorded.' }, `risk ${a.risk.level} · ${a.risk.score}`)),
+      invFacts(a), invGapChips(a),
+      h('div', { class: 'inv-foot' }, h('span', { class: 'muted mono', style: 'font-size:11px' }, 'last active ' + (a.last_activity ? when(a.last_activity) : 'never')),
+        h('span', { class: 'sp' }),
+        h('span', { class: 'row2' },
+          btn('Rights', (e) => { e.stopPropagation(); openRights(a); }, 'link'),
+          btn(a.status === 'suspended' ? 'Resume' : 'Suspend', (e) => { e.stopPropagation(); invAct(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory' }); }, 'link'),
+          btn('Edit accountability', (e) => { e.stopPropagation(); editFor(a); }, 'link'))));
+    const rightsPanel = (a) => {
+      const r = S.invRights || { loading: true };
+      const head = h('div', { class: 'inv-panel-head' }, tile(a, 40), h('div', { class: 'inv-title' }, h('b', {}, a.name), h('div', { class: 'muted inv-sub' }, a.role || 'Agent')),
+        btn(icon('x', 16), closePanel, 'link', { 'aria-label': 'Close rights panel' }));
+      let body;
+      if (r.loading) body = h('p', { class: 'muted inv-note' }, 'Loading rights…');
+      else if (r.error) body = h('p', { class: 'muted inv-note' }, 'Rights data could not be loaded. ' + r.error);
+      else {
+        const bot = r.bot, caps = r.caps || [], spaces = (bot && bot.spaces) || [], scopes = (bot && bot.scopes) || [];
+        const granted = caps.filter((c) => scopes.includes(c)).length;
+        body = [
+          h('h3', {}, 'Scopes'),
+          scopes.length ? h('div', { class: 'row2' }, scopes.map((s) => h('span', { class: 'chip' }, s))) : h('p', { class: 'muted inv-note' }, 'No scope is granted to this agent.'),
+          h('h3', {}, 'Capabilities'),
+          bot && caps.length ? [h('p', { class: 'muted inv-note' }, `${granted} of ${caps.length} capabilities granted. The server enforces every capability.`),
+            h('div', { class: 'inv-caps' }, caps.map((c) => { const on = scopes.includes(c); return h('div', { class: 'inv-cap' + (on ? '' : ' off') }, icon(on ? 'check' : 'x', 14), h('span', { class: on ? 'inv-ok' : 'muted' }, c), h('span', { class: 'muted', style: 'font-size:11px' }, on ? 'granted' : 'not granted')); }))] : h('p', { class: 'muted inv-note' }, 'No capability data for this agent.'),
+          h('h3', {}, 'Memory spaces'),
+          spaces.length ? h('div', { class: 'row2' }, spaces.map((s, i) => h('span', { class: 'chip', title: i === spaces.length - 1 ? 'The last space is where the agent writes.' : 'Memory space' }, s + (i === spaces.length - 1 ? ' · write' : '')))) : h('p', { class: 'muted inv-note' }, 'No memory spaces. The agent cannot read or write memory.'),
+          h('h3', {}, 'App and tool grants'),
+          (r.grants || []).length ? r.grants.map((g) => h('div', { class: 'inv-grant' }, h('div', { class: 'row2' }, h('b', {}, g.name), h('span', { class: 'chip' + (g.connected ? ' ok' : '') }, g.connected ? 'connected' : 'not connected')),
+            h('div', { class: 'row2' }, g.tools.map((t) => h('span', { class: 'chip risk-' + (t.risk === 'write' ? 'high' : t.risk === 'secret' ? 'medium' : 'low'), title: 'Tool risk: ' + t.risk }, `${t.name} · ${t.risk}`)))))
+            : h('p', { class: 'muted inv-note' }, 'No app or tool grants. The agent cannot call any connected app tool.'),
+          h('h3', {}, 'Accountability'), invFacts(a), invGapChips(a),
+          h('div', { style: 'margin-top:6px' }, btn('Edit accountability', () => editFor(a), 'link')),
+          h('h3', {}, 'Risk and trust'),
+          h('p', { class: 'muted inv-note' }, `Risk score ${a.risk.score} of 10, level ${a.risk.level}. Trust ${a.trust}, status ${a.status}, criticality ${a.criticality}.`),
+          (a.risk.reasons || []).length ? h('ul', { class: 'inv-reasons' }, a.risk.reasons.map((x) => h('li', {}, x))) : h('p', { class: 'muted inv-note' }, 'No risk reasons recorded.'),
+          h('h3', {}, 'Last activity'), h('p', { class: 'muted inv-note mono' }, a.last_activity ? when(a.last_activity) : 'Never active.'),
+          h('h3', {}, 'Actions'),
+          h('div', { class: 'row2' },
+            btn(a.status === 'suspended' ? 'Resume agent' : 'Suspend agent', () => invAct(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory panel' }), 'btn'),
+            btn(a.trust === 'unverified' ? 'Mark verified' : 'Mark unverified', () => invAct(a, `/api/bots/${a.id}/trust`, { trust: a.trust === 'unverified' ? 'verified' : 'unverified' }), 'btn')),
+          h('div', { class: 'row2', style: 'margin-top:8px' }, h('span', { class: 'muted' }, 'Criticality'),
+            h('select', { class: 'field inv-crit', 'aria-label': 'Criticality for ' + a.name, onchange: (e) => invAct(a, `/api/bots/${a.id}/meta`, { criticality: e.target.value }, 'PUT') }, ['low', 'medium', 'high'].map((v) => h('option', { value: v, selected: a.criticality === v }, v)))),
+          S.invEdit && S.invEdit.id === a.id ? accountabilityForm() : null,
+          h('div', { class: 'row2', style: 'margin-top:10px' }, btn('Close', closePanel, 'link')),
+        ];
+      }
+      return h('aside', { class: 'inv-aside', role: 'complementary', 'aria-label': `Rights panel for ${a.name}` }, head,
+        h('div', { class: 'row2 inv-panel-chips' }, h('span', { class: 'chip ' + (a.trust === 'unverified' ? 'warn' : 'ok') }, a.trust), h('span', { class: 'chip ' + (a.status === 'suspended' ? 'warn' : 'ok') }, a.status), h('span', { class: 'chip' }, `criticality ${a.criticality}`), h('span', { class: 'chip risk-' + a.risk.level, title: (a.risk.reasons || []).length ? a.risk.reasons.join('; ') : 'No risk reasons recorded.' }, `risk ${a.risk.level} · ${a.risk.score}`)),
+        body);
+    };
+    const nSel = S.invSel.size;
+    const bulk = nSel ? h('div', { class: 'inv-bulk', role: 'toolbar', 'aria-label': 'Bulk actions' }, h('b', {}, `${nSel} selected`),
+      btn('Suspend selected', () => invBulk('suspend'), 'btn', { disabled: !!S.invBulk }), btn('Resume selected', () => invBulk('resume'), 'btn', { disabled: !!S.invBulk }), btn('Mark verified', () => invBulk('verify'), 'btn', { disabled: !!S.invBulk }),
+      h('span', { class: 'sp' }), btn('Clear', () => { S.invSel.clear(); render(); }, 'link')) : null;
+    const legend = h('p', { class: 'inv-legend' }, INV_TRUST_RULE);
+    const grid = S.inv.length === 0
+      ? emptyState('table', 'No agents yet', 'This workspace has no agents. Create one to give it an owner, a sponsor and a purpose.', btn([icon('plus', 16), 'New agent'], openAgent, 'btn primary'))
+      : rows.length ? h('div', { class: 'inv-grid' }, rows.map(card))
+        : emptyState('lens', 'No agents match', 'No agent matches the current search and filters.', btn('Clear filters', clearFilters, 'btn'));
+    return h('div', { class: 'body' }, h('div', { class: 'wide inv-view' }, h('h2', {}, 'Agent inventory'),
+      h('p', { class: 'muted' }, 'Every agent in this workspace with its source, owner, trust and risk. Open a card for its real permissions. Suspending an agent switches off all of its capabilities at once.'),
+      stats,
+      h('div', { class: 'inv-layout' + (picked ? '' : ' inv-layout-full') }, h('div', { class: 'inv-main' },
+        S.invEdit && !(picked && S.invEdit.id === picked.id) ? accountabilityForm() : null,
+        h('div', { class: 'inv-filters' },
+          h('div', { class: 'row2 inv-search-row' }, q, h('span', { class: 'sp' }), h('span', { class: 'muted', 'aria-live': 'polite' }, `${rows.length} of ${S.inv.length}`), filtered ? btn('Clear filters', clearFilters, 'link') : null),
+          chipRow('Risk', 'invRisk', ['low', 'medium', 'high', 'suspended']), chipRow('Trust', 'invTrust', ['verified', 'unverified']), chipRow('Status', 'invStatus', ['active', 'suspended']),
+          h('div', { class: 'row2 inv-masterrow' }, h('label', { class: 'inv-master' }, master, h('span', { class: 'muted' }, 'Select all filtered')))),
+        bulk, legend, grid),
+        picked ? rightsPanel(picked) : null)));
   }
   const importAgent = (body, label) => run(async () => { const r = await api('/api/marketplace/import', { method: 'POST', body }); await loadBots(); S.info = `${label} added as "${r.name}".` + (r.note ? ' ' + r.note : ''); });
   function marketView() {
