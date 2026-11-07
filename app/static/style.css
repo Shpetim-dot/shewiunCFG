@@ -679,3 +679,129 @@ html { scroll-behavior: smooth; }
   .planx-actions .btn { flex: 1; justify-content: center; }
   .planx-table table { min-width: 900px; }
 }
+
+
+/* ===== Batch 7 — 3-D avatars & sidebar ===== */
+/* --- 3-D avatar plate -------------------------------------------------------------------------
+   tile() builds a 48x48 SVG with gradient defs whose stops are classes, so the same markup gets a
+   light-mode and a dark-mode light source. No per-frame JS runs for idle faces. */
+.av3-plate-hi { stop-color: #FFFFFF; }
+.av3-plate-mid { stop-color: #F3F5FA; }
+.av3-plate-lo { stop-color: #DBE2EC; }
+.av3-shade-hi { stop-color: rgba(255, 255, 255, .65); }
+.av3-shade-mid { stop-color: rgba(255, 255, 255, 0); }
+.av3-shade-lo { stop-color: rgba(15, 23, 42, .10); }
+.av3-rim-hi { stop-color: rgba(255, 255, 255, .95); }
+.av3-rim-mid { stop-color: rgba(255, 255, 255, .18); }
+.av3-rim-lo { stop-color: rgba(15, 23, 42, .22); }
+.av3-drop-in { stop-color: rgba(15, 23, 42, .30); }
+.av3-drop-out { stop-color: rgba(15, 23, 42, 0); }
+.av .av3-base { fill: rgba(15, 23, 42, .13); }
+.av .av3-gloss { stroke: rgba(255, 255, 255, .75); }
+.av .av3-spec { fill: #FFFFFF; opacity: .92; }
+.av .av3-arc-sh { stroke: rgba(15, 23, 42, .24); }
+.av .av3-arc-hi { stroke: rgba(255, 255, 255, .38); }
+.avatar { filter: drop-shadow(0 1px 1.5px rgba(15, 23, 42, .12)); }
+
+/* --- cursor gaze: one global pointer tracker writes a transform on the hovered .look group --- */
+.av .look { transition: transform .12s ease-out; }
+.av.av3-gaze .look { animation: none; }
+
+/* --- walk-to-message: <=900 ms, fixed overlay so it never shifts layout --- */
+.av3-walk { position: fixed; z-index: 60; pointer-events: none; line-height: 0; display: flex; will-change: transform, opacity; animation: av3Walk .82s cubic-bezier(.34, .08, .3, 1) both; }
+/* The sidebar row class .agent also matches chat bubbles (.msg.agent); keep message text in normal flow. */
+.msgs .msg { display: block; }
+@keyframes av3Walk {
+  0% { transform: translate(0, 0) rotate(0deg) scale(.9); opacity: 0; }
+  8% { opacity: 1; }
+  22% { transform: translate(calc(var(--av3-dx, 0px) * .18), calc(var(--av3-dy, 0px) * .18 - 5px)) rotate(-4deg) scale(1); }
+  38% { transform: translate(calc(var(--av3-dx, 0px) * .38), calc(var(--av3-dy, 0px) * .38 + 2px)) rotate(3deg); }
+  55% { transform: translate(calc(var(--av3-dx, 0px) * .58), calc(var(--av3-dy, 0px) * .58 - 5px)) rotate(-3deg); }
+  72% { transform: translate(calc(var(--av3-dx, 0px) * .78), calc(var(--av3-dy, 0px) * .78 + 1px)) rotate(2deg); }
+  88% { transform: translate(calc(var(--av3-dx, 0px) * .97), calc(var(--av3-dy, 0px) * .97 - 2px)) rotate(0deg) scale(.98); opacity: 1; }
+  100% { transform: translate(var(--av3-dx, 0px), var(--av3-dy, 0px)) rotate(0deg) scale(.55); opacity: 0; }
+}
+
+/* --- left sidebar: prominent sticky group headings, clearer active row, pin/unread marks --- */
+.av3-agents { padding: 0 8px 10px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 32%, transparent) transparent; }
+.av3-group { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 8px; padding: 12px 10px 6px; font-size: 11px; font-weight: 700; letter-spacing: .09em; line-height: 16px; text-transform: uppercase; color: var(--muted); background: var(--side); }
+.av3-glabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av3-gcount { flex: none; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 600; letter-spacing: 0; line-height: 15px; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
+.av3-agent { position: relative; gap: 10px; padding: 7px 9px; border: 1px solid transparent; border-radius: 10px; }
+.av3-agent:hover { background: color-mix(in srgb, var(--surface) 55%, transparent); border-color: color-mix(in srgb, var(--line) 72%, transparent); }
+.av3-agent[aria-current="true"] { background: var(--surface); border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); box-shadow: inset 3px 0 0 var(--accent), 0 1px 2px rgba(15, 23, 42, .06); }
+.av3-agent[aria-current="true"] .av3-agentav { filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--accent) 34%, transparent)); }
+.av3-agent:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.av3-agentav { display: inline-flex; flex: none; }
+.av3-agenttxt { flex: 1; min-width: 0; }
+.av3-agenttxt b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av3-agenttxt small { display: block; max-width: none; font-size: 11.5px; line-height: 1.25; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av3-pin { display: inline-flex; flex: none; color: var(--accent); }
+.av3-unread { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #D92D20; box-shadow: 0 0 0 2px var(--side); }
+
+/* --- "Connect apps (MCP)" button: status dot + real connected count --- */
+.appsbtn.av3-mcp { display: flex; align-items: center; gap: 10px; margin: 10px 8px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 74%, #000); color: var(--on-accent); background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 86%, #fff) 0%, var(--accent) 46%, color-mix(in srgb, var(--accent) 82%, #000) 100%); box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 24%, transparent); }
+.appsbtn.av3-mcp:hover { filter: none; background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 76%, #fff) 0%, color-mix(in srgb, var(--accent) 94%, #000) 100%); }
+.av3-mcp-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left; }
+.av3-mcp-txt b { font-size: 13.5px; font-weight: 600; line-height: 1.2; }
+.av3-mcp-txt small { font-size: 11.5px; line-height: 1.2; opacity: .82; }
+.av3-mcp-badge { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.av3-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .55); box-shadow: 0 0 0 2px rgba(255, 255, 255, .22); }
+.av3-dot.on { background: #6EE7B7; box-shadow: 0 0 0 2px rgba(110, 231, 183, .30); }
+.av3-mcp .chip { font-size: 11px; line-height: 18px; color: inherit; border-color: rgba(255, 255, 255, .36); background: rgba(255, 255, 255, .16); }
+
+/* --- account footer: avatar, name/email/role, version chip and a menu chevron --- */
+.acct.av3-acct { gap: 10px; padding: 9px 10px; border-radius: 12px; transition: box-shadow .15s ease, border-color .15s ease; }
+.acct.av3-acct:hover, .acct.av3-acct[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); box-shadow: 0 4px 14px rgba(15, 23, 42, .10); }
+.av3-acctav { flex: none; display: inline-flex; }
+.av3-usertile { width: 34px; height: 34px; border-radius: 11px; color: var(--on-accent); background: linear-gradient(150deg, color-mix(in srgb, var(--accent) 78%, #fff), var(--accent) 55%, color-mix(in srgb, var(--accent) 80%, #000)); box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 30%, transparent); }
+.av3-accttxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left; }
+.av3-accttxt b { font-size: 13px; font-weight: 600; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av3-accttxt small { font-size: 11.5px; line-height: 1.25; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av3-acctchip { flex: none; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); font-size: 10.5px; font-weight: 600; color: var(--muted); background: color-mix(in srgb, var(--muted) 9%, transparent); }
+.av3-acctchev { flex: none; display: inline-flex; color: var(--muted); transition: transform .16s ease; }
+.acct.av3-acct[aria-expanded="true"] .av3-acctchev { transform: rotate(180deg); }
+
+/* --- mobile drawer (the left overlay on phones) gets the same hierarchy --- */
+.av3-dhead { display: flex; align-items: center; gap: 10px; margin: 2px 4px 10px; padding-bottom: 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.drawer .av3-dgroup { position: sticky; top: 0; z-index: 3; margin: 14px 0 3px; padding: 8px 10px 6px; border-radius: 0 0 8px 8px; font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); background: var(--side); }
+.ditem.av3-ditem { border-radius: 10px; }
+.ditem.av3-ditem[aria-current="true"] { background: var(--surface); border-left-color: var(--accent); box-shadow: 0 1px 2px rgba(15, 23, 42, .06); }
+.av3-ditxt { flex: 1; min-width: 0; }
+.av3-ditxt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ditem.av3-dagent { gap: 10px; }
+.av3-dfoot { margin: 18px 10px 10px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 11.5px; }
+
+@media (prefers-color-scheme: dark) {
+  .av3-plate-hi { stop-color: #FDFEFF; }
+  .av3-plate-mid { stop-color: #E9EEF8; }
+  .av3-plate-lo { stop-color: #C8D3E4; }
+  .av3-shade-hi { stop-color: rgba(255, 255, 255, .45); }
+  .av3-shade-lo { stop-color: rgba(0, 0, 0, .20); }
+  .av3-rim-hi { stop-color: rgba(255, 255, 255, .85); }
+  .av3-rim-lo { stop-color: rgba(0, 0, 0, .35); }
+  .av3-drop-in { stop-color: rgba(0, 0, 0, .62); }
+  .av .av3-base { fill: rgba(0, 0, 0, .55); }
+  .av .av3-arc-sh { stroke: rgba(0, 0, 0, .45); }
+  .av .av3-spec { opacity: .96; }
+  .avatar { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .5)); }
+  .av3-agent[aria-current="true"] { box-shadow: inset 3px 0 0 var(--accent), 0 1px 2px rgba(0, 0, 0, .35); }
+  .av3-unread { box-shadow: 0 0 0 2px var(--side); }
+  .av3-gcount { background: color-mix(in srgb, var(--muted) 22%, transparent); }
+  .acct.av3-acct:hover, .acct.av3-acct[aria-expanded="true"] { box-shadow: 0 4px 14px rgba(0, 0, 0, .45); }
+  .ditem.av3-ditem[aria-current="true"] { box-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+}
+
+@media (max-width: 760px) {
+  .av3-group { padding: 10px 8px 5px; }
+  .av3-agent { padding: 8px; }
+  .av3-agenttxt b { font-size: 13.5px; }
+  .av3-dgroup { top: 0; }
+  .av3-mcp { margin-top: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .av .look { transition: none; }
+  .av3-walk { display: none !important; animation: none !important; }
+  .acct.av3-acct[aria-expanded="true"] .av3-acctchev { transform: none; }
+}

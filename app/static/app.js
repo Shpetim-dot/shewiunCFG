@@ -62,6 +62,14 @@ const overlayRoot = (() => {
     calm: '<path d="M15.5 22.5h5M27.5 22.5h5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
     wink: '<circle cx="18" cy="22" r="2.6"/><path d="M27 23.5q3-4 6 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   };
+  // Specular catch-lights for the open eye styles. They live inside the gaze/blink groups, so they
+  // follow the cursor and close with the lids. Closed eyes (happy/calm/wink) never get a fake pupil.
+  const EYE_SPEC = {
+    dot: '<circle class="av3-spec" cx="17.05" cy="21.05" r=".95"/><circle class="av3-spec" cx="29.05" cy="21.05" r=".95"/>',
+    wide: '',
+    tall: '<circle class="av3-spec" cx="17.2" cy="20.7" r=".85"/><circle class="av3-spec" cx="29.2" cy="20.7" r=".85"/>',
+    happy: '', calm: '', wink: '<circle class="av3-spec" cx="17.05" cy="21.05" r=".95"/>',
+  };
   const BROWS = {
     none: '', raise: '<path d="M14.5 16q3.5-3 7-.5M27 17.2h6.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
     slant: '<path d="M14.5 16.5l6.5 2.2M33.5 16.5l-6.5 2.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
@@ -91,18 +99,105 @@ const overlayRoot = (() => {
     return { ring: [fromHsl(hh, Math.max(0.55, Math.min(sa, 0.8)), 0.55), fromHsl(hue, 0.6, 0.5)], arcs: x % ARCS.length, eyes: pickKey(EYES, x >> 3), brow: pickKey(BROWS, x >> 6), mouth: pickKey(MOUTHS, x >> 9) };
   }
   const arcPath = (n, r = 18) => { const [a0, a1] = ARC_ANGLES[n], pt = (a) => `${(24 + r * Math.cos((a * Math.PI) / 180)).toFixed(2)} ${(24 + r * Math.sin((a * Math.PI) / 180)).toFixed(2)}`; return `M${pt(a0)}A${r} ${r} 0 0 1 ${pt(a1)}`; };
+  // A tiny custom mark for "pinned": the G icon map is shared and must not grow for one sidebar state.
+  const av3Pin = (s = 12) => {
+    const v = document.createElementNS(NS, 'svg');
+    for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true' })) v.setAttribute(k, x);
+    v.innerHTML = '<path fill-rule="evenodd" d="M12 2.5a6.5 6.5 0 0 1 6.5 6.4c0 4.6-6.5 12-6.5 12S5.5 13.5 5.5 8.9A6.5 6.5 0 0 1 12 2.5zm0 4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z"/>';
+    return v;
+  };
   // state: o.thinking = the agent is working or answering (eyes look around, mouth talks, ring turns); idle faces blink now and then.
+  // The plate is shaded like a small 3-D object: radial light from the top-left, a rim highlight, a
+  // contact shadow and a gloss arc. Gradients are plain SVG defs; their colours come from CSS classes
+  // so light and dark mode each get their own light source without any per-frame JavaScript.
   function tile(b, s = 40, o = {}) {
-    const f = faceOf(b || {}), on = ARCS[f.arcs];
-    const ring = Object.keys(ARC_ANGLES).map((n) => `<path d="${arcPath(n)}" fill="none" stroke="${on.includes(n) ? f.ring[0] : f.ring[1]}" stroke-width="3.6" stroke-linecap="round"/>`).join('');
+    const f = faceOf(b || {}), on = ARCS[f.arcs], uid = ++gid;
+    const ring = Object.keys(ARC_ANGLES).map((n) => {
+      const d = arcPath(n), c = on.includes(n) ? f.ring[0] : f.ring[1];
+      return `<path class="av3-arc-sh" d="${d}" fill="none" stroke-width="4.2" stroke-linecap="round" transform="translate(.5 .65)"/>`
+        + `<path d="${d}" fill="none" stroke="${c}" stroke-width="3.6" stroke-linecap="round"/>`
+        + `<path class="av3-arc-hi" d="${d}" fill="none" stroke-width="1.1" stroke-linecap="round" transform="translate(-.35 -.4)"/>`;
+    }).join('');
     const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true');
     v.setAttribute('class', 'av' + (o.float ? ' float' : '') + (o.thinking ? ' thinking' : ''));
     v.style.setProperty('--bd', `-${(Math.random() * 5).toFixed(1)}s`);
-    v.innerHTML = '<circle class="halo" cx="24" cy="24" r="22" fill="none" stroke="var(--accent)" stroke-width="2"/>'
-      + '<rect x="2" y="2" width="44" height="44" rx="14" fill="#FBFAF4" stroke="rgba(15,23,42,.14)"/>'
+    v.innerHTML = '<defs>'
+      + `<radialGradient id="av3p${uid}" cx="30%" cy="22%" r="90%"><stop offset="0" class="av3-plate-hi"/><stop offset=".55" class="av3-plate-mid"/><stop offset="1" class="av3-plate-lo"/></radialGradient>`
+      + `<linearGradient id="av3s${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="av3-shade-hi"/><stop offset=".5" class="av3-shade-mid"/><stop offset="1" class="av3-shade-lo"/></linearGradient>`
+      + `<radialGradient id="av3d${uid}" cx="50%" cy="50%" r="50%"><stop offset="0" class="av3-drop-in"/><stop offset="1" class="av3-drop-out"/></radialGradient>`
+      + `<linearGradient id="av3r${uid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="av3-rim-hi"/><stop offset=".55" class="av3-rim-mid"/><stop offset="1" class="av3-rim-lo"/></linearGradient>`
+      + '</defs>'
+      + '<circle class="halo" cx="24" cy="24" r="22" fill="none" stroke="var(--accent)" stroke-width="2"/>'
+      + `<ellipse class="av3-drop" cx="24" cy="46.4" rx="16" ry="2.3" fill="url(#av3d${uid})"/>`
+      + '<rect class="av3-base" x="2.5" y="3.4" width="44" height="44" rx="14"/>'
+      + `<rect class="av3-plate" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3p${uid})"/>`
+      + `<rect class="av3-shade" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3s${uid})"/>`
+      + `<rect class="av3-rim" x="3.1" y="3.1" width="41.8" height="41.8" rx="12.9" fill="none" stroke="url(#av3r${uid})" stroke-width="1.1"/>`
+      + '<path class="av3-gloss" d="M9.8 17.2Q9.8 9.8 17.2 9.8" fill="none" stroke-width="1.4" stroke-linecap="round"/>'
       + `<g class="ring">${ring}</g>`
-      + `<g class="face" fill="${INK}" color="${INK}"><g class="look"><g class="blink">${EYES[f.eyes] || EYES.dot}</g></g>${BROWS[f.brow] || ''}<g class="mouth m-${f.mouth}">${MOUTHS[f.mouth] || MOUTHS.smile}</g></g>`;
+      + `<g class="face" fill="${INK}" color="${INK}"><g class="look"><g class="blink">${EYES[f.eyes] || EYES.dot}${EYE_SPEC[f.eyes] || ''}</g></g>${BROWS[f.brow] || ''}<g class="mouth m-${f.mouth}">${MOUTHS[f.mouth] || MOUTHS.smile}</g></g>`;
     return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
+  }
+  // ---------- cursor gaze: one global pointer tracker moves the hovered avatar's eyes, never a listener per tile ----------
+  const av3Reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const av3Fine = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
+  const AV3_GAZE_MAX = 2.1;   // 48x48 viewBox units, so the shift stays subtle at every rendered size
+  let av3Hover = null, av3Px = 0, av3Py = 0, av3Raf = 0;
+  function av3Parts(el) { return { av: el.querySelector('.av'), look: el.querySelector('.look') }; }
+  function av3ClearGaze(el) {
+    const target = el || av3Hover; if (!target) return;
+    const { av, look } = av3Parts(target);
+    if (look) look.style.transform = '';
+    if (av) av.classList.remove('av3-gaze');
+    if (!el || el === av3Hover) av3Hover = null;
+  }
+  function av3GazeFrame() {
+    av3Raf = 0;
+    const el = av3Hover; if (!el) return;
+    if (!el.isConnected) { av3Hover = null; return; }
+    const { av, look } = av3Parts(el); if (!av || !look) return;
+    const r = av.getBoundingClientRect(); if (!r.width) return;
+    const reach = r.width * 0.7 + 26;
+    const nx = Math.max(-1, Math.min(1, (av3Px - (r.left + r.width / 2)) / reach));
+    const ny = Math.max(-1, Math.min(1, (av3Py - (r.top + r.height / 2)) / reach));
+    av.classList.add('av3-gaze');
+    look.style.transform = `translate(${(nx * AV3_GAZE_MAX).toFixed(2)}px, ${(ny * AV3_GAZE_MAX).toFixed(2)}px)`;
+  }
+  document.addEventListener('pointermove', (e) => {
+    if (e.pointerType && e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
+    if ((av3Reduce && av3Reduce.matches) || (av3Fine && !av3Fine.matches) || !e.target || !e.target.closest) { av3ClearGaze(); return; }
+    const hit = e.target.closest('.avatar');
+    if (av3Hover && av3Hover !== hit) av3ClearGaze(av3Hover);
+    av3Hover = hit; av3Px = e.clientX; av3Py = e.clientY;
+    if (hit && !av3Raf) av3Raf = requestAnimationFrame(av3GazeFrame);
+  }, { passive: true });
+  document.addEventListener('pointerout', (e) => { if (!e.relatedTarget && av3Hover) av3ClearGaze(); });
+  document.addEventListener('scroll', () => { if (av3Hover && !av3Raf) av3Raf = requestAnimationFrame(av3GazeFrame); }, { passive: true, capture: true });
+  window.addEventListener('blur', () => av3ClearGaze());
+  // ---------- walk-to-message: the agent's little avatar hops from the sidebar edge to a live reply ----------
+  function av3WalkToMessage(bot) {
+    if (!bot || S.view !== 'chat' || (av3Reduce && av3Reduce.matches)) return;
+    const replies = document.querySelectorAll('#scroll .msgs .msg.agent');
+    const target = replies[replies.length - 1];
+    if (!target) return;
+    const tr = target.getBoundingClientRect();
+    if (tr.width < 20 || tr.height < 10) return;
+    const side = document.querySelector('.side');
+    const sr = side ? side.getBoundingClientRect() : null;
+    const size = 30, narrow = window.innerWidth <= 760 || !sr || sr.width < 40;
+    const startX = narrow ? 12 : Math.max(6, sr.right + 2);
+    const startY = Math.min(window.innerHeight - size - 8, Math.max(8, tr.top + tr.height / 2 - size / 2));
+    const endX = Math.min(window.innerWidth - size - 8, Math.max(8, tr.left + 6));
+    const endY = Math.min(window.innerHeight - size - 8, Math.max(8, tr.top - 4));
+    const walker = h('div', { class: 'av3-walk', 'aria-hidden': 'true' }, tile(bot, size, { thinking: true }));
+    walker.style.left = startX + 'px';
+    walker.style.top = startY + 'px';
+    walker.style.setProperty('--av3-dx', (endX - startX).toFixed(1) + 'px');
+    walker.style.setProperty('--av3-dy', (endY - startY).toFixed(1) + 'px');
+    const stop = () => { if (walker.parentNode) walker.remove(); };
+    walker.addEventListener('animationend', stop);
+    setTimeout(stop, 1200);
+    document.body.append(walker);
   }
   const when = (t) => (t || '').slice(0, 16).replace('T', ' ');
   const botBy = (id) => S.bots.find((b) => b.id === id) || { color: '#5B6B88', icon: 'spark', name: id };
@@ -195,8 +290,12 @@ const overlayRoot = (() => {
   function updateTicker() { const t = document.getElementById('ticker'); if (t) t.replaceChildren(...S.activity.slice(0, 6).map((e) => h('div', {}, `${when(e.ts)} · ${e.bot || 'someone'} ${e.kind === 'read' ? 'read' : 'wrote'} "${e.title || 'a note'}"`))); }
   async function send() {
     const text = S.draft.trim(); if (!text || S.busy) return;
+    const before = S.msgs.length;
     S.draft = ''; S.busy = true; S.msgs.push({ role: 'user', content: text }); render();
     await run(async () => { try { const r = await api(`/api/bots/${S.bot.id}/messages`, { method: 'POST', body: { content: text } }); S.msgs.push({ role: 'agent', content: r.reply, note: r.draft_note_id, used: r.used }); } finally { S.busy = false; } });
+    // Walk the little avatar to the bubble only for a live reply (never while history is loading).
+    const last = S.msgs[S.msgs.length - 1];
+    if (last && last.role === 'agent' && S.msgs.length > before) av3WalkToMessage(S.bot);
   }
   async function loadDemo() { await run(async () => { const r = await api('/api/demo/workspace', { method: 'POST' }); await Promise.all([loadBots(), loadNotes(), loadApps(), loadTeams()]); S.menu = false; S.info = `Demo workspace loaded: ${r.agents} agents, ${r.notes} notes, 2 teams, 3 apps. All of it is sample data.`; }); }
 
@@ -1896,21 +1995,21 @@ const overlayRoot = (() => {
   // menu
   function drawer() {
     const f = S.menuQ.trim().toLowerCase();
-    const it = (label, sub, ic, view, fn, count) => ((f && !(label + ' ' + sub).toLowerCase().includes(f)) ? null : h('button', { class: 'ditem', type: 'button', 'aria-current': S.view === view && !S.modal, onclick: fn || (() => go(view)) }, h('span', { class: 'dicon' }, icon(ic, 18)), h('span', { style: 'flex:1' }, label, h('small', {}, sub)), badge(count)));
-    const group = (title, items) => { const real = items.filter(Boolean); return real.length ? [h('h3', {}, title), real] : null; };
+    const it = (label, sub, ic, view, fn, count) => ((f && !(label + ' ' + sub).toLowerCase().includes(f)) ? null : h('button', { class: 'ditem av3-ditem', type: 'button', 'aria-current': S.view === view && !S.modal, onclick: fn || (() => go(view)) }, h('span', { class: 'dicon' }, icon(ic, 18)), h('span', { class: 'av3-ditxt' }, label, h('small', {}, sub)), badge(count)));
+    const group = (title, items) => { const real = items.filter(Boolean); return real.length ? [h('h3', { class: 'av3-dgroup' }, title), real] : null; };
     const quick = h('div', { class: 'quick' }, [['New agent', 'plus', openAgent], ['New note', 'doc', () => { S.newNote = true; S.graph = false; go('brain').then(() => { S.newNote = true; S.graph = false; render(); }); }], ['New call', 'council', () => { S.room = null; go('council'); }], ['Upload file', 'up', () => { pickFile(); go('brain'); }]].map(([l, ic, fn]) => h('button', { type: 'button', class: 'qbtn', onclick: fn }, icon(ic, 18), h('span', {}, l))));
     const q = h('input', { class: 'field', placeholder: 'Search the menu', value: S.menuQ, 'aria-label': 'Search the menu' });
     q.addEventListener('input', () => { S.menuQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search the menu"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
     return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; syncOverlays(true); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
-      h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
-      h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
+      h('div', { class: 'av3-dhead' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
+      h('div', { class: 'm-only' }, h('h3', { class: 'av3-dgroup' }, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem av3-dagent', type: 'button', onclick: () => pick(b.id) }, h('span', { class: 'av3-agentav' }, tile(b, 34)), h('span', { class: 'av3-agenttxt' }, h('b', {}, b.name), h('small', {}, b.role)), S.pinned[b.id] ? h('span', { class: 'av3-pin', title: 'Pinned' }, av3Pin(11)) : null))),
       group('Organisation', [it('Organisation', 'Workspace, members, revenue, announcements', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
       group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Teams', 'Team memory and channels', 'teams', 'teams'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
       group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
-      group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
+      group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem av3-ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', { class: 'av3-ditxt' }, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
       group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
-      h('p', { class: 'muted', style: 'font-size:12px;margin:18px 10px' }, `Shewiun v${S.health.version || '?'}${S.health.build ? ' · build ' + S.health.build : ''}`))];
+      h('p', { class: 'muted av3-dfoot' }, `Shewiun v${S.health.version || '?'}${S.health.build ? ' · build ' + S.health.build : ''}`))];
   }
 
   // ---------- organisation ----------
@@ -2151,18 +2250,31 @@ const overlayRoot = (() => {
       h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(true); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
         h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Search notes', onclick: () => go('brain') }, icon('search')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus'))),
-      h('div', { class: 'agents' }, groups.map((g) => [h('div', { class: 'group' }, g), S.bots.filter((b) => b.team === g)
-        .sort((a, b) => (S.pinned[b.id] ? 1 : 0) - (S.pinned[a.id] ? 1 : 0))
-        .map((b) => h('button', { class: 'agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false,
-            onclick: () => { delete S.unreadA[b.id]; pick(b.id); },
-            oncontextmenu: (e) => { e.preventDefault(); S.ctx = { id: b.id, x: e.clientX, y: e.clientY }; syncOverlays(true); } },
-          tile(b, 38), h('span', {}, h('b', {}, (S.pinned[b.id] ? '• ' : '') + b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role), S.unreadA[b.id] ? h('span', { class: 'udot' }) : null)))])),
+      h('div', { class: 'agents av3-agents' }, groups.map((g) => {
+        const list = S.bots.filter((b) => b.team === g).sort((a, b) => (S.pinned[b.id] ? 1 : 0) - (S.pinned[a.id] ? 1 : 0));
+        return [h('div', { class: 'group av3-group' }, h('span', { class: 'av3-glabel' }, g), h('span', { class: 'av3-gcount', 'aria-hidden': 'true' }, String(list.length))),
+          list.map((b) => h('button', { class: 'agent av3-agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false,
+              title: `${b.name} · ${b.status === 'suspended' ? 'suspended' : b.preview || b.role}`,
+              onclick: () => { delete S.unreadA[b.id]; pick(b.id); },
+              oncontextmenu: (e) => { e.preventDefault(); S.ctx = { id: b.id, x: e.clientX, y: e.clientY }; syncOverlays(true); } },
+            h('span', { class: 'av3-agentav' }, tile(b, 38)),
+            h('span', { class: 'av3-agenttxt' }, h('b', {}, b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role)),
+            S.pinned[b.id] ? h('span', { class: 'av3-pin', title: 'Pinned', 'aria-label': 'Pinned' }, av3Pin(12)) : null,
+            S.unreadA[b.id] ? h('span', { class: 'av3-unread', title: 'Unread', 'aria-label': 'Unread' }) : null))];
+      })),
       meterBlock(),
-      h('button', { class: 'appsbtn', type: 'button', onclick: openApps }, icon('grid', 20), h('span', { style: 'flex:1' }, 'Connect apps', h('small', {}, `${S.sum.apps || 0} connected · MCP`)), h('span', { class: 'chip ok' }, 'MCP')),
+      h('button', { class: 'appsbtn av3-mcp', type: 'button', title: 'Connect apps and MCP servers', onclick: openApps }, icon('grid', 20),
+        h('span', { class: 'av3-mcp-txt' }, h('b', {}, 'Connect apps'), h('small', {}, `${S.sum.apps || 0} connected · MCP`)),
+        h('span', { class: 'av3-mcp-badge' }, h('i', { class: 'av3-dot' + (S.sum.apps ? ' on' : '') }), h('span', { class: 'chip' }, 'MCP'))),
       h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => go('settings'), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
-        h('button', { class: 'acct', type: 'button', 'aria-expanded': S.menu, onclick: () => { S.menu = !S.menu; render(); } }, h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
-          h('span', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner'), h('small', {}, S.me && S.me.user ? S.me.user.email + ' · ' + S.me.role : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')), h('small', {}, hd.model_configured ? 'Model connected' : 'No model, demo replies'), h('small', {}, `v${hd.version || '?'}${hd.build ? ' · ' + hd.build : ''}`)))));
+        h('button', { class: 'acct av3-acct', type: 'button', 'aria-expanded': S.menu, 'aria-label': 'Account menu', onclick: () => { S.menu = !S.menu; render(); } },
+          h('span', { class: 'av3-acctav' }, h('span', { class: 'tile av3-usertile' }, icon('user', 18))),
+          h('span', { class: 'av3-accttxt' }, h('b', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner')),
+            h('small', {}, S.me && S.me.user ? S.me.user.email : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')),
+            h('small', {}, (S.me && S.me.role ? S.me.role + ' · ' : '') + (hd.model_configured ? 'Model connected' : 'No model, demo replies'))),
+          h('span', { class: 'av3-acctchip', title: hd.build ? 'build ' + hd.build : '' }, `v${hd.version || '?'}`),
+          h('span', { class: 'av3-acctchev' }, icon('up', 14)))));
     if (!S.notifs && !S._notifsAsked) { S._notifsAsked = true; loadNotifs().then(() => { if (S.notifs && S.notifs.unread) syncOverlays(); }); }
     const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
