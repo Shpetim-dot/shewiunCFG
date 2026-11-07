@@ -774,7 +774,7 @@ def invite(item: InviteIn, request: Request) -> dict[str, Any]:
     email = _norm_email(item.email)
     if item.role not in ROLES or item.role == "super_admin":
         raise HTTPException(422, "unknown role")
-    if rank(item.role) >= rank(p["role"]) and p["role"] != "super_admin":
+    if rank(item.role) >= rank(p["role"]) and p["role"] != "super_admin" and not (p["role"] == "owner" and item.role == "owner"):
         raise HTTPException(403, "you cannot invite a role at or above your own")
     from app import billing
     billing.check_count("seats", billing.member_count_org(p["org_id"]), 1)
@@ -822,7 +822,7 @@ def set_role(user_id: str, item: RoleIn, request: Request) -> dict[str, Any]:
         raise HTTPException(422, "unknown role")
     if item.role == "super_admin" and p["role"] != "super_admin":
         raise HTTPException(403, "only a super admin can create super admins")
-    if rank(item.role) >= rank(p["role"]) and p["role"] != "super_admin":
+    if rank(item.role) >= rank(p["role"]) and p["role"] != "super_admin" and not (p["role"] == "owner" and item.role == "owner"):
         raise HTTPException(403, "you cannot grant a role at or above your own")
     with db() as con:
         target = con.execute("SELECT * FROM users WHERE id=? AND org_id=?", (user_id, p["org_id"])).fetchone()
@@ -830,6 +830,14 @@ def set_role(user_id: str, item: RoleIn, request: Request) -> dict[str, Any]:
             raise HTTPException(404, "member not found")
         if target["role"] == "owner" and p["role"] not in ("owner", "super_admin"):
             raise HTTPException(403, "only the owner can change the owner")
+        # Never allow the workspace to end up without an owner: self-demotion is permitted,
+        # so one mis-click could otherwise lock everyone out of owner-only settings. Promote
+        # a second owner first (owners may now invite/promote another owner).
+        if target["role"] == "owner" and item.role != "owner":
+            owners = con.execute("SELECT COUNT(*) FROM users WHERE org_id=? AND role='owner' AND status='active'",
+                                 (p["org_id"],)).fetchone()[0]
+            if owners <= 1:
+                raise HTTPException(409, "this is the last owner; promote another owner before changing this role")
         con.execute("UPDATE users SET role=?, updated_at=? WHERE id=?", (item.role, _now(), user_id))
         con.execute("UPDATE sessions SET revoked=1 WHERE user_id=?", (user_id,))  # role change invalidates sessions
     _audit("org.role_changed", p["name"], {"user_id": user_id, "from": target["role"], "to": item.role})

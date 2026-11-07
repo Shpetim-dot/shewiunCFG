@@ -258,8 +258,10 @@ def test_members_are_scoped_to_their_organisation(tmp_path, monkeypatch):
     assert {m["email"] for m in members_b} == {"b@example.com"}
     assert {m["email"] for m in members_a} == {"owner@example.com"}
     a_user = members_a[0]["id"]
+    # The last owner cannot demote themselves into a lockout; other role changes are covered above.
+    assert c.patch(f"/api/org/members/{a_user}", json={"role": "viewer"}, headers=csrf(c)).status_code == 409
     # tenant A cannot see or modify tenant B's member
-    assert c.patch(f"/api/org/members/{a_user}", json={"role": "viewer"}, headers=csrf(c)).status_code == 200
+    assert other.patch(f"/api/org/members/{a_user}", json={"role": "viewer"}, headers=csrf(other)).status_code == 404
     assert other.delete(f"/api/org/members/{a_user}", headers=csrf(other)).status_code == 404
 
 
