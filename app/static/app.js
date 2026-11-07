@@ -253,6 +253,8 @@ const overlayRoot = (() => {
   const stopSim = () => { if (sim && sim.raf) cancelAnimationFrame(sim.raf); sim = null; };
   const stopAct = () => { if (actTimer) clearInterval(actTimer); actTimer = null; };
   async function go(view) {
+    // Settings is a dialog now, not a screen. Old links keep working and land on the same overlay.
+    if (view === 'settings') { openSettings(); return; }
     stopAct(); S.view = view; S.drawer = false; S.menu = false; S.err = ''; S.info = ''; if (view !== 'council') S.room = null; render();
     await run(async () => {
       if (view === 'brain') { await loadNotes(); await loadBots(); S.graph = S.notes.length > 0; if (!S.note && S.notes[0]) await openNote(S.notes[0].id, true); S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
@@ -261,7 +263,6 @@ const overlayRoot = (() => {
       if (view === 'org') { await loadOrg(); if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; } }
       if (view === 'teams') { await Promise.all([loadTeams(), loadBots()]); await loadChannelIndex(); } else if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; }
       if (view === 'plans') S.bill = await api('/api/billing');
-      if (view === 'settings') { for (const [k, u] of [['models', '/api/models'], ['keys', '/api/admin/keys'], ['backups', '/api/admin/backups']]) { try { S[k] = await api(u); } catch (e) { S.err = e.message; } } try { S.ready = await (await fetch('/api/health/ready')).json(); } catch {} try { S.ssearch = await api('/api/search/status'); } catch {} }
       if (view === 'control') { try { S.leads = await api('/api/leads'); S.funnel = await api('/api/events/summary'); } catch {} }
       if (view === 'inventory') { S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }
       if (view === 'usage') { [S.usage, S.provs, S.prices, S.cu] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices'), api('/api/computer-use/status')]); }
@@ -690,7 +691,7 @@ const overlayRoot = (() => {
         if (k[key]) sadd(s, 'path', { d: `M ${cx} ${cy} L ${x1} ${y1} A ${rr} ${rr} 0 ${a > Math.PI ? 1 : 0} 1 ${x2} ${y2} Z`, fill: color });
         ang += a;
       });
-      sadd(s, 'circle', { cx: cx, cy: cy, r: rr * 0.55, fill: 'var(--panel, #fff)' });
+      sadd(s, 'circle', { cx: cx, cy: cy, r: rr * 0.55, fill: 'var(--surface)' });
       sadd(s, 'text', { x: cx, y: cy + 4, 'text-anchor': 'middle', 'font-size': 12, fill: 'currentColor' }, String(tot));
       return s;
     };
@@ -761,9 +762,9 @@ const overlayRoot = (() => {
           value: S.rsub || '', 'aria-label': 'Template subject' }),
         btn('Clear template', () => { S.rmode = null; S.rsub = ''; S.rq = ''; render(); }, 'link')) : null,
       h('div', { class: 'rbox' }, q, qhint, cx), h('div', { class: 'row2', style: 'margin:10px 0;flex-wrap:wrap' }, depthChips,
-        chip((S.rweb && webReady ? 'Web: on - ' + (S.ssearch ? S.ssearch.provider : 'search') : 'Web: off'), S.rweb && webReady, () => { if (!webReady) { go('settings'); return; } S.rweb = !S.rweb; render(); }, false),
-        webReady ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'No search key in this running instance - set CFA_SEARCH_API_KEY and redeploy, then check Settings > Web search > Test key. ',
-          btn('Open settings', () => go('settings'), 'link')), h('span', { class: 'sp' }), rbtn),
+        chip((S.rweb && webReady ? 'Web: on - ' + (S.ssearch ? S.ssearch.provider : 'search') : 'Web: off'), S.rweb && webReady, () => { if (!webReady) { openSettings('search'); return; } S.rweb = !S.rweb; render(); }, false),
+        webReady ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'No search key in this running instance - set CFA_SEARCH_API_KEY and redeploy, then check Settings > Search > Test key. ',
+          btn('Open settings', () => openSettings('search'), 'link')), h('span', { class: 'sp' }), rbtn),
       r ? h('div', { class: 'room' }, h('div', {},
         r.running ? h('div', { class: 'card research-run' },
           h('div', { class: 'row2' }, h('b', {}, 'Research in progress'), h('span', { class: 'chip warn' }, r.agent ? r.agent.name : 'planning'), h('span', { class: 'sp' }),
@@ -2689,81 +2690,290 @@ const overlayRoot = (() => {
           btn('Not now', closeUp)),
         h('p', { class: 'muted planx-fine' }, 'Continue opens Stripe Checkout for this invoice. The subscription is billed monthly and you can cancel anytime.')));
   }
+  // ---------- app settings (dialog) ----------
+  // The settings are an overlay, not a screen: a left navigation (like the reference recording) and a
+  // content pane. Every action reuses the existing settings APIs; nothing is simulated.
+  const SET_SECTIONS = [
+    { id: 'readiness', label: 'Readiness', icon: 'shield', hint: 'Health and checks' },
+    { id: 'models', label: 'Models', icon: 'spark', hint: 'Providers and test' },
+    { id: 'search', label: 'Search', icon: 'lens', hint: 'Web search key' },
+    { id: 'keys', label: 'Access keys', icon: 'table', hint: 'API tokens' },
+    { id: 'mfa', label: 'Two-factor', icon: 'user', hint: 'Authenticator codes' },
+    { id: 'data', label: 'Backups & data', icon: 'doc', hint: 'Backups and retention' },
+    { id: 'danger', label: 'Danger', icon: 'x', hint: 'Destructive actions' },
+  ];
+  const settingsIsAdmin = () => ['owner', 'admin', 'super_admin'].includes((S.me && S.me.role) || '');
+  const setRow = (label, desc, control) => h('div', { class: 'set2-row' },
+    h('div', { class: 'set2-rowmain' }, h('b', {}, label), desc ? h('div', { class: 'muted set2-rowdesc' }, desc) : null),
+    control ? h('div', { class: 'set2-controls' }, control) : null);
+  const setCard = (...rows) => h('div', { class: 'set2-card' }, rows);
+  const setGroup = (title, ...kids) => h('div', { class: 'set2-group' }, title ? h('div', { class: 'set2-grouplabel' }, title) : null, ...kids);
+  const setFine = (text) => h('p', { class: 'muted set2-fine' }, text);
+
+  function settingsForm(action) {
+    return async () => {
+      S.err = ''; S.setInfo = '';
+      try { await action(); } catch (e) { S.err = e.message; }
+      syncOverlays(true);
+    };
+  }
+
+  function openSettings(section) {
+    if (S.setSection === undefined) S.setSection = 'readiness';
+    if (section) S.setSection = section;
+    S.modal = 'settings';
+    S.drawer = false; S.menu = false;
+    S.err = ''; S.setInfo = ''; S.setArm = false; S.setLoading = true;
+    render();  // closes the account popup / drawer before the dialog appears
+    loadSettingsData().catch(() => { S.setLoading = false; syncOverlays(true); });
+  }
+
+  async function loadSettingsData() {
+    S.setLoading = true; S.setLoadErr = ''; syncOverlays(true);
+    const errs = [];
+    try { S.health = await api('/api/health'); } catch (e) { errs.push('Health: ' + e.message); }
+    try { S.me = await api('/api/auth/me'); } catch (e) { errs.push('Account: ' + e.message); }
+    try { S.ssearch = await api('/api/search/status'); } catch (e) { errs.push('Search status: ' + e.message); }
+    try { S.ready = await (await fetch('/api/health/ready')).json(); } catch (e) { errs.push('Readiness: ' + e.message); }
+    if (settingsIsAdmin()) {
+      for (const [k, u] of [['models', '/api/models'], ['keys', '/api/admin/keys'], ['backups', '/api/admin/backups']]) {
+        try { S[k] = await api(u); } catch (e) { errs.push(u + ': ' + e.message); }
+      }
+    }
+    S.setLoadErr = errs.join(' · ');
+    S.setLoading = false;
+    syncOverlays(true);
+  }
+
+  function settingsModal() {
+    if (!S.mtest) S.mtest = { model: '', out: '' };
+    if (S.ret == null) S.ret = 90;
+    const active = S.setSection || 'readiness';
+    const admin = settingsIsAdmin();
+    const closeS = () => { S.modal = null; S.err = ''; S.setInfo = ''; S.setArm = false; syncOverlays(true); };
+    const goSection = (id) => {
+      S.setSection = id;
+      S.setInfo = ''; S.err = '';  // a status from the previous section would be confusing here
+      syncOverlays(true);
+      if (window.matchMedia('(max-width: 760px)').matches) {
+        requestAnimationFrame(() => { const el = document.getElementById('set2-sec-' + id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+      }
+    };
+    const nav = h('nav', { class: 'set2-nav', 'aria-label': 'Settings sections' }, SET_SECTIONS.map((s) => btn(
+      [icon(s.icon, 17), h('span', { class: 'set2-navtext' }, h('b', {}, s.label), h('small', {}, s.hint))],
+      () => goSection(s.id), 'set2-navbtn',
+      { 'aria-current': active === s.id ? 'true' : 'false', 'aria-label': 'Settings section: ' + s.label })));
+    const section = (id, title, sub, ...kids) => h('section', { class: 'set2-sec' + (active === id ? ' on' : ''), id: 'set2-sec-' + id, 'aria-label': title },
+      h('h3', { class: 'set2-sectitle' }, title), sub ? h('p', { class: 'muted set2-secsub' }, sub) : null, ...kids);
+    const adminOnly = (what) => h('div', { class: 'set2-card' }, h('div', { class: 'set2-row' }, h('div', { class: 'set2-rowmain' },
+      h('b', {}, 'Admin only'), h('div', { class: 'muted' }, `Only owners and admins can manage ${what} on this deployment. You can still review the other sections.`))));
+    const missing = (what) => setFine(S.setLoading ? 'Loading…' : `${what} is not available right now. Use “Reload” at the top right.`);
+
+    // Readiness
+    const ready = S.ready;
+    const checkRow = (label, ok, detail) => setRow(label, detail, h('span', { class: 'chip ' + (ok ? 'ok' : 'warn') }, ok ? 'ok' : 'needs attention'));
+    const readinessSec = section('readiness', 'Readiness', 'Live checks of this installation. Every value comes from the server; nothing is cached here.',
+      setGroup('Checks', setCard(
+        checkRow('Readiness probe', !!(ready && ready.ready), ready ? ((ready.errors || []).length ? ready.errors.join('; ') : 'No configuration errors reported.') : 'Checking…'),
+        checkRow('Model provider', !!S.health.model_configured, 'Set CFA_MODEL_API_KEY (and optionally CFA_MODEL_BASE_URL) on the host. Without a key, agents answer with demo text.'),
+        checkRow('Web search', !!S.health.search_configured, 'Needed for live citations in deep research. Configure it in the Search section.'),
+        checkRow('Encryption key', !!S.health.secret_key_configured, 'CFA_SECRET_KEY encrypts provider keys and the stored search key.'),
+        checkRow('Mail delivery', !!S.health.mail_configured, 'Needed for invitations and password resets. Without SMTP, invitations are printed to the server log.'))),
+      setGroup('Instance', setCard(
+        setRow('Version', (S.health.app || 'Shewiun CFA') + ' ' + (S.health.version || '?') + (S.health.build ? ' · build ' + S.health.build : '')),
+        setRow('Access mode', S.health.auth === 'disabled' ? 'Open development mode: every request counts as the workspace owner.' : 'Email and password with sessions; API keys can exist next to accounts.', h('span', { class: 'chip' }, S.health.auth_mode || S.health.auth || 'unknown')),
+        setRow('Password hashing', S.health.password_hash || 'unknown'),
+        setRow('Storage', (S.health.storage || 'unknown') + (S.health.storage_warning ? ' · ' + S.health.storage_warning : ''), S.health.storage === 'ephemeral_sqlite' ? h('span', { class: 'chip warn' }, 'ephemeral') : null))),
+      setGroup('Warnings', (S.health.warnings || []).length
+        ? h('ul', { class: 'set2-list' }, (S.health.warnings || []).map((w) => h('li', {}, w)))
+        : setFine('No setup warnings right now.')),
+      h('div', { class: 'set2-actions' }, btn([icon('check', 14), 'Re-check now'], settingsForm(() => loadSettingsData()), 'btn')));
+
+    // Models
+    const mi = h('input', { class: 'field set2-input', value: S.mtest.model || '', placeholder: 'default, or hf:MiniMaxAI/MiniMax-M2', 'aria-label': 'Model to test' });
+    mi.addEventListener('input', () => { S.mtest.model = mi.value; });
+    const modelRows = (S.models ? S.models.providers : []).map((p) => setRow(p.name, [p.model, p.host, p.env].filter(Boolean).join(' · '),
+      h('span', { class: 'chip ' + (p.configured ? 'ok' : 'warn') }, p.configured ? 'key set' : 'no key')));
+    const modelsSec = section('models', 'Models', 'Provider keys live in the host environment and are resolved on every call. Nothing is stored in this dialog.',
+      !admin ? adminOnly('model providers') : [
+        setGroup('Providers', S.models ? setCard(...modelRows) : missing('Provider data')),
+        setGroup('Test a model', setCard(setRow('Connection check', 'Sends one short completion through the configured provider. Without a key it reports that instead of pretending.',
+          h('div', { class: 'row2 set2-inline' }, mi, btn('Test connection', settingsForm(async () => {
+            const r = await api('/api/models/test', { method: 'POST', body: { model: (S.mtest.model || '').trim() || null } });
+            S.mtest.out = r.ok ? `OK: ${r.provider} / ${r.model} answered in ${r.ms} ms` : `Not working: ${r.message}`;
+            S.setInfo = r.ok ? 'The model answered.' : 'The model did not answer; see the result below.';
+          }), 'btn primary'))))),
+        S.mtest.out ? h('div', { class: 'pre set2-out' }, S.mtest.out) : null,
+        S.models ? setGroup('Open models to try', h('div', { class: 'row2 set2-chips' }, S.models.suggested.map((x) =>
+          btn(x.name, () => { S.mtest.model = x.id; syncOverlays(true); }, 'chip', { title: x.note })))) : null,
+        S.models && S.models.free_tier_note ? setFine(S.models.free_tier_note) : null,
+        setFine('Environment: CFA_MODEL_BASE_URL, CFA_MODEL_API_KEY, CFA_MODEL_NAME, HF_TOKEN. Set the model per agent in the agent panel.')]);
+
+    // Search
+    const s = S.ssearch;
+    const searchProviders = ['', ...new Set([...((s && s.providers) || []), 'brave', 'tavily', 'google', 'exa'])];
+    const provSel = h('select', { class: 'field set2-select', id: 'set2-sprov', 'aria-label': 'Search provider' },
+      searchProviders.map((v) => h('option', { value: v, selected: !!(s && s.provider === v) }, v || 'auto detect')));
+    const keyIn = h('input', { class: 'field set2-input', id: 'set2-skey', type: 'password', placeholder: 'Search API key (stored encrypted)', autocomplete: 'off', 'aria-label': 'Search API key' });
+    const canSaveSearch = s && s.key_source !== 'environment';
+    const searchSec = section('search', 'Search', 'Deep research can cite live web pages. A key from the environment wins over the encrypted key saved here.',
+      !admin ? adminOnly('the web search configuration') : [
+        setGroup('Status', s ? setCard(
+          setRow('Provider', s.note || '', h('span', { class: 'chip ' + (s.configured ? 'ok' : 'warn') }, s.provider || 'unknown')),
+          setRow('Key source', s.key_source === 'environment' ? 'A key from the environment is active and takes precedence.' : s.key_source === 'database' ? 'A key saved in this workspace (encrypted) is active.' : 'No search key is configured, so research uses your Brain only.',
+            h('span', { class: 'chip ' + (s.key_source === 'none' ? 'warn' : 'ok') }, s.key_source || 'none')),
+          s.provider === 'google' ? setRow('Google CSE id', 'Google Custom Search needs CFA_SEARCH_CX as well as the API key.', h('span', { class: 'chip ' + (s.google_cx_set ? 'ok' : 'warn') }, s.google_cx_set ? 'set' : 'missing')) : null) : missing('Search status')),
+        canSaveSearch ? setGroup('Save a provider or key', setCard(
+          setRow('Provider', 'Auto detect guesses from the key prefix.', provSel),
+          setRow('API key', 'Stored encrypted with CFA_SECRET_KEY. Leave empty to change only the provider.', keyIn),
+          h('div', { class: 'set2-actions' },
+            btn('Save settings', settingsForm(async () => {
+              const provider = (document.getElementById('set2-sprov') || {}).value || '';
+              const api_key = (document.getElementById('set2-skey') || {}).value || '';
+              if (!provider && !api_key) { S.setInfo = 'Choose a provider or paste an API key first.'; return; }
+              await api('/api/search/config', { method: 'PUT', body: { provider, api_key } });
+              S.ssearch = await api('/api/search/status');
+              S.stest = null;
+              S.setInfo = 'Search settings saved.';
+            }), 'btn primary'),
+            btn('Test key', settingsForm(async () => { S.stest = await api('/api/search/test', { method: 'POST' }); })),
+            btn('Check configuration', settingsForm(async () => { S.ssearch = await api('/api/search/status'); S.stest = null; S.setInfo = 'Configuration re-read.'; })),
+            s.key_source === 'database' ? btn('Remove stored key', settingsForm(async () => { await api('/api/search/config', { method: 'DELETE' }); S.ssearch = await api('/api/search/status'); S.stest = null; S.setInfo = 'Stored search key removed.'; }), 'link') : null))) : null,
+        S.stest ? h('div', { class: 'set2-card set2-testresult' }, setRow('Search test', S.stest.detail + (S.stest.hint ? ' ' + S.stest.hint : '') + (S.stest.results ? ' (' + S.stest.results + ' results in ' + S.stest.ms + ' ms)' : ''),
+          h('span', { class: 'chip ' + (S.stest.ok ? 'ok' : 'warn') }, S.stest.ok ? 'works' : 'problem')),
+          (S.stest.sample || []).length ? h('ul', { class: 'set2-list' }, S.stest.sample.map((x) => h('li', {}, x.title))) : null) : null,
+        s && s.key_source === 'environment' ? setFine('The active key comes from the environment. Change it on the host, not here.') : null]);
+
+    // Access keys
+    const kname = h('input', { class: 'field set2-input', placeholder: 'Key name, for example Alice laptop', maxlength: 40, 'aria-label': 'Key name' });
+    const krole = h('select', { class: 'field set2-select', style: 'width:auto', 'aria-label': 'Key role' }, ['member', 'admin', 'viewer'].map((r) => h('option', {}, r)));
+    const keysSec = section('keys', 'Access keys', 'Tokens for scripts and integrations. Stored only as a hash; a new token is shown once.',
+      !admin ? adminOnly('access keys') : [
+        S.newKey ? h('div', { class: 'set2-newkey' }, h('b', {}, 'New token for ' + S.newKey.name + ' (' + S.newKey.role + ')'), h('div', { class: 'pre' }, S.newKey.token), setFine('Copy it now. It cannot be shown again.')) : null,
+        setGroup('Existing keys', S.keys ? setCard(S.keys.keys.length ? S.keys.keys.map((x) => setRow(x.name, (x.role || '') + ' · used ' + (when(x.last_used) || 'never'),
+          x.revoked ? h('span', { class: 'chip warn' }, 'revoked') : btn('Revoke', settingsForm(async () => {
+            await api('/api/admin/keys/' + x.id, { method: 'DELETE' });
+            S.keys = await api('/api/admin/keys');
+            S.setInfo = 'Key revoked.';
+          }), 'link'))) : h('div', { class: 'set2-row' }, h('div', { class: 'set2-rowmain muted' }, 'No access keys yet.'))) : missing('Access keys')),
+        S.keys && S.keys.env_keys ? setFine(S.keys.env_keys + ' key(s) come from the environment and cannot be revoked here.') : null,
+        setGroup('Create a key', setCard(setRow('New key', 'Use the smallest role that can do the job.', h('div', { class: 'row2 set2-inline' }, kname, krole,
+          btn('Create key', settingsForm(async () => {
+            const name = (kname.value || '').trim();
+            if (name.length < 2) { S.setInfo = 'Give the key a name of at least 2 characters.'; return; }
+            S.newKey = await api('/api/admin/keys', { method: 'POST', body: { name, role: krole.value } });
+            S.keys = await api('/api/admin/keys');
+            S.setInfo = 'Access key created.';
+          }), 'btn primary'))))) ]);
+
+    // Two-factor
+    const me = S.me || {}, user = me.user || null;
+    const mfaSetupForm = S.mfaSetup ? h('div', { class: 'set2-card set2-mfa' },
+      h('div', { class: 'set2-row' }, h('div', { class: 'set2-rowmain' }, h('b', {}, 'Add this secret to your authenticator app (Base32)'), h('div', { class: 'pre' }, S.mfaSetup.secret))),
+      h('div', { class: 'set2-row' }, h('div', { class: 'set2-rowmain' }, h('b', {}, 'otpauth link'), h('div', { class: 'mono set2-break' }, S.mfaSetup.otpauth))),
+      h('div', { class: 'set2-row' }, h('div', { class: 'set2-rowmain' }, h('b', {}, 'Confirm with a code'),
+        h('input', { class: 'field set2-input', id: 'set2-mfa-on-code', placeholder: '6-digit code from the app', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12, 'aria-label': 'Authenticator code to activate' })),
+        h('div', { class: 'set2-controls' }, btn('Activate 2FA', settingsForm(async () => {
+          const code = (document.getElementById('set2-mfa-on-code') || {}).value || '';
+          const r = await api('/api/auth/mfa/enable', { method: 'POST', body: { code } });
+          S.mfaCodes = r.recovery_codes; S.mfaSetup = null;
+          S.me = await api('/api/auth/me');
+          S.setInfo = 'Two-factor is active. Save the recovery codes now.';
+        }), 'btn primary')))) : null;
+    const mfaOff = (user && user.mfa_enabled) ? h('details', { class: 'set2-details' }, h('summary', { class: 'muted' }, 'Disable two-factor'),
+      h('div', { class: 'set2-card' },
+        h('div', { class: 'set2-row' }, h('div', { class: 'set2-rowmain' }, h('b', {}, 'Password'), h('input', { class: 'field set2-input', id: 'set2-mfa-off-pw', type: 'password', placeholder: 'Password', autocomplete: 'current-password', 'aria-label': 'Password to disable two-factor' }))),
+        h('div', { class: 'set2-row' }, h('div', { class: 'set2-rowmain' }, h('b', {}, 'Authenticator or recovery code'), h('input', { class: 'field set2-input', id: 'set2-mfa-off-code', placeholder: 'Authenticator or recovery code', autocomplete: 'one-time-code', 'aria-label': 'Code to disable two-factor' })),
+          h('div', { class: 'set2-controls' }, btn('Disable 2FA', settingsForm(async () => {
+            const password = (document.getElementById('set2-mfa-off-pw') || {}).value || '';
+            const code = (document.getElementById('set2-mfa-off-code') || {}).value || '';
+            await api('/api/auth/mfa/disable', { method: 'POST', body: { password, code } });
+            S.me = await api('/api/auth/me');
+            S.setInfo = 'Two-factor has been disabled.';
+          }), 'btn'))))) : null;
+    const mfaSec = section('mfa', 'Two-factor', 'Optional TOTP second factor for your account. Works with any RFC 6238 authenticator app.',
+      !user ? setFine('This deployment runs without user accounts (open development mode), so there is no account to protect with two-factor.') : [
+        setGroup('Your account', setCard(setRow('Status', user.mfa_enabled ? 'Two-factor is active for ' + (user.email || 'this account') + '.' : 'Two-factor is not enabled for this account.',
+          h('span', { class: 'chip ' + (user.mfa_enabled ? 'ok' : 'warn') }, user.mfa_enabled ? 'active' : 'not enabled')))),
+        !user.mfa_enabled && !S.mfaSetup ? h('div', { class: 'set2-actions' }, btn('Set up 2FA', settingsForm(async () => {
+          S.mfaSetup = await api('/api/auth/mfa/setup', { method: 'POST' });
+          S.setInfo = 'Scan or copy the secret, then confirm with a code.';
+        }), 'btn primary')) : null,
+        mfaSetupForm,
+        mfaOff,
+        (S.mfaCodes || []).length ? h('div', { class: 'set2-card set2-newkey' }, h('b', {}, 'Recovery codes — save them now'), h('div', { class: 'pre' }, S.mfaCodes.join('\n')), setFine('Each code works exactly once. They cannot be shown again.')) : null]);
+
+    // Backups and data
+    const days = h('input', { class: 'field set2-days', type: 'number', min: 7, max: 3650, value: S.ret, id: 'set2-ret', 'aria-label': 'Retention days' });
+    days.addEventListener('input', () => { S.ret = +days.value; });
+    const dataSec = section('data', 'Backups & data', 'Copy the whole database, export the organisation and bound how long activity is kept.',
+      !admin ? adminOnly('backups, exports and retention') : [
+        setGroup('Backups', setCard(
+          setRow('Create a backup', 'A consistent snapshot of the database. Copy it off the host; keep three copies.', h('div', { class: 'row2 set2-inline' },
+            btn('Back up now', settingsForm(async () => {
+              const r = await api('/api/admin/backup', { method: 'POST' });
+              S.backups = await api('/api/admin/backups');
+              S.setInfo = 'Backup created: ' + r.name + ' (' + Math.round((r.bytes || 0) / 1024) + ' KB).';
+            }), 'btn primary'),
+            btn('Export all data (JSON)', settingsForm(async () => { await dl('/api/admin/export', 'cfa-export.json'); })))),
+          (S.backups || []).length
+            ? h('div', { class: 'set2-backups' }, (S.backups || []).slice(0, 8).map((x) => h('div', { class: 'set2-backuprow' }, h('span', { class: 'mono set2-backupname' }, x.name), h('span', { class: 'muted' }, Math.round(x.bytes / 1024) + ' KB'), btn('Download', settingsForm(async () => { await dl('/api/admin/backups/' + x.name, x.name); }), 'link'))))
+            : setFine('No backups on this host yet.'))),
+        setGroup('Retention', setCard(setRow('Delete activity older than', 'Removes chats, activity, calls and research older than this many days. The audit log is never purged.', h('div', { class: 'row2 set2-inline' }, days, h('span', { class: 'muted' }, 'days'),
+          btn('Run retention', settingsForm(async () => {
+            const d = Math.round(Number(S.ret));
+            if (!Number.isFinite(d) || d < 7 || d > 3650) { S.setInfo = 'Enter a number of days between 7 and 3650.'; return; }
+            const r = await api('/api/admin/retention', { method: 'POST', body: { days: d } });
+            S.setInfo = 'Deleted: ' + (Object.entries(r.deleted || {}).map(([a, n]) => `${a} ${n}`).join(', ') || 'nothing') + '.';
+          }), 'btn'))))) ]);
+
+    // Danger
+    const org = S.me && S.me.org;
+    const removeDemo = () => {
+      if (!S.setArm) { S.setArm = true; S.setInfo = 'Click “Remove sample data” again to confirm. This cannot be undone.'; syncOverlays(true); return; }
+      S.setArm = false;
+      settingsForm(async () => {
+        await api('/api/demo/workspace', { method: 'DELETE' });
+        await Promise.all([loadBots(), loadNotes(), loadTeams(), loadApps()]);
+        render();
+        S.setInfo = 'Demo workspace data removed.';
+      })();
+    };
+    const orgSlugInp = h('input', { class: 'field set2-input', id: 'set2-org-slug', placeholder: org ? org.slug : 'organisation slug', 'aria-label': 'Organisation slug to confirm' });
+    const dangerSec = section('danger', 'Danger', 'Destructive actions. Each one asks for confirmation once more; the audit log records what is deleted.',
+      !admin ? adminOnly('the danger actions') : [
+        setGroup('Sample data', setCard(setRow('Remove the demo workspace data', 'Deletes the agents, notes and teams created by “Load demo workspace”. Your own agents and notes stay.',
+          btn(S.setArm ? 'Click again to remove sample data' : 'Remove sample data', removeDemo, 'btn')))),
+        setGroup('Organisation', setCard(
+          !org ? setRow('No organisation', 'This deployment runs in open development mode without user accounts, so there is no organisation to delete.', h('span', { class: 'chip' }, 'n/a'))
+            : me.role !== 'owner' ? setRow('Delete the organisation', 'Only the owner can delete the organisation and everything in it.', h('span', { class: 'chip warn' }, 'owner only'))
+              : setRow('Delete the organisation', 'Deletes every agent, note, call, audit event and member of this organisation. This cannot be undone.',
+                h('div', { class: 'row2 set2-inline' }, orgSlugInp, btn('Delete organisation', settingsForm(async () => {
+                  const typed = (orgSlugInp.value || '').trim().toLowerCase();
+                  if (typed !== org.slug) { S.setInfo = 'Type the organisation slug (' + org.slug + ') to confirm.'; return; }
+                  await api('/api/org?confirm=' + encodeURIComponent(org.slug), { method: 'DELETE' });
+                  location.reload();
+                }), 'btn'))))) ]);
+
+    return h('div', { class: 'scrim set2-scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) closeS(); } },
+      h('div', { class: 'modal set2-modal', role: 'dialog', 'aria-label': 'Settings' },
+        h('div', { class: 'set2-head' },
+          h('div', { class: 'set2-headtext' }, h('h2', { class: 'set2-title' }, 'Settings'), h('p', { class: 'set2-sub' }, 'Workspace configuration for models, search, access and data.')),
+          h('div', { class: 'set2-headbtns' }, btn('Reload', settingsForm(() => loadSettingsData()), 'chip', { 'aria-label': 'Reload settings data' }), btn([icon('x', 16)], closeS, 'chip set2-close', { 'aria-label': 'Close settings' }))),
+        h('div', { class: 'set2-body' }, nav,
+          h('div', { class: 'set2-content' },
+            S.setLoading ? h('div', { class: 'set2-loading' }, h('span', { class: 'chip' }, 'Loading…')) : null,
+            S.setLoadErr ? h('div', { class: 'banner set2-banner', role: 'alert' }, 'Some settings could not be loaded: ' + S.setLoadErr) : null,
+            S.err ? h('div', { class: 'banner set2-banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null,
+            S.setInfo ? h('div', { class: 'banner set2-banner', role: 'status' }, S.setInfo) : null,
+            readinessSec, modelsSec, searchSec, keysSec, mfaSec, dataSec, dangerSec))));
+  }
+
+  // Settings used to be a full screen. It is a dialog now; this honest fallback is only reachable if
+  // some old code sets S.view = 'settings' directly instead of calling openSettings().
   function settingsView() {
-    const m = S.models, k = S.keys, mt = S.mtest;
-    const kname = h('input', { class: 'field', placeholder: 'Key name, for example Alice laptop', maxlength: 40, 'aria-label': 'Key name' }), krole = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Key role' }, ['member', 'admin', 'viewer'].map((r) => h('option', {}, r)));
-    const mi = h('input', { class: 'field', placeholder: 'Model id, for example hf:MiniMaxAI/MiniMax-M2', value: mt.model, 'aria-label': 'Model to test' }); mi.addEventListener('input', () => { mt.model = mi.value; });
-    const days = h('input', { class: 'field', type: 'number', min: 7, max: 3650, value: S.ret, style: 'width:110px', 'aria-label': 'Retention days' }); days.addEventListener('input', () => { S.ret = +days.value; });
-    const jump = (id, label, ic) => btn([icon(ic, 14), label], () => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 'chip');
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Settings'),
-      h('div', { class: 'row2', style: 'flex-wrap:wrap;margin:4px 0 14px' },
-        jump('set-health', 'Readiness', 'shield'), jump('set-models', 'Models', 'spark'), jump('set-keys', 'API keys', 'table'),
-        jump('set-backups', 'Backups & data', 'table'), jump('set-danger', 'Danger zone', 'x')),
-      h('div', { class: 'card', id: 'set-health', style: 'margin-bottom:14px' }, h('b', {}, 'Readiness'), S.ready ? h('p', {}, h('span', { class: 'chip ' + (S.ready.ready ? 'ok' : 'warn') }, S.ready.ready ? 'ready' : 'not ready'), ' ', S.ready.errors.join('; ')) : null, (S.health.warnings || []).map((w) => h('div', { class: 'muted' }, w))),
-      h('div', { class: 'card', id: 'set-models', style: 'margin-bottom:14px' }, h('b', {}, 'Models'), h('p', { class: 'muted' }, 'Agents use any OpenAI-compatible endpoint, and open models through Hugging Face Inference Providers (prefix hf:). Keys are environment variables and are never shown here.'),
-        m ? m.providers.map((p) => h('div', { class: 'kv' }, h('span', {}, p.name), h('span', { class: 'chip ' + (p.configured ? 'ok' : 'warn') }, p.configured ? 'key set' : 'no key'))) : null, m ? h('p', { class: 'muted' }, m.free_tier_note) : null,
-        h('div', { class: 'muted', style: 'margin-top:8px' }, 'Open models to try (click to fill):'), m ? h('div', { class: 'row2' }, m.suggested.map((x) => btn(x.name, () => { mt.model = x.id; render(); }, 'chip', { title: x.note }))) : null,
-        h('div', { class: 'row2', style: 'margin-top:10px' }, mi, btn('Test connection', () => run(async () => { const r = await api('/api/models/test', { method: 'POST', body: { model: mt.model || null } }); mt.out = r.ok ? `OK: ${r.provider} / ${r.model} answered in ${r.ms} ms` : `Not working: ${r.message}`; }), 'btn primary')), mt.out ? h('div', { class: 'pre' }, mt.out) : null,
-        h('p', { class: 'muted', style: 'font-size:12px' }, 'Set the model per agent in the agent panel. Default: CFA_MODEL_BASE_URL, CFA_MODEL_API_KEY, CFA_MODEL_NAME. Hugging Face: HF_TOKEN.')),
-      h('div', { class: 'card', style: 'margin-bottom:14px' }, h('b', {}, 'Web search'),
-        h('p', { class: 'muted' }, 'Deep research can cite live web pages. The provider and key are environment variables (CFA_SEARCH_PROVIDER, CFA_SEARCH_API_KEY); Google also needs CFA_SEARCH_CX.'),
-        S.ssearch ? h('div', { class: 'row2', style: 'flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.ssearch.configured ? 'ok' : 'warn') }, S.ssearch.provider + (S.ssearch.configured ? ' - key set' : ' - no key')),
-          S.ssearch.provider === 'google' ? h('span', { class: 'chip ' + (S.ssearch.google_cx_set ? 'ok' : 'warn') }, 'CX ' + (S.ssearch.google_cx_set ? 'set' : 'missing')) : null) : null,
-        S.ssearch && S.ssearch.key_source === 'environment'
-          ? h('p', { class: 'muted', style: 'font-size:12px;margin:8px 0 0' }, 'The key comes from the environment variable CFA_SEARCH_API_KEY. Change it on the host, not here.')
-          : h('div', { class: 'rbox', style: 'margin-top:8px' },
-            h('select', { class: 'field', id: 'sprov', 'aria-label': 'Search provider', style: 'width:auto' },
-              [['', 'auto detect'], ['tavily', 'Tavily'], ['brave', 'Brave'], ['google', 'Google CSE']].map(([v, l]) => h('option', { value: v, selected: (S.ssearch || {}).provider === v }, l))),
-            h('input', { class: 'field', id: 'skey', type: 'password', placeholder: 'Search API key (stored encrypted)', autocomplete: 'off', 'aria-label': 'Search API key' })),
-        h('div', { class: 'row2', style: 'margin-top:8px;flex-wrap:wrap' },
-          btn('Save key', () => run(async () => {
-            const provider = (document.getElementById('sprov') || {}).value || '';
-            const api_key = (document.getElementById('skey') || {}).value || '';
-            if (!api_key) { S.stest = { ok: false, detail: 'Paste a key first.' }; render(); return; }
-            const r = await api('/api/search/config', { method: 'PUT', body: { provider, api_key } });
-            S.ssearch = { ...r, providers: ['brave', 'tavily', 'google'] }; S.stest = null;
-            S.info = 'Search key saved for ' + r.provider + '.'; render();
-          }), 'btn primary'),
-          btn('Test key', () => run(async () => { S.stest = await api('/api/search/test', { method: 'POST' }); render(); }), 'btn'),
-          btn('Check configuration', () => run(async () => { S.ssearch = await api('/api/search/status'); S.stest = null; render(); }), 'btn'),
-          (S.ssearch && S.ssearch.key_source === 'database') ? btn('Remove stored key', () => run(async () => { await api('/api/search/config', { method: 'DELETE' }); S.ssearch = await api('/api/search/status'); S.stest = null; render(); }), 'link') : null),
-        S.stest ? h('div', { style: 'margin-top:10px' }, h('span', { class: 'chip ' + (S.stest.ok ? 'ok' : 'warn') }, S.stest.ok ? 'search works' : 'problem'),
-          h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:12px' }, S.stest.detail + (S.stest.hint ? ' ' + S.stest.hint : '') + (S.stest.results ? ' (' + S.stest.results + ' results in ' + S.stest.ms + ' ms)' : '')),
-          (S.stest.sample || []).length ? h('ul', { class: 'muted', style: 'font-size:12px;margin:6px 0 0;padding-left:18px' }, S.stest.sample.map((x) => h('li', {}, x.title))) : null) : null),
-      h('div', { class: 'card', id: 'set-keys', style: 'margin-bottom:14px' }, h('b', {}, 'Access keys'), h('p', { class: 'muted' }, 'Keys are stored as a hash. A new token is shown once.'),
-        S.newKey ? h('div', { class: 'pre' }, `New token for ${S.newKey.name} (${S.newKey.role}): ${S.newKey.token}\nCopy it now. It cannot be shown again.`) : null,
-        k ? h('table', {}, h('tbody', {}, k.keys.map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.role), h('td', { class: 'mono' }, 'used ' + (when(x.last_used) || 'never')), h('td', {}, x.revoked ? h('span', { class: 'chip warn' }, 'revoked') : btn('Revoke', () => run(async () => { await api('/api/admin/keys/' + x.id, { method: 'DELETE' }); S.keys = await api('/api/admin/keys'); }), 'link')))))) : null, k && k.env_keys ? h('p', { class: 'muted' }, `${k.env_keys} key(s) come from the environment.`) : null,
-        h('div', { class: 'row2', style: 'margin-top:8px' }, kname, krole, btn('Create key', () => run(async () => { S.newKey = await api('/api/admin/keys', { method: 'POST', body: { name: kname.value, role: krole.value } }); S.keys = await api('/api/admin/keys'); }), 'btn primary'))),
-      h('div', { class: 'card', style: 'margin-bottom:14px' }, h('b', {}, 'Two-factor authentication (TOTP)'),
-        h('p', { class: 'muted' }, 'Optional but recommended for owners and admins. Works with Google Authenticator, 1Password, Authy and any RFC 6238 app. Recovery codes are shown once.'),
-        (S.me && S.me.user && S.me.user.mfa_enabled)
-          ? h('div', {}, h('p', {}, h('span', { class: 'chip ok' }, '2FA active')), h('details', { style: 'margin-top:8px' }, h('summary', { class: 'muted' }, 'Disable 2FA'),
-            h('div', { style: 'margin-top:8px' }, h('p', { class: 'muted', style: 'font-size:12px' }, 'Password and a valid code are required.'),
-              h('input', { class: 'field', id: 'mfa-off-pw', type: 'password', placeholder: 'Password', autocomplete: 'current-password' }),
-              h('div', { style: 'height:6px' }),
-              h('input', { class: 'field', id: 'mfa-off-code', placeholder: 'Authenticator or recovery code', autocomplete: 'one-time-code' }),
-              h('div', { style: 'margin-top:8px' }, btn('Disable 2FA', () => run(async () => {
-                const password = (document.getElementById('mfa-off-pw') || {}).value || '';
-                const code = (document.getElementById('mfa-off-code') || {}).value || '';
-                await api('/api/auth/mfa/disable', { method: 'POST', body: { password, code } });
-                S.me = await api('/api/auth/me'); S.info = '2FA has been disabled.'; render();
-              }), 'btn')))))
-          : (S.mfaSetup
-            ? h('div', {}, h('p', { class: 'muted' }, 'Add this secret to your app (Base32):'), h('div', { class: 'pre', style: 'word-break:break-all' }, S.mfaSetup.secret),
-              h('p', { class: 'muted', style: 'font-size:12px' }, 'otpauth link: ' + S.mfaSetup.otpauth),
-              h('div', { style: 'margin-top:8px' }, h('input', { class: 'field', id: 'mfa-on-code', placeholder: '6-digit code from the app', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12 }),
-                h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Activate', () => run(async () => {
-                  const code = (document.getElementById('mfa-on-code') || {}).value || '';
-                  const r = await api('/api/auth/mfa/enable', { method: 'POST', body: { code } });
-                  S.mfaCodes = r.recovery_codes; S.mfaSetup = null; S.me = await api('/api/auth/me'); render();
-                }), 'btn primary'))))
-            : h('div', {}, btn('Set up 2FA', () => run(async () => { S.mfaSetup = await api('/api/auth/mfa/setup', { method: 'POST' }); render(); }), 'btn primary'))),
-        (S.mfaCodes || []).length ? h('div', { style: 'margin-top:10px' }, h('b', {}, 'Recovery codes - save them now'),
-          h('div', { class: 'pre' }, S.mfaCodes.join('\n')), h('p', { class: 'muted', style: 'font-size:12px' }, 'Each code works exactly once. They cannot be shown again.')) : null),
-      h('div', { class: 'card', id: 'set-backups' }, h('b', {}, 'Backups and data'), h('p', { class: 'muted' }, 'Backups copy the whole database. Keep CFA_SECRET_KEY somewhere else. The audit log is never purged.'),
-        h('div', { class: 'row2' }, btn('Back up now', () => run(async () => { await api('/api/admin/backup', { method: 'POST' }); S.backups = await api('/api/admin/backups'); S.info = 'Backup created.'; }), 'btn primary'), btn('Export all data (JSON)', () => run(async () => { await dl('/api/admin/export', 'cfa-export.json'); }))),
-        h('div', { style: 'margin-top:8px' }, (S.backups || []).slice(0, 6).map((x) => h('div', { class: 'row2' }, h('span', { class: 'mono', style: 'flex:1' }, x.name), h('span', { class: 'muted' }, Math.round(x.bytes / 1024) + ' KB'), btn('Download', () => run(async () => { await dl('/api/admin/backups/' + x.name, x.name); }), 'link')))),
-        h('div', { class: 'row2', style: 'margin-top:10px' }, h('span', {}, 'Delete chats, activity, calls and research older than'), days, h('span', {}, 'days'), btn('Run retention', () => run(async () => { const r = await api('/api/admin/retention', { method: 'POST', body: { days: S.ret } }); S.info = 'Deleted: ' + Object.entries(r.deleted).map(([a, n]) => `${a} ${n}`).join(', '); }), 'btn')))));
+    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Settings'), h('p', { class: 'muted' }, 'Settings open as a dialog over the current screen.'),
+      h('div', { class: 'row2' }, btn('Open settings', () => openSettings(), 'btn primary'), btn('Back to chat', () => go('chat'), 'btn'))));
   }
   // live agent screen
   async function streamGet(path, signal, onEv) {
@@ -2856,7 +3066,7 @@ const overlayRoot = (() => {
       group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem av3-ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', { class: 'av3-ditxt' }, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
-      group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
+      group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings', openSettings), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
       h('p', { class: 'muted av3-dfoot' }, `Shewiun v${S.health.version || '?'}${S.health.build ? ' · build ' + S.health.build : ''}`))];
   }
 
@@ -2965,8 +3175,9 @@ const overlayRoot = (() => {
   function syncOverlays(force) {
     const upSig = S.up && S.modal === 'upgrade' ? '|up:' + S.up.plan + ':' + S.up.seats + ':' + (S.up.quote ? 'q' : '') + ':' + (S.up.busy ? 'b' : '') + ':' + (S.up.err || '') : '';
     const agxSig = S.modal === 'agentSettings' && S.agx ? '|agx:' + S.agx.bot + ':' + S.agx.section + ':' + (S.agx.loading ? 'l' : '') + ':' + (S.agx.busy ? 'b' : '') : '';
-    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig + agxSig;
-    if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
+    // Settings has its own section/loading/status state; include it so a section switch rebuilds the dialog.
+    const setSig = S.modal === 'settings' ? '|set:' + (S.setSection || '') + (S.setLoading ? ':L' : '') + (S.setLoadErr ? ':E' : '') + (S.setInfo ? ':I' : '') + (S.setArm ? ':A' : '') + (S.err ? ':X' : '') : '';
+    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig + agxSig + setSig;    if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
     S._ovlSig = sig;
     const parts = [];
     if (S.drawer) parts.push(...drawer());
@@ -2977,6 +3188,7 @@ const overlayRoot = (() => {
     else if (m === 'upsell') parts.push(upsellModal());
     else if (m === 'lead') parts.push(leadModal());
     else if (m === 'notif') parts.push(notifModal());
+    else if (m === 'settings') parts.push(settingsModal());
     else if (m === 'upgrade') parts.push(upgradeModal());
     else if (m === 'agentSettings') parts.push(agentSettingsModal());
     if (S.ctx) parts.push(...agentCtx());
@@ -3093,9 +3305,33 @@ const overlayRoot = (() => {
         isEdit ? h('div', { class: 'tm-danger' }, btn('Delete team', remove, 'link tm-del')) : null,
         h('div', { class: 'row2', style: 'margin-top:14px' }, btn(isEdit ? 'Save changes' : 'Create team', save, 'btn primary'), btn('Cancel', close))));
   }
+  // Scroll preservation across full re-renders. Every state change rebuilds the view tree; without
+  // this the content scroller starts at the top again, which made deep research jump on every source.
+  const SCROLL_SELECTORS = ['#scroll', '.main > .body', '.brain > div', '.transcript', '.monbody', '.feed', '.cmsgs', '.screenbody'];
+  function captureScrollState() {
+    const mem = [];
+    for (const sel of SCROLL_SELECTORS) {
+      document.querySelectorAll(sel).forEach((el, i) => {
+        if (el.scrollTop <= 0) return;
+        mem.push({ sel, i, top: el.scrollTop, atBottom: el.scrollHeight - el.clientHeight - el.scrollTop < 24 });
+      });
+    }
+    return mem;
+  }
+  function restoreScrollState(mem) {
+    if (!mem || !mem.length) return;
+    for (const m of mem) {
+      const el = document.querySelectorAll(m.sel)[m.i];
+      // Stick to the bottom only when the reader was already there; otherwise keep the position.
+      if (el) el.scrollTop = m.atBottom ? el.scrollHeight : Math.min(m.top, el.scrollHeight);
+    }
+  }
   function render() {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
+    const viewChanged = S._v !== S.view;
+    const scrollMem = viewChanged ? null : captureScrollState();
+    S._v = S.view;
     const side = h('aside', { class: 'side' },
       h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(true); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
         h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
@@ -3116,7 +3352,7 @@ const overlayRoot = (() => {
       h('button', { class: 'appsbtn av3-mcp', type: 'button', title: 'Connect apps and MCP servers', onclick: openApps }, icon('grid', 20),
         h('span', { class: 'av3-mcp-txt' }, h('b', {}, 'Connect apps'), h('small', {}, `${S.sum.apps || 0} connected · MCP`)),
         h('span', { class: 'av3-mcp-badge' }, h('i', { class: 'av3-dot' + (S.sum.apps ? ' on' : '') }), h('span', { class: 'chip' }, 'MCP'))),
-      h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => go('settings'), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
+      h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => openSettings(), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct av3-acct', type: 'button', 'aria-expanded': S.menu, 'aria-label': 'Account menu', onclick: () => { S.menu = !S.menu; render(); } },
           h('span', { class: 'av3-acctav' }, h('span', { class: 'tile av3-usertile' }, icon('user', 18))),
@@ -3128,12 +3364,13 @@ const overlayRoot = (() => {
     if (!S.notifs && !S._notifsAsked) { S._notifsAsked = true; loadNotifs().then(() => { if (S.notifs && S.notifs.unread) syncOverlays(); }); }
     const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
-    const viewChanged = S._v !== S.view; S._v = S.view;
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
       h('main', { class: 'main', style: viewChanged ? 'animation:cfaFade .22s ease' : '' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,
         warn ? h('div', { class: 'banner', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
       );
-    const sc = document.getElementById('scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
+    restoreScrollState(scrollMem);
+    const sc = document.getElementById('scroll');
+    if (sc && !(scrollMem && scrollMem.some((m) => m.sel === '#scroll'))) sc.scrollTop = sc.scrollHeight;
     ensureScreen();
     syncOverlays();
   }
