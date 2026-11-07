@@ -1114,8 +1114,8 @@ const overlayRoot = (() => {
     const quick = h('div', { class: 'quick' }, [['New agent', 'plus', openAgent], ['New note', 'doc', () => { S.newNote = true; S.graph = false; go('brain').then(() => { S.newNote = true; S.graph = false; render(); }); }], ['New call', 'council', () => { S.room = null; go('council'); }], ['Upload file', 'up', () => { pickFile(); go('brain'); }]].map(([l, ic, fn]) => h('button', { type: 'button', class: 'qbtn', onclick: fn }, icon(ic, 18), h('span', {}, l))));
     const q = h('input', { class: 'field', placeholder: 'Search the menu', value: S.menuQ, 'aria-label': 'Search the menu' });
     q.addEventListener('input', () => { S.menuQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search the menu"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
-    return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; syncOverlays(); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
-      h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(); } }, icon('x'))), q, quick,
+    return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; syncOverlays(true); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
+      h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
       group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
       group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Agent screen', 'Watch what an agent does, live', 'panel', 'screen', () => { S.tab = 'screen'; S.panel = true; if (S.bot) pick(S.bot.id); else go('chat'); }), it('Teams', 'Units with shared memory', 'teams', 'teams', null, S.sum.teams), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
@@ -1228,7 +1228,10 @@ const overlayRoot = (() => {
           danger))));
   }
 
-  function syncOverlays() {
+  function syncOverlays(force) {
+    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '');
+    if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
+    S._ovlSig = sig;
     const parts = [];
     if (S.drawer) parts.push(...drawer());
     const m = S.modal;
@@ -1244,15 +1247,15 @@ const overlayRoot = (() => {
     try { S.notifs = await api('/api/notifications'); } catch {}
   }
   async function openNotifs() {
-    S.modal = 'notif'; syncOverlays();
+    S.modal = 'notif'; syncOverlays(true);
     await run(async () => { await loadNotifs(); render(); });
   }
   function notifModal() {
     const n = S.notifs || { items: [], unread: 0 };
-    const close = () => { S.modal = null; syncOverlays(); };
+    const close = () => { S.modal = null; syncOverlays(true); };
     const markAll = () => run(async () => {
       await api('/api/notifications/read', { method: 'POST', body: { keys: n.items.map((i) => i.key) } });
-      await loadNotifs(); syncOverlays();
+      await loadNotifs(); syncOverlays(true);
     });
     return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
       h('div', { class: 'modal', role: 'dialog', 'aria-label': 'Notifications', style: 'max-width:560px' },
@@ -1260,7 +1263,7 @@ const overlayRoot = (() => {
           n.unread ? h('span', { class: 'chip warn' }, n.unread + ' unread') : h('span', { class: 'chip ok' }, 'all read'),
           btn('Mark all read', markAll, 'chip'), btn([icon('x', 16)], close, 'chip', { 'aria-label': 'Close' })),
         n.items.length ? h('div', { style: 'margin-top:10px' }, n.items.map((i) => h('button', { type: 'button', class: 'notif-item' + (i.read ? ' read' : ''),
-          onclick: () => { S.modal = null; syncOverlays(); go(i.view || 'control'); } },
+          onclick: () => { S.modal = null; syncOverlays(true); go(i.view || 'control'); } },
           h('span', { class: 'chip ' + (i.kind === 'approval' ? 'warn' : i.kind === 'run' ? 'warn' : 'ok') }, i.kind),
           h('span', { style: 'flex:1;min-width:0' }, h('b', {}, i.title), h('div', { class: 'muted', style: 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, String(i.detail || ''))),
           h('span', { class: 'muted mono', style: 'font-size:11px' }, when(i.ts))))) : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Nothing needs your attention right now.'))));
@@ -1269,7 +1272,7 @@ const overlayRoot = (() => {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
     const side = h('aside', { class: 'side' },
-      h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
+      h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(true); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
         h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Search notes', onclick: () => go('brain') }, icon('search')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus'))),
       h('div', { class: 'agents' }, groups.map((g) => [h('div', { class: 'group' }, g), S.bots.filter((b) => b.team === g).map((b) => h('button', { class: 'agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false, onclick: () => pick(b.id) }, tile(b, 38), h('span', {}, h('b', {}, b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role))))])),
@@ -1291,7 +1294,7 @@ const overlayRoot = (() => {
     ensureScreen();
     syncOverlays();
   }
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (S.modal) close(); else if (S.drawer) { S.drawer = false; syncOverlays(); } } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (S.modal) close(); else if (S.drawer) { S.drawer = false; syncOverlays(true); } } });
   async function init() {
     S.err = '';
     try {
