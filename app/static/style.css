@@ -300,3 +300,16 @@ html { scroll-behavior: smooth; }
 .mode-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
 .mode-card.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .mode-card .muted { font-size: 11px; line-height: 1.4; }
+
+
+/* --- v26: agent context menu + team pop-in --- */
+.ctxscrim { position: fixed; inset: 0; z-index: 90; }
+.ctxmenu { position: fixed; z-index: 91; min-width: 210px; background: var(--panel, #fff); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-2); padding: 6px; animation: cfaFade .12s ease; }
+.ctxhead { padding: 6px 10px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted, #7C8BA5); border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.ctxitem { display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; font: inherit; cursor: pointer; }
+.ctxitem:hover { background: rgba(140,160,200,.16); }
+.ctxitem.danger { color: #B5543C; }
+.udot { width: 7px; height: 7px; border-radius: 50%; background: #B5543C; display: inline-block; margin-left: 6px; vertical-align: middle; }
+.tsel-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; margin-top: 10px; }
+.tsel { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.tsel:hover { background: rgba(140,160,200,.12); }

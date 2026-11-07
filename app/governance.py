@@ -554,6 +554,35 @@ class MetaIn(BaseModel):
     criticality: str = Field(pattern="^(low|medium|high)$")
 
 
+class RenameIn(BaseModel):
+    name: str = Field(min_length=2, max_length=40)
+
+
+@router.patch("/api/bots/{bot_id}")
+def rename_bot(bot_id: str, item: RenameIn, request: Request) -> dict[str, str]:
+    """Rename one agent. The id stays stable so audit chains and team memberships keep working."""
+    p = pf.need_admin(request)
+    name = item.name.strip()
+    with pf.db() as con:
+        _get(con, bot_id)
+        con.execute("UPDATE bots SET name=? WHERE id=? AND org_id=?", (name, bot_id, pf.org()))
+        con.commit()
+    pf._m().append_audit("agent.renamed", p["name"], {"agent": bot_id, "name": name})
+    return {"id": bot_id, "name": name}
+
+
+@router.delete("/api/bots/{bot_id}")
+def delete_bot(bot_id: str, request: Request) -> dict[str, object]:
+    """Remove one agent. Its audit trail stays in the recording tables."""
+    p = pf.need_admin(request)
+    with pf.db() as con:
+        bot = _get(con, bot_id)
+        con.execute("DELETE FROM bots WHERE id=? AND org_id=?", (bot_id, pf.org()))
+        con.commit()
+    pf._m().append_audit("agent.deleted", p["name"], {"agent": bot_id, "name": bot["name"]})
+    return {"id": bot_id, "deleted": True}
+
+
 @router.put("/api/bots/{bot_id}/meta")
 def set_meta(bot_id: str, item: MetaIn, request: Request) -> dict[str, str]:
     p = pf.need_admin(request)

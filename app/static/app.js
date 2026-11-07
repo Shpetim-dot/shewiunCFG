@@ -28,7 +28,7 @@ const overlayRoot = (() => {
   const KIND_COLOR = { note: '#2F5BD3', fact: '#1B7F79', decision: '#7A4E9C', rule: '#B7791F', hypothesis: '#B5543C', lesson: '#3D7A4F' };
   const SPACE_COLOR = (s) => (s === 'shared' ? '#8FB1FF' : s === 'finance' ? '#4FC3D9' : (s || '').startsWith('team:') ? '#6EE7B7' : '#F4B860');
   const S = { usage: { models: [], by_kind: {}, budget: { monthly_cap: null, spent_this_month_known_cost: 0 }, note: 'Loading…', cost_is_partial: false, fallback_models: [] }, provs: [], prices: [], cu: { status: 'unconfigured', problems: [], note: '' }, invSum: null, pnew: { id: '', base_url: '', api_key: '' }, ptest: {}, pr: { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }, fb: '', cap: '', chans: {}, chan: null, cmsgs: [], cdraft: '', cbusy: '', invEdit: null, bs: { q: '', res: null }, view: 'chat', bots: [], bot: null, msgs: [], health: {}, drawer: false, menu: false, modal: null, panel: true, tab: 'overview', draft: '', busy: false,
-    notes: [], note: null, versions: [], edit: false, q: '', filter: '', space: '', graph: true, graphAgent: '', gStatus: '', gSpace: '', gzoom: 1, kindFilter: '', sortBy: '', orphans: false, afilter: {}, mfa: false, mfaCode: '', newNote: false, activity: [], seen: new Set(), pulse: {}, actSince: '',
+    notes: [], note: null, versions: [], edit: false, q: '', filter: '', space: '', graph: true, graphAgent: '', gStatus: '', gSpace: '', gzoom: 1, kindFilter: '', sortBy: '', orphans: false, afilter: {}, mfa: false, mfaCode: '', pinned: {}, unreadA: {}, ctx: null, tmodal: false, tsel: new Set(), tname: '', tmission: '', newNote: false, activity: [], seen: new Set(), pulse: {}, actSince: '',
     calls: [], room: null, topic: '', picked: null, rounds: 1, planDone: {}, approvals: [], audit: [], policies: [], test: null, demo: null, verify: '', toolCalls: [], auth: false, tokenErr: '', bill: null, onb: null, presets: [], upsell: null, models: null, keys: null, newKey: null, backups: [], ready: null, leads: [], funnel: null, lead: { name: '', email: '', company: '', message: '' }, mtest: { model: '', out: '' }, ret: 90, skipOnb: false, sum: {}, cov: null, panicArm: false, menuQ: '', screen: { bot: '', events: [], ctrl: null, seen: new Set() },
     apps: [], appQ: '', appCat: 'All', appOpen: null, mcp: { name: '', url: '', token: '' }, tcall: { bot: '', tool: '', args: '{}', out: '' }, tmpl: [], caps: [],
     ag: { template: 'finance-analyst', name: '', team: '', icon: '', color: '' }, teams: [], tnew: { name: '', icon: 'teams', color: '#2F5BD3', mission: '', members: [] }, inv: [], invQ: '', invRisk: '',
@@ -1204,7 +1204,7 @@ const overlayRoot = (() => {
       h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
       group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
-      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Agent screen', 'Watch what an agent does, live', 'panel', 'screen', () => { S.tab = 'screen'; S.panel = true; if (S.bot) pick(S.bot.id); else go('chat'); }), it('Teams', 'Units with shared memory', 'teams', 'teams', null, S.sum.teams), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
+      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Agent screen', 'Watch what an agent does, live', 'panel', 'screen', () => { S.tab = 'screen'; S.panel = true; if (S.bot) pick(S.bot.id); else go('chat'); }), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
       group('Govern', [it('Control', 'Approvals, tool calls, audit, incident switch', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage'), it('Self-test', 'Prove the boundaries, share the evidence', 'flask', 'control'), it('OWASP coverage', 'What is covered, what is not', 'check', 'control')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
@@ -1327,6 +1327,8 @@ const overlayRoot = (() => {
     else if (m === 'upsell') parts.push(upsellModal());
     else if (m === 'lead') parts.push(leadModal());
     else if (m === 'notif') parts.push(notifModal());
+    if (S.ctx) parts.push(agentCtx());
+    if (S.tmodal) parts.push(teamModal());
     if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);
   }
   async function loadNotifs() {
@@ -1354,6 +1356,44 @@ const overlayRoot = (() => {
           h('span', { style: 'flex:1;min-width:0' }, h('b', {}, i.title), h('div', { class: 'muted', style: 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, String(i.detail || ''))),
           h('span', { class: 'muted mono', style: 'font-size:11px' }, when(i.ts))))) : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Nothing needs your attention right now.'))));
   }
+  function closeCtx() { S.ctx = null; syncOverlays(true); }
+  function agentCtx() {
+    const c = S.ctx, bot = S.bots.find((b) => b.id === c.id);
+    if (!bot) { S.ctx = null; return h('div'); }
+    const act = (label, fn, danger) => h('button', { type: 'button', class: 'ctxitem' + (danger ? ' danger' : ''), onclick: () => { S.ctx = null; syncOverlays(true); fn(); } }, label);
+    const style = 'left:' + Math.min(c.x, window.innerWidth - 240) + 'px;top:' + Math.min(c.y, window.innerHeight - 260) + 'px';
+    return [h('div', { class: 'ctxscrim', onclick: closeCtx, oncontextmenu: (e) => { e.preventDefault(); closeCtx(); } }),
+      h('div', { class: 'ctxmenu', style: style, role: 'menu' },
+        h('div', { class: 'ctxhead' }, bot.name),
+        act('Rename', () => run(async () => { const n = window.prompt('New name for ' + bot.name, bot.name); if (!n || n.trim().length < 2) return; await api('/api/bots/' + bot.id, { method: 'PATCH', body: { name: n.trim() } }); await loadBots(); })),
+        act(S.pinned[bot.id] ? 'Unpin' : 'Pin to top', () => { if (S.pinned[bot.id]) delete S.pinned[bot.id]; else S.pinned[bot.id] = true; render(); }),
+        act('Mark as unread', () => { S.unreadA[bot.id] = true; render(); }),
+        act('Create team with this agent', () => { S.tmodal = true; S.tsel = new Set([bot.id]); S.tname = ''; S.tmission = ''; syncOverlays(true); }),
+        act('Delete agent', () => run(async () => {
+          if (!window.confirm('Delete ' + bot.name + '? This cannot be undone.')) return;
+          await api('/api/bots/' + bot.id, { method: 'DELETE' });
+          if (S.bot && S.bot.id === bot.id) { S.bot = null; S.view = 'chat'; } await loadBots();
+        }), true))];
+  }
+  function teamModal() {
+    const close = () => { S.tmodal = false; syncOverlays(true); };
+    const boxes = S.bots.map((b) => { const cb = h('input', { type: 'checkbox', checked: S.tsel.has(b.id), 'aria-label': b.name });
+      cb.addEventListener('change', () => { cb.checked ? S.tsel.add(b.id) : S.tsel.delete(b.id); });
+      return h('label', { class: 'tsel' }, cb, tile(b, 22), b.name); });
+    const nm = h('input', { class: 'field', placeholder: 'Team name, e.g. Engineering', maxlength: 40, value: S.tname }); nm.addEventListener('input', () => { S.tname = nm.value; });
+    const ms = h('input', { class: 'field', placeholder: 'Mission (optional)', maxlength: 300, value: S.tmission }); ms.addEventListener('input', () => { S.tmission = ms.value; });
+    return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
+      h('div', { class: 'modal', role: 'dialog', 'aria-label': 'Create team', style: 'max-width:520px' },
+        h('h2', {}, 'Create team'), h('p', { class: 'muted' }, 'Pick the agents that share this team memory. Team members can read the team space, other agents cannot.'),
+        nm, h('div', { style: 'height:8px' }), ms,
+        h('div', { class: 'tsel-list' }, boxes),
+        h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Create team', () => run(async () => {
+          if (S.tname.trim().length < 2) { S.err = 'The team needs a name.'; render(); return; }
+          await api('/api/teams', { method: 'POST', body: { name: S.tname.trim(), mission: S.tmission, members: [...S.tsel] } });
+          S.tmodal = false; S.tsel = new Set(); await Promise.all([loadBots(), loadTeams()]);
+          S.info = 'Team created.'; go('teams');
+        }), 'btn primary'), btn('Cancel', close))));
+  }
   function render() {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
@@ -1361,7 +1401,12 @@ const overlayRoot = (() => {
       h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(true); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
         h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Search notes', onclick: () => go('brain') }, icon('search')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus'))),
-      h('div', { class: 'agents' }, groups.map((g) => [h('div', { class: 'group' }, g), S.bots.filter((b) => b.team === g).map((b) => h('button', { class: 'agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false, onclick: () => pick(b.id) }, tile(b, 38), h('span', {}, h('b', {}, b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role))))])),
+      h('div', { class: 'agents' }, groups.map((g) => [h('div', { class: 'group' }, g), S.bots.filter((b) => b.team === g)
+        .sort((a, b) => (S.pinned[b.id] ? 1 : 0) - (S.pinned[a.id] ? 1 : 0))
+        .map((b) => h('button', { class: 'agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false,
+            onclick: () => { delete S.unreadA[b.id]; pick(b.id); },
+            oncontextmenu: (e) => { e.preventDefault(); S.ctx = { id: b.id, x: e.clientX, y: e.clientY }; syncOverlays(true); } },
+          tile(b, 38), h('span', {}, h('b', {}, (S.pinned[b.id] ? '• ' : '') + b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role), S.unreadA[b.id] ? h('span', { class: 'udot' }) : null)))])),
       meterBlock(),
       h('button', { class: 'appsbtn', type: 'button', onclick: openApps }, icon('grid', 20), h('span', { style: 'flex:1' }, 'Connect apps', h('small', {}, `${S.sum.apps || 0} connected · MCP`)), h('span', { class: 'chip ok' }, 'MCP')),
       h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => go('settings'), 'menuitem'), btn([icon('flask', 16), 'Authorization self-test'], () => go('control'), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
