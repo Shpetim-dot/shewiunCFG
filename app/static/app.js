@@ -558,6 +558,20 @@ const overlayRoot = (() => {
     catch (e) { S.err = e.message; }
     if (S.rs) S.rs.running = false; try { S.rlist = await api('/api/research'); } catch {} render();
   }
+  const RESEARCH_MODES = [
+    { id: 'company', title: 'Company research', icon: 'compass', depth: 'standard', desc: 'News, launches, hires and funding for one company',
+      q: 'Research the latest news about <company>: product launches, new hires and funding deals in the last 12 months. Focus on facts with dates and sources.' },
+    { id: 'market', title: 'Market & financials', icon: 'chart', depth: 'thorough', desc: 'Market position, pricing models and financial signals',
+      q: 'Analyse the market for <segment>: key players, pricing models, positioning and financial signals. Compare at least three vendors and cite every number.' },
+    { id: 'compliance', title: 'Compliance screening', icon: 'shield', depth: 'thorough', desc: 'Ownership, background and adverse media',
+      q: 'Screen <company> for ownership structure, business background and adverse media. List open questions and mark anything that needs a human review.' },
+    { id: 'sales', title: 'Sales meeting prep', icon: 'chat', depth: 'quick', desc: 'Meeting brief and talking points from current news',
+      q: 'Prepare a meeting brief for <company>: latest news, likely priorities and three talking points for <our offering>. Flag what is uncertain.' },
+    { id: 'supply', title: 'Supply chain risk', icon: 'table', depth: 'standard', desc: 'Supplier risks and disruption signals',
+      q: 'Identify supplier risks and potential disruptions for <product or category>: dependencies, single points of failure and recent incidents.' },
+    { id: 'underwriting', title: 'Underwriting research', icon: 'lens', depth: 'thorough', desc: 'Operations, industry and risk signals',
+      q: 'Describe the operations, industry and risk signals of <business> for an underwriting decision. Separate evidence from assumptions.' },
+  ];
   function researchView() {
     const q = h('textarea', { class: 'field', rows: 2, maxlength: 1000, 'aria-label': 'Research question', placeholder: 'What do you want to find out?' }); q.value = S.rq;
     const cx = h('textarea', { class: 'field', rows: 2, maxlength: 2000, 'aria-label': 'Context and constraints', placeholder: 'Context for the agents (optional): who it is for, what to focus on, what to ignore.' }); cx.value = S.rctx;
@@ -615,6 +629,12 @@ const overlayRoot = (() => {
     const cite = (t) => t.split(/(\[\d+\])/).map((p) => { const m = p.match(/^\[(\d+)\]$/); if (!m) return p; const s = (rep ? rep.sources : r.sources).find((x) => x.n === +m[1]); return !s ? p : s.kind === 'brain' ? btn(p, () => openNote(s.ref), 'wl') : /^https?:\/\//.test(s.ref) ? h('a', { class: 'wl', href: s.ref, target: '_blank', rel: 'noopener noreferrer' }, p) : p; });
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Deep research'),
       h('p', { class: 'muted' }, 'Plans sub-questions, searches your Brain' + (S.health.search_configured ? ' and the web' : '') + ', and writes a report with numbered citations and a chart. Without a model the report is extractive: it quotes sources and adds no generated claims.'),
+      h('div', { class: 'mode-grid' }, RESEARCH_MODES.map((m) => h('button', {
+          type: 'button', class: 'mode-card' + (S.rmode === m.id ? ' on' : ''), 'aria-pressed': S.rmode === m.id,
+          onclick: () => { S.rmode = m.id; S.rq = m.q; S.rdepth = m.depth || S.rdepth; render(); },
+        }, h('span', { class: 'row2' }, icon(m.icon, 16), h('b', {}, m.title)), h('span', { class: 'muted' }, m.desc)))),
+      S.rmode ? h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0 0' }, 'Template applied - replace the <...> parts with your company or topic. ',
+        btn('Clear template', () => { S.rmode = null; S.rq = ''; render(); }, 'link')) : null,
       h('div', { class: 'rbox' }, q, qhint, cx), h('div', { class: 'row2', style: 'margin:10px 0;flex-wrap:wrap' }, depthChips,
         chip((S.rweb && webReady ? 'Web: on - ' + (S.ssearch ? S.ssearch.provider : 'search') : 'Web: off'), S.rweb && webReady, () => { if (!webReady) { go('settings'); return; } S.rweb = !S.rweb; render(); }, false),
         webReady ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'No search key in this running instance - set CFA_SEARCH_API_KEY and redeploy, then check Settings > Web search > Test key. ',
