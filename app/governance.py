@@ -618,6 +618,31 @@ def set_meta(bot_id: str, item: MetaIn, request: Request) -> dict[str, str]:
     return {"id": bot_id, "criticality": item.criticality}
 
 
+LOOK_ICONS = "^(compass|lens|wrench|scales|coins|shield|book|chat|spark|pen|rocket|chart|terminal|bug|radar|graph|flask|table|doc|bolt|heart|star|eye|gem|crown|bulb|lock)$"
+
+
+class LookIn(BaseModel):
+    icon: str | None = Field(default=None, pattern=LOOK_ICONS)
+    color: str | None = Field(default=None, pattern="^#[0-9a-fA-F]{6}$")
+    figure: str | None = Field(default=None, pattern="^(block|antenna|ears|crest)$")
+
+
+@router.put("/api/bots/{bot_id}/look")
+def set_look(bot_id: str, item: LookIn, request: Request) -> dict[str, Any]:
+    """Customise the voxel figure of one agent: badge symbol, body colour and figure shape. Audited."""
+    p = pf.need_admin(request)
+    changes = {k: v for k, v in (("icon", item.icon), ("color", item.color), ("figure", item.figure)) if v is not None}
+    if not changes:
+        raise HTTPException(422, "nothing to change")
+    with pf.db() as con:
+        _get(con, bot_id)
+        for col, val in changes.items():
+            con.execute(f"UPDATE bots SET {col}=? WHERE id=? AND org_id=?", (val, bot_id, pf.org()))
+        con.commit()
+    pf._m().append_audit("agent.look.changed", p["name"], {"agent": bot_id, **changes})
+    return {"id": bot_id, **changes}
+
+
 @router.get("/api/bots/{bot_id}/card")
 def agent_card(bot_id: str) -> dict[str, Any]:
     with pf.db() as con:
