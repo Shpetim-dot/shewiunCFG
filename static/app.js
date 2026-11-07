@@ -564,7 +564,38 @@
     const u = S.usage, money = (v, c) => (v == null ? 'unknown' : `${v.toFixed(4)} ${c || ''}`), inp = (o, k, ph, type = 'text') => { const i = h('input', { class: 'field', type, placeholder: ph, 'aria-label': ph, value: o[k] || '', autocomplete: 'off' }); i.addEventListener('input', () => { o[k] = i.value; }); return i; };
     const reload = async () => { [S.usage, S.provs, S.prices] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices')]); };
     const cap = u.budget.monthly_cap;
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Models & usage'),
+    const uBars = () => {
+      const d = u.daily || [], W = 720, H = 190, pad = 26;
+      const max = Math.max(1, ...d.map((x) => x.calls || 0));
+      const s = svg(W, H), bw = (W - pad * 2) / Math.max(d.length, 1);
+      d.forEach((x, i) => {
+        const hh = ((x.calls || 0) / max) * (H - pad * 2);
+        sadd(s, 'rect', { x: pad + i * bw + 2, y: H - pad - hh, width: Math.max(2, bw - 4), height: hh, rx: 3, fill: '#2F5BD3', opacity: '.85' });
+      });
+      sadd(s, 'line', { x1: pad, y1: H - pad, x2: W - pad, y2: H - pad, stroke: 'currentColor', 'stroke-opacity': '.25' });
+      sadd(s, 'text', { x: pad, y: H - 8, 'font-size': 9, fill: 'currentColor' }, d.length ? `Calls pro Tag, letzte ${d.length} Tage (max ${max})` : 'Noch keine Calls in diesem Zeitraum.');
+      return s;
+    };
+    const uDonut = () => {
+      const K = { chat: '#2F5BD3', research: '#B5543C', channel: '#1B7F79', call: '#7A4E9C', council: '#B7791F', computer: '#1F6F8B' };
+      const entries = Object.entries(u.by_kind || {});
+      const tot = entries.reduce((a, [, n]) => a + n, 0) || 1, s = svg(140, 140), cx = 70, cy = 70, r = 56;
+      let ang = -Math.PI / 2;
+      entries.forEach(([k, n]) => {
+        const a = (n / tot) * 2 * Math.PI;
+        const x1 = cx + r * Math.cos(ang), y1 = cy + r * Math.sin(ang);
+        const x2 = cx + r * Math.cos(ang + a), y2 = cy + r * Math.sin(ang + a);
+        sadd(s, 'path', { d: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${a > Math.PI ? 1 : 0} 1 ${x2} ${y2} Z`, fill: K[k] || '#7C8BA5' });
+        ang += a;
+      });
+      sadd(s, 'circle', { cx: cx, cy: cy, r: r * 0.55, fill: 'var(--panel, #fff)' });
+      sadd(s, 'text', { x: cx, y: cy + 4, 'text-anchor': 'middle', 'font-size': 12, fill: 'currentColor' }, String(tot));
+      return s;
+    };
+    const uChart = h('div', { class: 'cards', style: 'margin:10px 0' },
+      h('div', { class: 'card', style: 'padding:10px;min-width:0' }, h('b', {}, 'Calls pro Tag'), h('div', { class: 'gwrap', style: 'overflow:auto' }, uBars())),
+      h('div', { class: 'card', style: 'padding:10px' }, h('b', {}, 'Verteilung nach Typ'), h('div', { class: 'row2', style: 'align-items:center' }, uDonut(), h('div', {}, Object.entries(u.by_kind || {}).map(([k, n]) => h('div', { class: 'muted', style: 'font-size:12px' }, `${k}: ${n}`))))));
+    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Models & usage'), uChart,
       h('p', { class: 'muted' }, u.note + (u.cost_is_partial ? ' Some calls have no price record, so the cost total is partial.' : '')),
       h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Model', 'Provider', 'Calls', 'Errors', 'Tokens in / out', 'Avg latency', 'Cost', 'Fallbacks'].map((c) => h('th', {}, c)))),
         h('tbody', {}, u.models.length ? u.models.map((m) => h('tr', {}, h('td', { class: 'mono' }, m.model), h('td', {}, m.provider), h('td', {}, m.calls), h('td', {}, m.errors), h('td', { class: 'mono' }, `${m.tokens_in} / ${m.tokens_out}`), h('td', {}, m.avg_latency_ms + ' ms'), h('td', {}, money(m.cost, m.currency) + (m.calls_with_unknown_cost && m.cost != null ? ' + unpriced calls' : '')), h('td', {}, m.fallback_calls))) : h('tr', {}, h('td', { colspan: 8, class: 'muted' }, 'No model calls in this period. Demo replies make no model calls.'))))),

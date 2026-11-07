@@ -237,9 +237,13 @@ def usage(days: int = 30) -> dict[str, Any]:
         fb = _setting(con, "fallback_models") or []
         start = datetime.now(timezone.utc).strftime("%Y-%m-01")
         spent = con.execute("SELECT COALESCE(SUM(cost),0) FROM llm_usage WHERE ts>=? AND cost IS NOT NULL AND org_id=?", (start, oid)).fetchone()[0]
+        daily = [{"day": r["day"], "calls": r["calls"], "cost": r["cost"], "tokens_in": r["tin"], "tokens_out": r["tout"]}
+                 for r in con.execute("SELECT substr(ts,1,10) day, COUNT(*) calls, ROUND(COALESCE(SUM(cost),0),6) cost, "
+                                      "SUM(COALESCE(tokens_in,0)) tin, SUM(COALESCE(tokens_out,0)) tout "
+                                      "FROM llm_usage WHERE ts>=? AND org_id=? GROUP BY day ORDER BY day", (since_iso, oid))]
     models = [{"provider": r["provider"], "model": r["model"], "calls": r["calls"], "ok": r["ok"], "errors": r["errors"], "tokens_in": r["tin"], "tokens_out": r["tout"],
                "avg_latency_ms": round(r["latency"] or 0), "cost": r["cost"], "currency": r["currency"], "calls_with_unknown_cost": r["unknown_cost"], "fallback_calls": r["fallbacks"]} for r in rows]
-    return {"days": days, "models": models, "by_kind": {r["kind"]: r["n"] for r in kinds},
+    return {"days": days, "models": models, "by_kind": {r["kind"]: r["n"] for r in kinds}, "daily": daily,
             "cost_is_partial": any(m["calls_with_unknown_cost"] for m in models),
             "note": "Tokens come from the provider's usage data. Cost is shown only where a price record exists; otherwise it is unknown.",
             "budget": {"monthly_cap": cap, "spent_this_month_known_cost": round(spent, 6)}, "fallback_models": fb}
