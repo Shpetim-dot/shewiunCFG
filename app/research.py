@@ -376,6 +376,60 @@ def get_research(rid: str) -> dict[str, Any]:
     return {"id": r["id"], "question": r["question"], "depth": r["depth"], "mode": r["mode"], **json.loads(r["report"])}
 
 
+CITE = re.compile(r"\[(\d+)\]")
+NUMBERY = re.compile(r"(\d[\d.,]*\s?(%|EUR|USD|€|\$)|\b(EUR|USD)\s?\d)")
+
+
+def audit_report(markdown: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Check how well the report binds its claims to the numbered sources.
+
+    Every claim (sentence) that contains a number should carry at least one [n] citation; the
+    audit lists the offenders instead of silently trusting the text.
+    """
+    text = markdown or ""
+    cited: dict[int, int] = {}
+    for m in CITE.finditer(text):
+        n = int(m.group(1))
+        cited[n] = cited.get(n, 0) + 1
+    known = {int(s.get("n") or 0) for s in sources or []}
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.replace("\n", " ")) if len(s.strip()) >= 20]
+    numeric = [s for s in sentences if NUMBERY.search(s)]
+    unsupported = [s for s in numeric if not CITE.search(s)]
+    uncited_sources = sorted(n for n in known if n not in cited)
+    unknown_citations = sorted(n for n in cited if n not in known)
+    total_claims = len(sentences) or 1
+    return {
+        "sentences": len(sentences),
+        "citations": sum(cited.values()),
+        "sources_total": len(known),
+        "sources_cited": len([n for n in known if n in cited]),
+        "coverage_percent": round(100 * len([n for n in known if n in cited]) / max(1, len(known))),
+        "claims_with_numbers": len(numeric),
+        "claims_without_citation": len(unsupported),
+        "unsupported_claims": unsupported[:20],
+        "uncited_sources": uncited_sources,
+        "unknown_citations": unknown_citations,
+        "verdict": ("all numeric claims are cited" if not unsupported
+                    else f"{len(unsupported)} claim(s) with numbers have no citation"),
+        "note": "Numbers without a [n] citation are flagged for review; the report itself is not changed.",
+    }
+
+
+@router.get("/api/research/{rid}/audit")
+def research_audit(rid: str) -> dict[str, Any]:
+    """Claim-to-source audit of a stored research report."""
+    with pf.db() as con:
+        r = con.execute("SELECT * FROM research WHERE id=? AND org_id=?", (rid, pf.org())).fetchone()
+    if not r:
+        raise HTTPException(404, "research not found")
+    try:
+        report = json.loads(r["report"] or "{}")
+    except ValueError:
+        report = {}
+    return {"id": rid, "question": r["question"],
+            **audit_report(report.get("markdown", ""), report.get("sources", []))}
+
+
 @router.post("/api/research/{rid}/save")
 def save_research(rid: str, request: Request) -> dict[str, Any]:
     p = pf._principal(request)
