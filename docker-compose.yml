@@ -1,13 +1,44 @@
-# Local production-like run:  docker compose up --build   (copy .env.example to .env first)
+# Production run on a single small VM (Oracle Always Free, Hetzner, any Docker host).
+#
+#   cp .env.example .env      # then fill CFA_SECRET_KEY, CFA_PUBLIC_URL, keys
+#   docker compose up -d --build
+#
+# Two services: the app (SQLite on the named volume) and Caddy in front of it for HTTPS.
+# Caddy fetches a Let's Encrypt certificate automatically when DOMAIN points at this host.
 services:
   cfa:
     build: .
-    ports: ["8000:8000"]
+    restart: unless-stopped
     env_file: .env
     environment:
       CFA_DATABASE_PATH: /data/cfa.db
-      FORWARDED_ALLOW_IPS: "*"   # only behind a reverse proxy you control
-    volumes: ["cfa-data:/data"]
+      CFA_ENV: production
+      FORWARDED_ALLOW_IPS: "*"        # only reachable through the proxy on this host
+      TZ: Europe/Berlin
+    volumes:
+      - cfa-data:/data
+    expose:
+      - "8000"
+    # no published port: the only way in is Caddy. Uncomment for a private test on localhost.
+    # ports: ["127.0.0.1:8000:8000"]
+
+  caddy:
+    image: caddy:2-alpine
     restart: unless-stopped
+    depends_on:
+      - cfa
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   cfa-data:
+  caddy-data:
+  caddy-config:

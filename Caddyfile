@@ -1,0 +1,37 @@
+# Reverse proxy with automatic HTTPS. Caddy obtains and renews the certificate for DOMAIN.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Security headers the app also sends; kept here as defence in depth for static errors.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Server-sent events (council, channels, research, screen) must not be buffered.
+	@streams path /api/*/stream /api/calls/stream /api/research/stream /api/bots/*/screen/stream
+	reverse_proxy @streams cfa:8000 {
+		flush_interval -1
+	}
+
+	reverse_proxy cfa:8000 {
+		health_uri /api/health/ready
+		health_interval 30s
+	}
+
+	# Big uploads go through the app, which enforces its own size limits.
+	request_body {
+		max_size 25MB
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
