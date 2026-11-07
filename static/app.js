@@ -563,8 +563,12 @@ const overlayRoot = (() => {
     const cx = h('textarea', { class: 'field', rows: 2, maxlength: 2000, 'aria-label': 'Context and constraints', placeholder: 'Context for the agents (optional): who it is for, what to focus on, what to ignore.' }); cx.value = S.rctx;
     cx.addEventListener('input', () => { S.rctx = cx.value; });
     const chip = (label, on, f, dis) => h('button', { type: 'button', class: 'chip' + (on ? ' ok' : ''), 'aria-pressed': on, disabled: !!dis, onclick: f }, label);
-    const depthChips = [['quick', 'Quick'], ['standard', 'Standard'], ['thorough', 'Thorough']].map(([v, l]) => chip(l, S.rdepth === v, () => { S.rdepth = v; render(); }));
+    const DEPTHS = [['quick', 'Quick', '3 sub-questions, fast scan'], ['standard', 'Standard', '6 sub-questions, balanced depth'], ['thorough', 'Thorough', '9 sub-questions, deepest coverage']];
+    const depthChips = DEPTHS.map(([v, l, d]) => h('button', { type: 'button', class: 'depth-card' + (S.rdepth === v ? ' on' : ''), 'aria-pressed': S.rdepth === v, onclick: () => { S.rdepth = v; render(); } }, h('b', {}, l), h('span', { class: 'muted' }, d)));
     const r = S.rs, rep = r && r.report;
+    const reportText = () => rep ? ('# ' + S.rq + '\n\n' + rep.markdown + '\n\n## Sources\n' + (rep.sources || []).map((s) => '[' + s.n + '] ' + s.title + ' - ' + s.ref).join('\n')) : '';
+    const copyReport = () => { if (navigator.clipboard) navigator.clipboard.writeText(reportText()).then(() => { S.info = 'Report copied to the clipboard.'; render(); }); };
+    const exportReport = () => { const b = new Blob([reportText()], { type: 'text/markdown' }); const a = h('a', { href: URL.createObjectURL(b), download: 'research-report.md' }); document.body.append(a); a.click(); a.remove(); };
     const rbtn = btn([icon('lens', 16), r && r.running ? 'Researching…' : 'Start research'], startResearch, 'btn primary', { disabled: S.rq.trim().length < 8 || !!(r && r.running) });
     q.addEventListener('input', () => { S.rq = q.value; rbtn.disabled = q.value.trim().length < 8 || !!(r && r.running); });
     const cite = (t) => t.split(/(\[\d+\])/).map((p) => { const m = p.match(/^\[(\d+)\]$/); if (!m) return p; const s = (rep ? rep.sources : r.sources).find((x) => x.n === +m[1]); return !s ? p : s.kind === 'brain' ? btn(p, () => openNote(s.ref), 'wl') : /^https?:\/\//.test(s.ref) ? h('a', { class: 'wl', href: s.ref, target: '_blank', rel: 'noopener noreferrer' }, p) : p; });
@@ -573,9 +577,21 @@ const overlayRoot = (() => {
       h('div', { class: 'rbox' }, q, cx), h('div', { class: 'row2', style: 'margin:10px 0;flex-wrap:wrap' }, depthChips,
         chip(S.rweb && S.health.search_configured ? 'Web: on' : 'Web: off', S.rweb && S.health.search_configured, () => { S.rweb = !S.rweb; render(); }, !S.health.search_configured),
         S.health.search_configured ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'Web search needs CFA_SEARCH_API_KEY'), h('span', { class: 'sp' }), rbtn),
-      r ? h('div', { class: 'room' }, h('div', {}, r.questions.length ? [h('h2', {}, 'Plan'), h('ul', { class: 'steps', style: 'padding:0' }, r.questions.map((x, i) => h('li', {}, icon(r.done.includes(i) ? 'check' : 'search', 16), x)))] : null,
-        rep ? [h('h2', {}, 'Report'), h('div', { class: 'notebody' }, md(rep.markdown, cite)), h('h2', {}, 'Chart'), bars(rep.chart),
-          h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Save to Brain as draft', () => run(async () => { const d = await api(`/api/research/${r.id}/save`, { method: 'POST' }); S.info = `Saved as draft: ${d.title}`; })))] : null),
+      r ? h('div', { class: 'room' }, h('div', {},
+        r.running ? h('div', { class: 'card research-run' },
+          h('div', { class: 'row2' }, h('b', {}, 'Research in progress'), h('span', { class: 'chip warn' }, r.agent ? r.agent.name : 'planning'), h('span', { class: 'sp' }),
+            h('span', { class: 'muted mono' }, (r.prog ? r.prog.done : 0) + ' / ' + (r.prog ? r.prog.total : 1))),
+          h('div', { class: 'progress' }, h('i', { style: 'width:' + Math.round(((r.prog ? r.prog.done : 0) / Math.max(1, r.prog ? r.prog.total : 1)) * 100) + '%' })),
+          h('div', { class: 'feed', style: 'margin-top:8px' }, [...(r.activity || [])].reverse().slice(0, 6).map((a) => h('div', {}, '· ' + a)))) : null,
+        r.questions.length ? [h('h2', {}, 'Plan'), h('ul', { class: 'steps', style: 'padding:0' }, r.questions.map((x, i) => h('li', {}, icon(r.done.includes(i) ? 'check' : 'search', 16), x)))] : null,
+        rep ? [h('div', { class: 'card research-head' },
+          h('div', { class: 'row2' }, h('span', { class: 'chip ok' }, 'Report'), h('span', { class: 'chip' }, rep.mode || r.mode || 'demo'),
+            h('span', { class: 'muted' }, (rep.sources || []).length + ' sources'), h('span', { class: 'sp' }),
+            r.id ? h('span', { class: 'muted mono', style: 'font-size:11px' }, 'run ' + String(r.id).slice(0, 8)) : null),
+          h('p', { class: 'muted', style: 'margin:8px 0 0' }, S.rq)),
+          h('h2', {}, 'Report'), h('div', { class: 'notebody' }, md(rep.markdown, cite)), h('h2', {}, 'Chart'), bars(rep.chart),
+          h('div', { class: 'row2', style: 'margin-top:12px;flex-wrap:wrap' }, btn('Save to Brain as draft', () => run(async () => { const d = await api(`/api/research/${r.id}/save`, { method: 'POST' }); S.info = `Saved as draft: ${d.title}`; }), 'btn primary'),
+            btn('Copy report', copyReport, 'btn'), btn('Export .md', exportReport, 'btn'))] : null),
         h('div', {}, researchMonitor(r, rep), h('h2', {}, `Sources (${(rep ? rep.sources : r.sources).length})`),
           (rep ? rep.sources : r.sources).map((s) => h('div', { class: 'card', style: 'margin:6px 0;font-size:13px' }, h('span', { class: 'chip' }, `[${s.n}] ${s.kind}`), ' ', s.kind === 'web' && /^https?:\/\//.test(s.ref) ? h('a', { class: 'link', href: s.ref, target: '_blank', rel: 'noopener noreferrer' }, s.title) : btn(s.title, () => openNote(s.ref), 'link'), h('div', { class: 'muted' }, s.snippet.slice(0, 120)))))) : null,
       S.rlist.length && !r ? [h('h2', {}, 'Previous research'), S.rlist.map((x) => h('div', {}, btn(x.question, () => run(async () => { const d = await api('/api/research/' + x.id); S.rs = { activity: [], sources: d.sources, questions: d.questions, report: d, running: false, done: d.questions.map((_, i) => i), id: d.id }; }), 'link'), h('span', { class: 'muted mono' }, ` ${when(x.created_at)} ${x.mode}`)))] : null));
