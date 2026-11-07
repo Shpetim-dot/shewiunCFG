@@ -66,6 +66,16 @@ def test_avatar_plate_is_shaded_with_gradients_rim_and_contact_shadow(tmp_path, 
     assert "const EYE_SPEC = {" in block
     assert 'class="av3-spec"' in block
     assert "blink\">${EYES[f.eyes]" in block and "${EYE_SPEC[f.eyes] || ''}" in block
+    # The figure itself is colour-filled: a per-agent body gradient (primary ring colour) plus a
+    # secondary-colour glow, both derived from faceOf() so every agent keeps its own palette.
+    assert "const c0 = f.ring[0], c1 = f.ring[1];" in block
+    assert "const bodyHi = mix(c0, .55)" in block and "bodyLo = mix(c0, -.38)" in block
+    assert 'id="av3c${uid}"' in block and 'id="av3t${uid}"' in block
+    assert 'stop-color="${bodyHi}"' in block and 'stop-color="${c1}" stop-opacity=".55"' in block
+    assert 'class="av3-body"' in block and 'class="av3-tint"' in block
+    assert 'fill="url(#av3c${uid})"' in block and 'fill="url(#av3t${uid})"' in block
+    # Identity arcs stay distinguishable: they use the pale secondary colour on the coloured body.
+    assert "arcC = mix(c1, .52)" in block and 'stroke="${arcC}"' in block
     # Every identity source is untouched.
     for marker in ("const EYES = {", "const BROWS = {", "const MOUTHS = {", "const ARC_ANGLES = {",
                    "const CORE_FACE = {", "strategist:", "skeptic:", "builder:", "chair:",
@@ -84,7 +94,7 @@ def test_avatar_styles_use_light_and_dark_gradient_stops_and_a_drop_shadow(tmp_p
     idx = css.index(CSS_MARKER)
     block = css[idx:]
     for marker in (".av3-plate-hi", ".av3-shade-hi", ".av3-rim-hi", ".av3-drop-in", ".av3-base",
-                   ".av3-gloss", ".av3-spec", ".av3-arc-sh", ".av3-arc-hi"):
+                   ".av3-gloss", ".av3-spec", ".av3-arc-sh", ".av3-arc-hi", ".av3-body", ".av3-tint"):
         assert marker in block, marker
     assert "stop-color" in block
     assert "drop-shadow(" in block

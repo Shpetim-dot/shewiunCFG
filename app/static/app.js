@@ -107,15 +107,17 @@ const overlayRoot = (() => {
     return v;
   };
   // state: o.thinking = the agent is working or answering (eyes look around, mouth talks, ring turns); idle faces blink now and then.
-  // The plate is shaded like a small 3-D object: radial light from the top-left, a rim highlight, a
-  // contact shadow and a gloss arc. Gradients are plain SVG defs; their colours come from CSS classes
-  // so light and dark mode each get their own light source without any per-frame JavaScript.
+  // Each agent is a small 3-D figure filled with its own colours: a radial body gradient in the primary
+  // ring colour, a secondary-colour glow, a rim light, a contact shadow and a gloss arc. The colours come
+  // from faceOf(), so identity, light/dark mode and every size stay data-driven with zero per-frame JS.
   function tile(b, s = 40, o = {}) {
     const f = faceOf(b || {}), on = ARCS[f.arcs], uid = ++gid;
+    const c0 = f.ring[0], c1 = f.ring[1];
+    const bodyHi = mix(c0, .55), bodyMid = mix(c0, .18), bodyLo = mix(c0, -.38), arcC = mix(c1, .52);
     const ring = Object.keys(ARC_ANGLES).map((n) => {
-      const d = arcPath(n), c = on.includes(n) ? f.ring[0] : f.ring[1];
+      const d = arcPath(n);
       return `<path class="av3-arc-sh" d="${d}" fill="none" stroke-width="4.2" stroke-linecap="round" transform="translate(.5 .65)"/>`
-        + `<path d="${d}" fill="none" stroke="${c}" stroke-width="3.6" stroke-linecap="round"/>`
+        + `<path d="${d}" fill="none" stroke="${arcC}" stroke-width="3.6" stroke-linecap="round"/>`
         + `<path class="av3-arc-hi" d="${d}" fill="none" stroke-width="1.1" stroke-linecap="round" transform="translate(-.35 -.4)"/>`;
     }).join('');
     const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true');
@@ -126,14 +128,18 @@ const overlayRoot = (() => {
       + `<linearGradient id="av3s${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="av3-shade-hi"/><stop offset=".5" class="av3-shade-mid"/><stop offset="1" class="av3-shade-lo"/></linearGradient>`
       + `<radialGradient id="av3d${uid}" cx="50%" cy="50%" r="50%"><stop offset="0" class="av3-drop-in"/><stop offset="1" class="av3-drop-out"/></radialGradient>`
       + `<linearGradient id="av3r${uid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="av3-rim-hi"/><stop offset=".55" class="av3-rim-mid"/><stop offset="1" class="av3-rim-lo"/></linearGradient>`
+      + `<radialGradient id="av3c${uid}" cx="30%" cy="22%" r="95%"><stop offset="0" stop-color="${bodyHi}"/><stop offset=".52" stop-color="${bodyMid}"/><stop offset="1" stop-color="${bodyLo}"/></radialGradient>`
+      + `<radialGradient id="av3t${uid}" cx="74%" cy="84%" r="78%"><stop offset="0" stop-color="${c1}" stop-opacity=".55"/><stop offset="1" stop-color="${c1}" stop-opacity="0"/></radialGradient>`
       + '</defs>'
       + '<circle class="halo" cx="24" cy="24" r="22" fill="none" stroke="var(--accent)" stroke-width="2"/>'
       + `<ellipse class="av3-drop" cx="24" cy="46.4" rx="16" ry="2.3" fill="url(#av3d${uid})"/>`
       + '<rect class="av3-base" x="2.5" y="3.4" width="44" height="44" rx="14"/>'
-      + `<rect class="av3-plate" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3p${uid})"/>`
+      + `<rect class="av3-body" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3c${uid})"/>`
+      + `<rect class="av3-tint" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3t${uid})"/>`
+      + `<rect class="av3-plate" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3p${uid})" opacity=".18"/>`
       + `<rect class="av3-shade" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3s${uid})"/>`
       + `<rect class="av3-rim" x="3.1" y="3.1" width="41.8" height="41.8" rx="12.9" fill="none" stroke="url(#av3r${uid})" stroke-width="1.1"/>`
-      + '<path class="av3-gloss" d="M9.8 17.2Q9.8 9.8 17.2 9.8" fill="none" stroke-width="1.4" stroke-linecap="round"/>'
+      + '<path class="av3-gloss" d="M9.8 17.2Q9.8 9.8 17.2 9.8" fill="none" stroke-width="1.6" stroke-linecap="round"/>'
       + `<g class="ring">${ring}</g>`
       + `<g class="face" fill="${INK}" color="${INK}"><g class="look"><g class="blink">${EYES[f.eyes] || EYES.dot}${EYE_SPEC[f.eyes] || ''}</g></g>${BROWS[f.brow] || ''}<g class="mouth m-${f.mouth}">${MOUTHS[f.mouth] || MOUTHS.smile}</g></g>`;
     return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
