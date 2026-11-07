@@ -81,19 +81,56 @@ def brain_search(con, text: str, k: int) -> list[dict[str, Any]]:
     return [{"kind": "brain", "ref": r["id"], "title": r["title"], "snippet": r["body"][:240]} for _, r in sorted(scored, key=lambda x: -x[0])[:k]]
 
 
+def _clean(text: Any, limit: int) -> str:
+    return re.sub(r"<[^>]+>", "", str(text or ""))[:limit].strip()
+
+
 async def web_search(q: str, k: int) -> list[dict[str, Any]]:
-    key = os.getenv("CFA_SEARCH_API_KEY")
+    """Web search through Brave (default), Tavily or Google custom search.
+
+    Provider is chosen with CFA_SEARCH_PROVIDER=brave|tavily|google and needs CFA_SEARCH_API_KEY;
+    Google additionally needs CFA_SEARCH_CX. A provider error is not an exception for the caller:
+    the research run simply continues with Brain sources only.
+    """
+    key = (os.getenv("CFA_SEARCH_API_KEY") or "").strip()
     if not key:
         return []
+    provider = (os.getenv("CFA_SEARCH_PROVIDER") or "brave").strip().lower()
+    out: list[dict[str, Any]] = []
     try:
-        async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=15) as c:
-            r = await c.get("https://api.search.brave.com/res/v1/web/search", params={"q": q, "count": k}, headers={"X-Subscription-Token": key, "Accept": "application/json"})
-            r.raise_for_status()
-            res = (r.json().get("web") or {}).get("results") or []
-    except (httpx.HTTPError, ValueError):
+        if provider == "tavily":
+            async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=20) as c:
+                r = await c.post("https://api.tavily.com/search",
+                                 json={"api_key": key, "query": q, "max_results": k, "search_depth": "basic"})
+                r.raise_for_status()
+                for x in (r.json().get("results") or []):
+                    url = str(x.get("url") or "")
+                    if url.startswith(("https://", "http://")):
+                        out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
+                                    "snippet": _clean(x.get("content"), 240)})
+        elif provider == "google":
+            async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=15) as c:
+                r = await c.get("https://www.googleapis.com/customsearch/v1",
+                                params={"key": key, "cx": os.getenv("CFA_SEARCH_CX", ""), "q": q, "num": min(k, 10)})
+                r.raise_for_status()
+                for x in (r.json().get("items") or []):
+                    url = str(x.get("link") or "")
+                    if url.startswith(("https://", "http://")):
+                        out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
+                                    "snippet": _clean(x.get("snippet"), 240)})
+        else:  # brave
+            async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=15) as c:
+                r = await c.get("https://api.search.brave.com/res/v1/web/search", params={"q": q, "count": k},
+                                headers={"X-Subscription-Token": key, "Accept": "application/json"})
+                r.raise_for_status()
+                for x in ((r.json().get("web") or {}).get("results") or []):
+                    url = str(x.get("url") or "")
+                    if url.startswith(("https://", "http://")):
+                        out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
+                                    "snippet": _clean(x.get("description"), 240)})
+    except (httpx.HTTPError, ValueError, KeyError):
         return []
-    return [{"kind": "web", "ref": x["url"], "title": re.sub(r"<[^>]+>", "", str(x.get("title", "")))[:120], "snippet": re.sub(r"<[^>]+>", "", str(x.get("description", "")))[:240]}
-            for x in res if str(x.get("url", "")).startswith(("https://", "http://"))][:k]
+    return out[:k]
 
 
 def valid_chart(c: Any) -> dict[str, Any] | None:
