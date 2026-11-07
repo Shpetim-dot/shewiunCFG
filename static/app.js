@@ -174,7 +174,7 @@ const overlayRoot = (() => {
     });
   }
   async function pick(id) {
-    stopAct(); S.bot = S.bots.find((b) => b.id === id); S.view = 'chat'; S.drawer = false; S.menu = false; S.room = null; render();
+    stopAct(); S.bot = S.bots.find((b) => b.id === id); S.view = 'chat'; S.tab = 'screen'; S.drawer = false; S.menu = false; S.room = null; render();
     await run(async () => { S.msgs = await api(`/api/bots/${id}/messages`); if (!S.notes.length) await loadNotes(); if (!S.apps.length) await loadApps(); });
   }
   async function openNote(id, quiet) {
@@ -1204,7 +1204,7 @@ const overlayRoot = (() => {
       h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
       group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
-      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Agent screen', 'Watch what an agent does, live', 'panel', 'screen', () => { S.tab = 'screen'; S.panel = true; if (S.bot) pick(S.bot.id); else go('chat'); }), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
+      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
       group('Govern', [it('Control', 'Approvals, tool calls, audit, incident switch', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage'), it('Self-test', 'Prove the boundaries, share the evidence', 'flask', 'control'), it('OWASP coverage', 'What is covered, what is not', 'check', 'control')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
@@ -1366,6 +1366,7 @@ const overlayRoot = (() => {
       h('div', { class: 'ctxmenu', style: style, role: 'menu' },
         h('div', { class: 'ctxhead' }, bot.name),
         act('Rename', () => run(async () => { const n = window.prompt('New name for ' + bot.name, bot.name); if (!n || n.trim().length < 2) return; await api('/api/bots/' + bot.id, { method: 'PATCH', body: { name: n.trim() } }); await loadBots(); })),
+        act('Open agent screen', () => { S.tab = 'screen'; S.panel = true; pick(bot.id); }),
         act(S.pinned[bot.id] ? 'Unpin' : 'Pin to top', () => { if (S.pinned[bot.id]) delete S.pinned[bot.id]; else S.pinned[bot.id] = true; render(); }),
         act('Mark as unread', () => { S.unreadA[bot.id] = true; render(); }),
         act('Create team with this agent', () => { S.tmodal = true; S.tsel = new Set([bot.id]); S.tname = ''; S.tmission = ''; syncOverlays(true); }),
