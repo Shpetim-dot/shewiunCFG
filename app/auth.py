@@ -755,8 +755,8 @@ def members(request: Request) -> dict[str, Any]:
     if not p.get("org_id"):
         # Open demo workspace (no account exists): report emptiness instead of 401,
         # so the Organisation view does not bounce into the sign-in screen.
-        return {"members": [], "invitations": [], "note": "Keine Organisation in dieser Demo-Instanz. "
-                "Registriere einen Owner, um Mitglieder einzuladen."}
+        return {"members": [], "invitations": [], "note": "No organisation in this demo instance. "
+                "Register an owner to invite members."}
     with db() as con:
         rows = con.execute("SELECT * FROM users WHERE org_id=? ORDER BY created_at", (p["org_id"],)).fetchall()
         invites = con.execute("SELECT id,email,role,expires_at,created_at FROM invitations WHERE org_id=? AND accepted_at IS NULL",

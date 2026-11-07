@@ -1,5 +1,11 @@
 (() => {
   const root = document.getElementById('app');
+// Overlays (drawer, modals) get their own container so toggling them never rebuilds the app.
+const overlayRoot = (() => {
+  let el = document.getElementById('overlay');
+  if (!el) { el = document.createElement('div'); el.id = 'overlay'; document.body.append(el); }
+  return el;
+})();
   const NS = 'http://www.w3.org/2000/svg';
   const G = {
     compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>', lens: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
@@ -22,7 +28,7 @@
   const KIND_COLOR = { note: '#2F5BD3', fact: '#1B7F79', decision: '#7A4E9C', rule: '#B7791F', hypothesis: '#B5543C', lesson: '#3D7A4F' };
   const SPACE_COLOR = (s) => (s === 'shared' ? '#8FB1FF' : s === 'finance' ? '#4FC3D9' : (s || '').startsWith('team:') ? '#6EE7B7' : '#F4B860');
   const S = { usage: { models: [], by_kind: {}, budget: { monthly_cap: null, spent_this_month_known_cost: 0 }, note: 'Loading…', cost_is_partial: false, fallback_models: [] }, provs: [], prices: [], cu: { status: 'unconfigured', problems: [], note: '' }, invSum: null, pnew: { id: '', base_url: '', api_key: '' }, ptest: {}, pr: { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }, fb: '', cap: '', chans: {}, chan: null, cmsgs: [], cdraft: '', cbusy: '', invEdit: null, bs: { q: '', res: null }, view: 'chat', bots: [], bot: null, msgs: [], health: {}, drawer: false, menu: false, modal: null, panel: true, tab: 'overview', draft: '', busy: false,
-    notes: [], note: null, versions: [], edit: false, q: '', filter: '', space: '', graph: true, graphAgent: '', gStatus: '', gSpace: '', gzoom: 1, newNote: false, activity: [], seen: new Set(), pulse: {}, actSince: '',
+    notes: [], note: null, versions: [], edit: false, q: '', filter: '', space: '', graph: true, graphAgent: '', gStatus: '', gSpace: '', gzoom: 1, kindFilter: '', sortBy: '', orphans: false, afilter: {}, mfa: false, mfaCode: '', newNote: false, activity: [], seen: new Set(), pulse: {}, actSince: '',
     calls: [], room: null, topic: '', picked: null, rounds: 1, planDone: {}, approvals: [], audit: [], policies: [], test: null, demo: null, verify: '', toolCalls: [], auth: false, tokenErr: '', bill: null, onb: null, presets: [], upsell: null, models: null, keys: null, newKey: null, backups: [], ready: null, leads: [], funnel: null, lead: { name: '', email: '', company: '', message: '' }, mtest: { model: '', out: '' }, ret: 90, skipOnb: false, sum: {}, cov: null, panicArm: false, menuQ: '', screen: { bot: '', events: [], ctrl: null, seen: new Set() },
     apps: [], appQ: '', appCat: 'All', appOpen: null, mcp: { name: '', url: '', token: '' }, tcall: { bot: '', tool: '', args: '{}', out: '' }, tmpl: [], caps: [],
     ag: { template: 'finance-analyst', name: '', team: '', icon: '', color: '' }, teams: [], tnew: { name: '', icon: 'teams', color: '#2F5BD3', mission: '', members: [] }, inv: [], invQ: '', invRisk: '',
@@ -420,9 +426,9 @@
     if (S.orphans) list = list.filter((n) => !(n.links || []).length && !(n.backlinks_count || 0));
     if (S.sortBy === 'title') list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     else if (S.sortBy === 'links') list = [...list].sort((a, b) => ((b.links || []).length + (b.backlinks_count || 0)) - ((a.links || []).length + (a.backlinks_count || 0)));
-    const kindChips = ['', 'note', 'fact', 'decision', 'rule', 'hypothesis'].map((k) => btn(k || 'Alle', () => { S.kindFilter = k; render(); }, 'chip' + (S.kindFilter === k ? ' ok' : ''), { 'aria-pressed': (S.kindFilter || '') === k }));
+    const kindChips = ['', 'note', 'fact', 'decision', 'rule', 'hypothesis'].map((k) => btn(k || 'All', () => { S.kindFilter = k; render(); }, 'chip' + (S.kindFilter === k ? ' ok' : ''), { 'aria-pressed': (S.kindFilter || '') === k }));
     const sortSel = h('select', { class: 'field', style: 'width:auto;font-size:12px', 'aria-label': 'Sort notes', onchange: (e) => { S.sortBy = e.target.value; render(); } },
-      [['', 'Zuletzt geaendert'], ['title', 'Titel A-Z'], ['links', 'Meiste Links']].map(([v, l]) => h('option', { value: v, selected: (S.sortBy || '') === v }, l)));
+      [['', 'Recently changed'], ['title', 'Title A-Z'], ['links', 'Most links']].map(([v, l]) => h('option', { value: v, selected: (S.sortBy || '') === v }, l)));
     const tree = h('div', { class: 'tree' }, [...new Set(list.map((n) => n.space))].sort().map((sp) => h('details', { open: true }, h('summary', {}, `${sp} (${list.filter((n) => n.space === sp).length})`),
       list.filter((n) => n.space === sp).map((n) => { const lc = (n.links || []).length + (n.backlinks_count || 0);
         return h('button', { type: 'button', class: 'it', 'aria-current': S.note && S.note.id === n.id ? 'true' : false, onclick: () => (S.graph ? selectNode(n.id) : openNote(n.id)) },
@@ -434,8 +440,8 @@
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); uploadFile(e.dataTransfer.files[0]); });
     const left = h('div', {}, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Neurons'], () => { S.graph = !S.graph; S.newNote = false; render(); })), drop,
       h('div', { style: 'height:8px' }), q, h('div', { class: 'row2', style: 'margin:8px 0' }, ['', 'draft', 'verified'].map((f) => btn(f || 'All', () => { S.filter = f; render(); }, 'chip' + (S.filter === f ? ' ok' : ''), { 'aria-pressed': S.filter === f })), S.space ? btn(`space: ${S.space} ×`, () => { S.space = ''; render(); }, 'chip ok') : null),
-      h('div', { class: 'row2', style: 'margin:6px 0;flex-wrap:wrap' }, kindChips, btn(S.orphans ? 'Orphans an' : 'Orphans', () => { S.orphans = !S.orphans; render(); }, 'chip' + (S.orphans ? ' ok' : ''), { 'aria-pressed': !!S.orphans }), sortSel),
-      list.length ? tree : h('p', { class: 'muted' }, S.notes.length ? 'No match.' : 'No notes yet.'));
+      h('div', { class: 'row2', style: 'margin:6px 0;flex-wrap:wrap' }, kindChips, btn(S.orphans ? 'Orphans on' : 'Orphans', () => { S.orphans = !S.orphans; render(); }, 'chip' + (S.orphans ? ' ok' : ''), { 'aria-pressed': !!S.orphans }), sortSel),
+      list.length ? tree : (S.notes.length ? h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'No note matches the current filters.'), btn('Reset filters', () => { S.kindFilter = ''; S.filter = ''; S.orphans = false; S.space = ''; S.q = ''; S.sortBy = ''; render(); }, 'btn')) : h('p', { class: 'muted' }, 'No notes yet.')));
     let mid; const n = S.note;
     if (!S.notes.length && !S.newNote) {
       mid = h('div', { class: 'card empty-card' }, h('h2', {}, 'Your Brain is empty'), h('p', { class: 'muted' }, 'The Brain is a network of notes that agents read from and write to. Every note an agent writes arrives as a draft you verify. Start with sample data, a file, or your own note.'),
@@ -445,9 +451,9 @@
       mid = h('div', {}, h('h2', {}, 'New note'), t, h('div', { style: 'height:8px' }), b, h('div', { class: 'row2', style: 'margin-top:8px' }, k, btn('Save note', () => run(async () => { const r = await api('/api/brain/notes', { method: 'POST', body: { title: t.value, body: b.value, kind: k.value } }); await loadNotes(); S.newNote = false; await openNote(r.id, true); }), 'btn primary')));
     } else if (S.graph) {
       const sel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Whose brain', onchange: (e) => { S.graphAgent = e.target.value; render(); } }, h('option', { value: '' }, 'All agents and people'), S.bots.map((b) => h('option', { value: b.id, selected: S.graphAgent === b.id }, `Brain of ${b.name}`)));
-      const stSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Status filter', onchange: (e) => { S.gStatus = e.target.value; render(); } }, [['', 'Alle Status'], ['verified', 'Verifiziert'], ['draft', 'Entwürfe']].map(([v, l]) => h('option', { value: v, selected: S.gStatus === v }, l)));
+      const stSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Status filter', onchange: (e) => { S.gStatus = e.target.value; render(); } }, [['', 'All statuses'], ['verified', 'Verified'], ['draft', 'Drafts']].map(([v, l]) => h('option', { value: v, selected: S.gStatus === v }, l)));
       const spaces = [...new Set(S.notes.map((x) => x.space))];
-      const spSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Space filter', onchange: (e) => { S.gSpace = e.target.value; render(); } }, [['', 'Alle Spaces'], ...spaces.map((x) => [x, x])].map(([v, l]) => h('option', { value: v, selected: S.gSpace === v }, l)));
+      const spSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Space filter', onchange: (e) => { S.gSpace = e.target.value; render(); } }, [['', 'All spaces'], ...spaces.map((x) => [x, x])].map(([v, l]) => h('option', { value: v, selected: S.gSpace === v }, l)));
       const zoom = (d) => { S.gzoom = Math.max(0.5, Math.min(2, (S.gzoom || 1) + d)); render(); };
       const zbtns = h('div', { class: 'row2', style: 'width:auto' }, btn('−', () => zoom(-0.2), 'chip', { 'aria-label': 'Zoom out' }), btn('+', () => zoom(0.2), 'chip', { 'aria-label': 'Zoom in' }));
       mid = h('div', {}, h('h2', {}, 'Live brain'), h('div', { class: 'row2', style: 'margin-bottom:8px' }, sel, stSel, spSel, zbtns, h('span', { class: 'muted', id: 'gcap' }, '')),
@@ -466,10 +472,10 @@
           h('span', { class: 'chip', style: 'background:' + (KIND_COLOR[n.kind] || '#2F5BD3') + ';color:#fff' }, n.kind),
           (n.links || []).map((l) => { const x = S.notes.find((y) => y.title === l); return x ? btn('-> ' + l, () => openNote(x.id), 'chip') : h('span', { class: 'chip muted' }, '-> ' + l + ' (missing)'); }),
           (n.backlinks || []).map((l) => { const x = S.notes.find((y) => y.title === l); return x ? btn('<- ' + l, () => openNote(x.id), 'chip') : h('span', { class: 'chip muted' }, '<- ' + l); })),
-        ...((n.backlink_details || []).length ? [h('b', {}, 'Backlinks mit Kontext')].concat(n.backlink_details.map((b) => h('div', { class: 'card', style: 'padding:10px;margin:6px 0' }, h('b', {}, b.title), h('p', { class: 'muted', style: 'margin:4px 0 0;font-size:12px' }, '...' + b.snippet + '...')))) : []),
+        ...((n.backlink_details || []).length ? [h('b', {}, 'Backlinks with context')].concat(n.backlink_details.map((b) => h('div', { class: 'card', style: 'padding:10px;margin:6px 0' }, h('b', {}, b.title), h('p', { class: 'muted', style: 'margin:4px 0 0;font-size:12px' }, '...' + b.snippet + '...')))) : []),
         h('details', { style: 'margin-top:20px' }, h('summary', { class: 'muted' }, `Version history (${S.versions.length})`), S.versions.map((v) => h('div', { class: 'card', style: 'margin:8px 0' }, h('span', { class: 'mono' }, `v${v.version} · ${when(v.created_at)} · ${v.actor} · ${v.reason} · ${v.status}`), h('div', { class: 'muted' }, v.body.slice(0, 120)),
           btn('Roll back to this version', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/rollback`, { method: 'POST', body: { version: v.version } }); await reload(); }), 'link')))));
-    } else mid = S.notes.length ? h('p', { class: 'muted' }, 'Select a note.') : emptyState('graph', 'Dein Brain ist leer', 'Erstelle Notizen oder lade die Demo-Workspace, um das Gedaechtnis der Agenten zu sehen.', btn([icon('plus', 16), 'New note'], () => { S.newNote = true; render(); }, 'btn primary'));
+    } else mid = S.notes.length ? h('p', { class: 'muted' }, 'Select a note.') : emptyState('graph', 'Your Brain is empty', 'Create notes or load the demo workspace to see the agents memory.', btn([icon('plus', 16), 'New note'], () => { S.newNote = true; render(); }, 'btn primary'));
     return h('div', { class: 'brain' }, left, h('div', {}, mid), h('div', { id: 'brain-side' }, noteSide(S.note)));
   }
 
@@ -573,7 +579,7 @@
           h('div', { class: 'row2' }, t.members.map((m) => h('span', { class: 'row2' }, tile(m, 24), m.name))), h('div', { class: 'muted' }, `${t.notes} team note(s)`),
           h('div', { class: 'row2' }, h('span', { class: 'row2' }, btn('Channels', () => run(() => openChannels(t)), 'btn'), S.chanCounts && S.chanCounts[t.id] ? badge(S.chanCounts[t.id]) : null), btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(t.members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'), btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); })),
           h('details', {}, h('summary', { class: 'muted' }, 'Edit members'), h('div', { style: 'margin-top:8px' }, eb), h('div', { class: 'row2' }, btn('Save', () => run(async () => { await api('/api/teams/' + t.id, { method: 'PUT', body: { name: t.name, mission: t.mission, members: picked(eb) } }); await Promise.all([loadTeams(), loadBots()]); }), 'btn'), btn('Delete team', () => run(async () => { await api('/api/teams/' + t.id, { method: 'DELETE' }); await Promise.all([loadTeams(), loadBots()]); }), 'link'))));
-      })), S.teams.length ? null : emptyState('teams', 'Noch keine Teams', 'Ein Team ist eine Einheit mit eigenem Gedaechtnis. Erstelle eins oder lade die Demo-Workspace.', btn('Load demo workspace', loadDemo, 'btn')),
+      })), S.teams.length ? null : emptyState('teams', 'No teams yet', 'A team is a unit with its own memory. Create one or load the demo workspace.', btn('Load demo workspace', loadDemo, 'btn')),
       h('h2', {}, 'New team'), nm, h('div', { style: 'height:8px' }), ms, h('div', { style: 'margin:10px 0' }, boxes),
       pickers, btn([icon('plus', 16), 'Create team'], () => run(async () => { await api('/api/teams', { method: 'POST', body: { name: S.tnew.name, mission: S.tnew.mission, members: picked(boxes), icon: S.tnew.icon, color: S.tnew.color } }); S.tnew = { name: '', icon: 'teams', color: '#2F5BD3', mission: '', members: [] }; await Promise.all([loadTeams(), loadBots()]); }), 'btn primary')));
   }
@@ -590,7 +596,7 @@
         sadd(s, 'rect', { x: pad + i * bw + 2, y: H - pad - hh, width: Math.max(2, bw - 4), height: hh, rx: 3, fill: '#2F5BD3', opacity: '.85' });
       });
       sadd(s, 'line', { x1: pad, y1: H - pad, x2: W - pad, y2: H - pad, stroke: 'currentColor', 'stroke-opacity': '.25' });
-      sadd(s, 'text', { x: pad, y: H - 8, 'font-size': 9, fill: 'currentColor' }, d.length ? `Calls pro Tag, letzte ${d.length} Tage (max ${max})` : 'Noch keine Calls in diesem Zeitraum.');
+      sadd(s, 'text', { x: pad, y: H - 8, 'font-size': 9, fill: 'currentColor' }, d.length ? `Calls per day, last ${d.length} days (max ${max})` : 'No calls in this period yet.');
       return s;
     };
     const uDonut = () => {
@@ -610,8 +616,8 @@
       return s;
     };
     const uChart = h('div', { class: 'cards', style: 'margin:10px 0' },
-      h('div', { class: 'card', style: 'padding:10px;min-width:0' }, h('b', {}, 'Calls pro Tag'), h('div', { class: 'gwrap', style: 'overflow:auto' }, uBars())),
-      h('div', { class: 'card', style: 'padding:10px' }, h('b', {}, 'Verteilung nach Typ'), h('div', { class: 'row2', style: 'align-items:center' }, uDonut(), h('div', {}, Object.entries(u.by_kind || {}).map(([k, n]) => h('div', { class: 'muted', style: 'font-size:12px' }, `${k}: ${n}`))))));
+      h('div', { class: 'card', style: 'padding:10px;min-width:0' }, h('b', {}, 'Calls per day'), h('div', { class: 'gwrap', style: 'overflow:auto' }, uBars())),
+      h('div', { class: 'card', style: 'padding:10px' }, h('b', {}, 'Distribution by type'), h('div', { class: 'row2', style: 'align-items:center' }, uDonut(), h('div', {}, Object.entries(u.by_kind || {}).map(([k, n]) => h('div', { class: 'muted', style: 'font-size:12px' }, `${k}: ${n}`))))));
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Models & usage'), uChart,
       h('p', { class: 'muted' }, u.note + (u.cost_is_partial ? ' Some calls have no price record, so the cost total is partial.' : '')),
       h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Model', 'Provider', 'Calls', 'Errors', 'Tokens in / out', 'Avg latency', 'Cost', 'Fallbacks'].map((c) => h('th', {}, c)))),
@@ -701,8 +707,8 @@
       h('h2', {}, 'Policies'), h('table', {}, h('tbody', {}, (S.policies || []).map((p) => h('tr', {}, h('td', { class: 'mono' }, p.action_type), h('td', {}, p.decision))))),
       S.funnel ? [h('h2', {}, 'Pipeline'), h('div', { class: 'cards' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l + ' (30 days)'), h('b', { style: 'font-size:22px' }, String(v || 0))))),
         S.leads.length ? h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60)))))) : h('p', { class: 'muted' }, 'No leads yet. The public page /welcome has the pilot form.')] : null,
-      h('h2', {}, 'Audit log'), h('p', { class: 'muted' }, 'Kette pro Organisation, hash-verkettet. Der Export ist NDJSON fuer SIEM (Splunk, Datadog, Elastic) und laesst sich nach Zeitraum, Akteur und Event-Typ filtern.'),
-      h('div', { class: 'rbox' }, fA('since', 'Ab Datum (2026-01-01)'), fA('until', 'Bis Datum (2026-12-31)'), fA('actor', 'Akteur enthaelt...'), fA('event_type', 'Event-Typ beginnt mit...')),
+      h('h2', {}, 'Audit log'), h('p', { class: 'muted' }, 'Hash-linked chain per organisation. The export is NDJSON for SIEM (Splunk, Datadog, Elastic) and can be filtered by date range, actor and event type.'),
+      h('div', { class: 'rbox' }, fA('since', 'From date (2026-01-01)'), fA('until', 'To date (2026-12-31)'), fA('actor', 'Actor contains...'), fA('event_type', 'Event type starts with...')),
       h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Verify integrity', () => run(async () => { const v = await api('/api/security/audit/verify'); S.verify = v.valid ? `Chain intact (${v.checked} events). It detects edits; it is not an external signature.` : 'Chain broken: ' + JSON.stringify(v); })), btn('Export for SIEM (NDJSON)', () => {
         const q = ['since', 'until', 'actor', 'event_type'].map((k) => (S.afilter || {})[k] ? `${k}=${encodeURIComponent(S.afilter[k])}` : '').filter(Boolean).join('&');
         dl('/api/security/audit/export' + (q ? '?' + q : ''), 'audit-export.ndjson');
@@ -819,7 +825,7 @@
       h('div', { class: 'cards' }, S.presets.map((p) => h('div', { class: 'card appcard preset' }, h('div', { class: 'stack' }, p.agents.slice(0, 4).map((a) => tile(a, 40))), h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, p.name), h('span', { class: 'chip' }, p.level), h('span', { class: 'chip ' + (p.plan === 'free' ? 'ok' : 'warn') }, p.plan === 'free' ? 'Free' : (p.plan === 'starter' ? 'Starter' : 'Professional'))), h('div', { class: 'muted' }, p.tagline), h('div', { class: 'muted', style: 'font-size:12px' }, 'For: ' + p.audience),
         h('div', { class: 'pflow' }, p.flow),
         h('ul', { class: 'pfacts' }, (p.features || []).map((f) => h('li', {}, f)), h('li', {}, `${p.agents.length} agents: ${p.agents.map((a) => a.name).join(', ')}`), h('li', {}, `${p.notes} starter notes in a shared team memory`)),
-        h('p', { class: 'muted', style: 'font-size:12px;margin:8px 0 2px' }, p.plan === 'free' ? 'Im Free-Plan enthalten.' : 'Enthalten im ' + (p.plan === 'starter' ? 'Starter' : 'Professional') + '-Plan - siehe Plans & usage.'), btn('Use this preset', () => applyPreset(p.id), 'btn primary')))),
+        h('p', { class: 'muted', style: 'font-size:12px;margin:8px 0 2px' }, p.plan === 'free' ? 'Included in the Free plan.' : 'Included in the ' + (p.plan === 'starter' ? 'Starter' : 'Professional') + ' plan - see Plans & usage.'), btn('Use this preset', () => applyPreset(p.id), 'btn primary')))),
       h('div', { class: 'row2', style: 'margin-top:16px' }, btn('Load the demo workspace instead', () => { S.modal = null; loadDemo(); }), btn('Skip for now', () => { S.skipOnb = true; S.modal = null; api('/api/onboarding/complete', { method: 'POST' }).catch(() => {}); render(); }, 'link'))));
   }
   function upsellModal() {
@@ -858,8 +864,8 @@
     const jump = (id, label, ic) => btn([icon(ic, 14), label], () => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 'chip');
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Settings'),
       h('div', { class: 'row2', style: 'flex-wrap:wrap;margin:4px 0 14px' },
-        jump('set-health', 'Readiness', 'shield'), jump('set-models', 'Modelle', 'spark'), jump('set-keys', 'API-Keys', 'table'),
-        jump('set-backups', 'Backups & Daten', 'table'), jump('set-danger', 'Gefahrenzone', 'x')),
+        jump('set-health', 'Readiness', 'shield'), jump('set-models', 'Models', 'spark'), jump('set-keys', 'API keys', 'table'),
+        jump('set-backups', 'Backups & data', 'table'), jump('set-danger', 'Danger zone', 'x')),
       h('div', { class: 'card', id: 'set-health', style: 'margin-bottom:14px' }, h('b', {}, 'Readiness'), S.ready ? h('p', {}, h('span', { class: 'chip ' + (S.ready.ready ? 'ok' : 'warn') }, S.ready.ready ? 'ready' : 'not ready'), ' ', S.ready.errors.join('; ')) : null, (S.health.warnings || []).map((w) => h('div', { class: 'muted' }, w))),
       h('div', { class: 'card', id: 'set-models', style: 'margin-bottom:14px' }, h('b', {}, 'Models'), h('p', { class: 'muted' }, 'Agents use any OpenAI-compatible endpoint, and open models through Hugging Face Inference Providers (prefix hf:). Keys are environment variables and are never shown here.'),
         m ? m.providers.map((p) => h('div', { class: 'kv' }, h('span', {}, p.name), h('span', { class: 'chip ' + (p.configured ? 'ok' : 'warn') }, p.configured ? 'key set' : 'no key'))) : null, m ? h('p', { class: 'muted' }, m.free_tier_note) : null,
@@ -870,32 +876,32 @@
         S.newKey ? h('div', { class: 'pre' }, `New token for ${S.newKey.name} (${S.newKey.role}): ${S.newKey.token}\nCopy it now. It cannot be shown again.`) : null,
         k ? h('table', {}, h('tbody', {}, k.keys.map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.role), h('td', { class: 'mono' }, 'used ' + (when(x.last_used) || 'never')), h('td', {}, x.revoked ? h('span', { class: 'chip warn' }, 'revoked') : btn('Revoke', () => run(async () => { await api('/api/admin/keys/' + x.id, { method: 'DELETE' }); S.keys = await api('/api/admin/keys'); }), 'link')))))) : null, k && k.env_keys ? h('p', { class: 'muted' }, `${k.env_keys} key(s) come from the environment.`) : null,
         h('div', { class: 'row2', style: 'margin-top:8px' }, kname, krole, btn('Create key', () => run(async () => { S.newKey = await api('/api/admin/keys', { method: 'POST', body: { name: kname.value, role: krole.value } }); S.keys = await api('/api/admin/keys'); }), 'btn primary'))),
-      h('div', { class: 'card', style: 'margin-bottom:14px' }, h('b', {}, 'Zwei-Faktor-Authentifizierung (TOTP)'),
-        h('p', { class: 'muted' }, 'Optional, aber empfohlen fuer Owner und Admins. Funktioniert mit Google Authenticator, 1Password, Authy und allen RFC-6238-Apps. Recovery-Codes werden einmal angezeigt.'),
+      h('div', { class: 'card', style: 'margin-bottom:14px' }, h('b', {}, 'Two-factor authentication (TOTP)'),
+        h('p', { class: 'muted' }, 'Optional but recommended for owners and admins. Works with Google Authenticator, 1Password, Authy and any RFC 6238 app. Recovery codes are shown once.'),
         (S.me && S.me.user && S.me.user.mfa_enabled)
-          ? h('div', {}, h('p', {}, h('span', { class: 'chip ok' }, '2FA aktiv')), h('details', { style: 'margin-top:8px' }, h('summary', { class: 'muted' }, '2FA deaktivieren'),
-            h('div', { style: 'margin-top:8px' }, h('p', { class: 'muted', style: 'font-size:12px' }, 'Passwort und ein gueltiger Code sind erforderlich.'),
-              h('input', { class: 'field', id: 'mfa-off-pw', type: 'password', placeholder: 'Passwort', autocomplete: 'current-password' }),
+          ? h('div', {}, h('p', {}, h('span', { class: 'chip ok' }, '2FA active')), h('details', { style: 'margin-top:8px' }, h('summary', { class: 'muted' }, 'Disable 2FA'),
+            h('div', { style: 'margin-top:8px' }, h('p', { class: 'muted', style: 'font-size:12px' }, 'Password and a valid code are required.'),
+              h('input', { class: 'field', id: 'mfa-off-pw', type: 'password', placeholder: 'Password', autocomplete: 'current-password' }),
               h('div', { style: 'height:6px' }),
-              h('input', { class: 'field', id: 'mfa-off-code', placeholder: 'Authenticator- oder Recovery-Code', autocomplete: 'one-time-code' }),
-              h('div', { style: 'margin-top:8px' }, btn('2FA deaktivieren', () => run(async () => {
+              h('input', { class: 'field', id: 'mfa-off-code', placeholder: 'Authenticator or recovery code', autocomplete: 'one-time-code' }),
+              h('div', { style: 'margin-top:8px' }, btn('Disable 2FA', () => run(async () => {
                 const password = (document.getElementById('mfa-off-pw') || {}).value || '';
                 const code = (document.getElementById('mfa-off-code') || {}).value || '';
                 await api('/api/auth/mfa/disable', { method: 'POST', body: { password, code } });
-                S.me = await api('/api/auth/me'); S.info = '2FA wurde deaktiviert.'; render();
+                S.me = await api('/api/auth/me'); S.info = '2FA has been disabled.'; render();
               }), 'btn')))))
           : (S.mfaSetup
-            ? h('div', {}, h('p', { class: 'muted' }, 'Secret in der App hinterlegen (Base32):'), h('div', { class: 'pre', style: 'word-break:break-all' }, S.mfaSetup.secret),
-              h('p', { class: 'muted', style: 'font-size:12px' }, 'OTC-Link: ' + (S.me && S.me.user ? '' : '') + S.mfaSetup.otpauth),
-              h('div', { style: 'margin-top:8px' }, h('input', { class: 'field', id: 'mfa-on-code', placeholder: '6-stelliger Code aus der App', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12 }),
-                h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Aktivieren', () => run(async () => {
+            ? h('div', {}, h('p', { class: 'muted' }, 'Add this secret to your app (Base32):'), h('div', { class: 'pre', style: 'word-break:break-all' }, S.mfaSetup.secret),
+              h('p', { class: 'muted', style: 'font-size:12px' }, 'otpauth link: ' + S.mfaSetup.otpauth),
+              h('div', { style: 'margin-top:8px' }, h('input', { class: 'field', id: 'mfa-on-code', placeholder: '6-digit code from the app', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12 }),
+                h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Activate', () => run(async () => {
                   const code = (document.getElementById('mfa-on-code') || {}).value || '';
                   const r = await api('/api/auth/mfa/enable', { method: 'POST', body: { code } });
                   S.mfaCodes = r.recovery_codes; S.mfaSetup = null; S.me = await api('/api/auth/me'); render();
                 }), 'btn primary'))))
-            : h('div', {}, btn('2FA einrichten', () => run(async () => { S.mfaSetup = await api('/api/auth/mfa/setup', { method: 'POST' }); render(); }), 'btn primary'))),
-        (S.mfaCodes || []).length ? h('div', { style: 'margin-top:10px' }, h('b', {}, 'Recovery-Codes - jetzt speichern'),
-          h('div', { class: 'pre' }, S.mfaCodes.join('\n')), h('p', { class: 'muted', style: 'font-size:12px' }, 'Jeder Code funktioniert genau einmal. Danach sind sie nicht mehr abrufbar.')) : null),
+            : h('div', {}, btn('Set up 2FA', () => run(async () => { S.mfaSetup = await api('/api/auth/mfa/setup', { method: 'POST' }); render(); }), 'btn primary'))),
+        (S.mfaCodes || []).length ? h('div', { style: 'margin-top:10px' }, h('b', {}, 'Recovery codes - save them now'),
+          h('div', { class: 'pre' }, S.mfaCodes.join('\n')), h('p', { class: 'muted', style: 'font-size:12px' }, 'Each code works exactly once. They cannot be shown again.')) : null),
       h('div', { class: 'card', id: 'set-backups' }, h('b', {}, 'Backups and data'), h('p', { class: 'muted' }, 'Backups copy the whole database. Keep CFA_SECRET_KEY somewhere else. The audit log is never purged.'),
         h('div', { class: 'row2' }, btn('Back up now', () => run(async () => { await api('/api/admin/backup', { method: 'POST' }); S.backups = await api('/api/admin/backups'); S.info = 'Backup created.'; }), 'btn primary'), btn('Export all data (JSON)', () => run(async () => { await dl('/api/admin/export', 'cfa-export.json'); }))),
         h('div', { style: 'margin-top:8px' }, (S.backups || []).slice(0, 6).map((x) => h('div', { class: 'row2' }, h('span', { class: 'mono', style: 'flex:1' }, x.name), h('span', { class: 'muted' }, Math.round(x.bytes / 1024) + ' KB'), btn('Download', () => run(async () => { await dl('/api/admin/backups/' + x.name, x.name); }), 'link')))),
@@ -947,7 +953,7 @@
       await init();
     } catch (e) { S.tokenErr = e.message; render(); }
   }
-  const storageWarn = (S.health && S.health.storage === 'ephemeral_sqlite') ? h('p', { class: 'warn-text', style: 'font-size:12px;margin-top:10px' }, 'Demo-Host: Diese Instanz hat keinen dauerhaften Speicher - Accounts und Daten koennen bei jedem Neustart verschwinden. Fuer dauerhafte Accounts: Render oder Fly mit Volume (docs/VERCEL.md).') : null;
+  const storageWarn = (S.health && S.health.storage === 'ephemeral_sqlite') ? h('p', { class: 'warn-text', style: 'font-size:12px;margin-top:10px' }, 'Demo host: this instance has no persistent storage - accounts and data can disappear on every restart. For durable accounts use Render or Fly with a volume (docs/VERCEL.md).') : null;
   const emptyState = (ic, title, text, act) => h('div', { class: 'empty' }, icon(ic, 34), h('h3', {}, title), h('p', { class: 'muted' }, text), act || null);
   function loginView() {
     if (S.setup) {
@@ -965,12 +971,12 @@
     }
     const email = h('input', { class: 'field', id: 'auth-email', type: 'email', placeholder: 'you@company.com', autocomplete: 'username', 'aria-label': 'Email' });
     const pw = h('input', { class: 'field', id: 'auth-password', type: 'password', placeholder: 'Password', autocomplete: 'current-password', 'aria-label': 'Password' });
-    const mfa = h('input', { class: 'field', id: 'auth-mfa', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 11, placeholder: 'Authenticator-Code oder Recovery-Code', 'aria-label': 'Two-factor code' });
+    const mfa = h('input', { class: 'field', id: 'auth-mfa', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 11, placeholder: 'Authenticator or recovery code', 'aria-label': 'Two-factor code' });
     mfa.value = S.mfaCode || '';
     mfa.addEventListener('input', () => { S.mfaCode = mfa.value; });
     [email, pw, mfa].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth('login'); }));
     return h('div', { class: 'login' }, h('div', { class: 'card login-card' }, h('div', { class: 'logo' }, 'Shewiun'), h('h2', { style: 'margin-top:18px' }, 'Sign in'), h('p', { class: 'muted' }, 'Use the email address and password of your Shewiun account.'),
-      email, pw, S.mfa ? [h('p', { class: 'muted', style: 'font-size:12px' }, '2FA ist fuer dieses Konto aktiv: Code aus der Authenticator-App eingeben oder einen Recovery-Code verwenden.'), mfa] : null,
+      email, pw, S.mfa ? [h('p', { class: 'muted', style: 'font-size:12px' }, 'Two-factor is enabled for this account: enter the code from your authenticator app or use a recovery code.'), mfa] : null,
       S.tokenErr ? h('p', { class: 'warn-text', role: 'alert' }, S.tokenErr) : null, h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Sign in', () => submitAuth('login'), 'btn primary')),
       h('p', { class: 'muted', style: 'font-size:12px;margin-top:16px' }, 'Forgot your password? Ask an admin to send a reset link, or use the API: POST /api/auth/password/forgot.'), storageWarn));
   }
@@ -984,8 +990,8 @@
     const quick = h('div', { class: 'quick' }, [['New agent', 'plus', openAgent], ['New note', 'doc', () => { S.newNote = true; S.graph = false; go('brain').then(() => { S.newNote = true; S.graph = false; render(); }); }], ['New call', 'council', () => { S.room = null; go('council'); }], ['Upload file', 'up', () => { pickFile(); go('brain'); }]].map(([l, ic, fn]) => h('button', { type: 'button', class: 'qbtn', onclick: fn }, icon(ic, 18), h('span', {}, l))));
     const q = h('input', { class: 'field', placeholder: 'Search the menu', value: S.menuQ, 'aria-label': 'Search the menu' });
     q.addEventListener('input', () => { S.menuQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search the menu"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
-    return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; render(); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
-      h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; render(); } }, icon('x'))), q, quick,
+    return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; syncOverlays(); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
+      h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
       group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
       group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Agent screen', 'Watch what an agent does, live', 'panel', 'screen', () => { S.tab = 'screen'; S.panel = true; if (S.bot) pick(S.bot.id); else go('chat'); }), it('Teams', 'Units with shared memory', 'teams', 'teams', null, S.sum.teams), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
@@ -1019,10 +1025,10 @@
         ROLES.map((r) => h('option', { value: r, selected: u.role === r }, r)));
       sel.addEventListener('change', () => run(async () => {
         await api(`/api/org/members/${u.id}`, { method: 'PATCH', body: { role: sel.value } });
-        S.info = 'Rolle von ' + (u.name || u.email) + ' geandert zu ' + sel.value + '.';
+        S.info = 'Role of ' + (u.name || u.email) + ' changed to ' + sel.value + '.';
         await loadOrg();
       }));
-      const remove = (u.id !== meId && u.role !== 'owner') ? btn('Entfernen', () => run(async () => {
+      const remove = (u.id !== meId && u.role !== 'owner') ? btn('Remove', () => run(async () => {
         await api(`/api/org/members/${u.id}`, { method: 'DELETE' });
         await loadOrg();
       }), 'link') : null;
@@ -1036,9 +1042,9 @@
       btn('Einladen', () => run(async () => {
         const email = (document.getElementById('inv-email') || {}).value || '';
         const r = await api('/api/org/invitations', { method: 'POST', body: { email: email, role: 'developer' } });
-        S.info = r && r.token ? 'Einladung erstellt. Token (dev): ' + r.token : 'Einladung an ' + email + ' verschickt.';
+        S.info = r && r.token ? 'Invitation created. Token (dev): ' + r.token : 'Invitation sent to ' + email + '.';
         await loadOrg();
-      }), 'btn primary')) : h('p', { class: 'muted' }, 'Nur Owner und Admins laden Mitglieder ein.');
+      }), 'btn primary')) : h('p', { class: 'muted' }, 'Only owners and admins can invite members.');
     const rev = o.revenue;
     const money = rev ? h('div', { style: 'margin-bottom:14px' }, h('div', { class: 'cards' },
       ['plan', 'mrr_eur', 'arr_eur', 'seats'].map((k) => h('div', { class: 'card stat' },
@@ -1046,13 +1052,13 @@
         h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))),
       h('div', { class: 'row2', style: 'margin-top:8px' },
         h('span', { class: 'chip ' + (rev.status === 'active' ? 'ok' : 'warn') }, rev.status === 'active' ? 'Active' : rev.status === 'demo' ? 'Demo' : String(rev.status || 'n/a')),
-        rev.customer_since ? h('span', { class: 'muted', style: 'font-size:12px' }, 'Kunde seit ' + when(rev.customer_since)) : null),
-      h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0 0' }, rev.note || 'MRR = Planpreis x bezahlte Seats (keine Buchhaltungs-Ledger).'),
-      rev.status === 'demo' ? h('div', { style: 'margin-top:10px' }, btn('Workspace registrieren fuer echte Umsaetze', () => { S.auth = true; S.setup = true; render(); }, 'btn primary')) : null) : emptyState('coins', 'Keine Umsatzdaten', 'Sobald eine Organisation existiert, zeigt dieser Block Plan, MRR, ARR und Seats.');
-    const anIn = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Titel, z.B. Wartungsfenster Sonntag 02:00', maxlength: 120 }), body: h('input', { class: 'field', id: 'an-body', placeholder: 'Nachricht an dein Team', maxlength: 500 }) };
+        rev.customer_since ? h('span', { class: 'muted', style: 'font-size:12px' }, 'Customer since ' + when(rev.customer_since)) : null),
+      h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0 0' }, rev.note || 'MRR = plan price x paid seats (not an accounting ledger).'),
+      rev.status === 'demo' ? h('div', { style: 'margin-top:10px' }, btn('Create a workspace for real revenue', () => { S.auth = true; S.setup = true; render(); }, 'btn primary')) : null) : emptyState('coins', 'No revenue data yet', 'As soon as an organisation exists this block shows plan, MRR, ARR and seats.');
+    const anIn = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Title, e.g. Maintenance window Sunday 02:00', maxlength: 120 }), body: h('input', { class: 'field', id: 'an-body', placeholder: 'Message to your team', maxlength: 500 }) };
     const annCard = canAdmin ? h('div', { class: 'card', style: 'padding:12px;margin-bottom:10px' },
-      h('b', {}, 'Mitteilung an das Team'), h('div', { style: 'height:6px' }), anIn.title, h('div', { style: 'height:6px' }), anIn.body,
-      h('div', { style: 'margin-top:8px' }, btn('Veröffentlichen', () => run(async () => {
+      h('b', {}, 'Message to the team'), h('div', { style: 'height:6px' }), anIn.title, h('div', { style: 'height:6px' }), anIn.body,
+      h('div', { style: 'margin-top:8px' }, btn('Publish', () => run(async () => {
         await api('/api/announcements', { method: 'POST', body: { title: anIn.title.value.trim(), body: anIn.body.value.trim(), level: 'info', audience: 'all' } });
         anIn.title.value = ''; anIn.body.value = ''; await loadOrg();
       }), 'btn'))) : null;
@@ -1062,43 +1068,54 @@
       h('div', { class: 'muted', style: 'font-size:11px' }, a.published_at ? when(a.published_at) : '')));
     const met = o.metrics;
     const danger = role === 'owner' ? h('details', { style: 'margin-top:22px' },
-      h('summary', { class: 'muted' }, 'Gefahrenzone: Organisation löschen'),
+      h('summary', { class: 'muted' }, 'Danger zone: delete organisation'),
       h('div', { class: 'card', style: 'padding:12px;margin-top:8px' },
-        h('p', { class: 'muted' }, 'Löscht alle Agenten, Notizen, Calls, Audit-Logs und Mitglieder dieser Organisation. Das ist endgültig.'),
-        btn('Organisation löschen', () => {
+        h('p', { class: 'muted' }, 'Deletes every agent, note, call, audit event and member of this organisation. This cannot be undone.'),
+        btn('Delete organisation', () => {
           const slug = (me.org && me.org.slug) || '';
-          const typed = window.prompt('Zum Löschen den Slug eingeben: ' + slug) || '';
+          const typed = window.prompt('Type the slug to delete: ' + slug) || '';
           if (typed.trim().toLowerCase() === slug) run(async () => {
             await api('/api/org?confirm=' + encodeURIComponent(slug), { method: 'DELETE' });
             location.reload();
           });
-          else if (typed) S.info = 'Abgebrochen: Slug stimmt nicht überein.';
-          else S.info = 'Abgebrochen.';
+          else if (typed) S.info = 'Cancelled: slug does not match.';
+          else S.info = 'Cancelled.';
         }, 'btn')) ) : null;
     return h('div', { class: 'body' }, h('div', { class: 'wide' },
       h('div', { class: 'card hero', style: 'padding:18px;margin-bottom:14px' },
-        h('div', { class: 'row2' }, h('div', {}, h('h2', { style: 'margin:0' }, me.org ? me.org.name : 'Organisation'), h('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Dein Workspace: Mitglieder, Rollen, Umsatz und Mitteilungen.')),
+        h('div', { class: 'row2' }, h('div', {}, h('h2', { style: 'margin:0' }, me.org ? me.org.name : 'Organisation'), h('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Your workspace: members, roles, revenue and announcements.')),
           h('span', { class: 'chip ok' }, role || '–')),
-        met ? h('p', { class: 'muted', style: 'font-size:12px' }, 'Agenten ' + met.counts.agents + ' · Notizen ' + met.counts.notes + ' · Calls ' + met.counts.calls + ' · offene Approvals ' + met.counts.approvals_pending + ' · Audit-Events ' + met.counts.audit_events) : null),
+        met ? h('p', { class: 'muted', style: 'font-size:12px' }, 'Agents ' + met.counts.agents + ' · Notes ' + met.counts.notes + ' · Calls ' + met.counts.calls + ' · open approvals ' + met.counts.approvals_pending + ' · audit events ' + met.counts.audit_events) : null),
       h('div', { class: 'org-grid' },
         h('div', { class: 'org-col' },
-          h('h3', {}, 'Mitglieder (' + o.members.length + ')'),
+          h('h3', {}, 'Members (' + o.members.length + ')'),
           o.members.map(memberCard), inviteBtn,
-          o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Offene Einladungen: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
+          o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Open invitations: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
           h('h3', { style: 'margin-top:18px' }, 'Announcements'),
-          annCard, notices.length ? notices : emptyState('chat', 'Keine Mitteilungen', 'Announcements erreichen dein Engineering-Team direkt in der Plattform.')),
+          annCard, notices.length ? notices : emptyState('chat', 'No announcements', 'Announcements reach your engineering team right inside the platform.')),
         h('div', { class: 'org-col' },
-          h('h3', {}, 'Billing & Umsatz'),
+          h('h3', {}, 'Billing & revenue'),
           money,
-          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Stripe'), h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, 'Checkout, Customer Portal und Rechnungen laufen pro Organisation ueber Stripe. Kein geteilter Customer.'), btn('Plans & Upgrade', () => go('plans'), 'btn primary')),
+          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Stripe'), h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, 'Checkout, customer portal and invoices run through Stripe per organisation. No shared customer.'), btn('Plans & upgrade', () => go('plans'), 'btn primary')),
           danger))));
   }
 
+  function syncOverlays() {
+    const parts = [];
+    if (S.drawer) parts.push(...drawer());
+    const m = S.modal;
+    if (m === 'apps') parts.push(appsModal());
+    else if (m === 'agent') parts.push(agentModal());
+    else if (m === 'onboard') parts.push(onboardModal());
+    else if (m === 'upsell') parts.push(upsellModal());
+    else if (m === 'lead') parts.push(leadModal());
+    if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);
+  }
   function render() {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
     const side = h('aside', { class: 'side' },
-      h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); render(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
+      h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Search notes', onclick: () => go('brain') }, icon('search')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus'))),
       h('div', { class: 'agents' }, groups.map((g) => [h('div', { class: 'group' }, g), S.bots.filter((b) => b.team === g).map((b) => h('button', { class: 'agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false, onclick: () => pick(b.id) }, tile(b, 38), h('span', {}, h('b', {}, b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role))))])),
       meterBlock(),
@@ -1113,11 +1130,12 @@
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
       h('main', { class: 'main', style: viewChanged ? 'animation:cfaFade .22s ease' : '' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,
         warn ? h('div', { class: 'banner', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
-      ...(S.drawer ? drawer() : []), S.modal === 'apps' ? appsModal() : null, S.modal === 'agent' ? agentModal() : null, S.modal === 'onboard' ? onboardModal() : null, S.modal === 'upsell' ? upsellModal() : null, S.modal === 'lead' ? leadModal() : null);
+      );
     const sc = document.getElementById('scroll'); if (sc) sc.scrollTop = sc.scrollHeight;
     ensureScreen();
+    syncOverlays();
   }
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (S.modal) close(); else if (S.drawer) { S.drawer = false; render(); } } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (S.modal) close(); else if (S.drawer) { S.drawer = false; syncOverlays(); } } });
   async function init() {
     S.err = '';
     try {

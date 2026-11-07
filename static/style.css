@@ -209,3 +209,9 @@ h2{border-left:3px solid var(--accent);padding-left:10px}
 
 html { scroll-behavior: smooth; }
 html { scroll-behavior: smooth; }
+
+
+/* --- v19: overlay container for drawer and modals --- */
+#overlay { position: fixed; inset: 0; z-index: 80; pointer-events: none; }
+#overlay > * { pointer-events: auto; }
+.modal, .scrim { animation: cfaFade .18s ease; }

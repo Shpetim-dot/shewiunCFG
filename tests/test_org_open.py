@@ -20,7 +20,7 @@ def test_org_views_work_in_the_open_demo_workspace(tmp_path, monkeypatch):
     r = c.get("/api/org/members")
     assert r.status_code == 200, r.text
     assert r.json()["members"] == [] and r.json()["invitations"] == []
-    assert "Demo" in r.json().get("note", "")
+    assert "demo" in r.json().get("note", "").lower()
     assert c.get("/api/org/revenue").status_code == 200
     assert c.get("/api/announcements").status_code == 200
 

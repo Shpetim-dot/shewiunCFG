@@ -273,7 +273,7 @@ def revenue(request: Request) -> dict[str, Any]:
     if A.user_count() == 0 and not row:
         # Demo workspace without an organisation: no billing row exists yet, so show the
         # honest zero state instead of pretending "active".
-        status, note = "demo", "Demo-Instanz ohne Organisation: Umsatz erscheint, sobald du einen Workspace registrierst."
+        status, note = "demo", "Demo instance without an organisation: revenue appears once you create a workspace."
     else:
         note = "Derived from the plan price and subscription status; invoices stay in Stripe."
     return {"org": pf.org(), "plan": plan, "plan_name": PLANS[plan]["name"], "currency": "EUR",
