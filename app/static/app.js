@@ -85,8 +85,8 @@ const overlayRoot = (() => {
       lock: ['..###..', '.#...#.', '.#...#.', '#######', '##...##', '##.#.##', '#######'],
     };
     const SYMBOLS = Object.keys(SPRITES);
-    const FIGURES = ['block', 'antenna', 'ears', 'crest'];
-    const FIGURE_LABEL = { block: 'Block', antenna: 'Antenna', ears: 'Ears', crest: 'Crest' };
+    const FIGURES = ['round', 'eagle', 'hat', 'cap'];
+    const FIGURE_LABEL = { round: 'Rundkopf', eagle: 'Adler', hat: 'Hut', cap: 'Kappe' };
     const AV_COLORS = ['#2F5BD3', '#3B82F6', '#1B7F79', '#16A37F', '#3D7A4F', '#B7791F', '#E5484D', '#B5543C', '#7A4E9C', '#DB2777', '#5B6B88', '#0F172A'];
     const spriteCache = {};
     const spritePath = (name, u) => {
@@ -151,26 +151,37 @@ const overlayRoot = (() => {
     // state: o.thinking = the agent is working or answering (it hops and the mouth moves); o.float = a calm idle bob
     // for the one hero avatar of a screen. Every other figure is static markup, so lists of agents cost nothing.
     function tile(b, s = 40, o = {}) {
-      const L = lookOf(b), c = L.body, top = mix(c, 0.32), side = mix(c, -0.3), ink = lum(c) > 0.55 ? INK : '#F8FAFC';
-      const acc = L.accent, aTop = mix(acc, 0.3), aSide = mix(acc, -0.3);
-      const back = L.figure === 'ears' ? `<rect x="3" y="27" width="4" height="9" fill="${acc}"/><rect x="41" y="17" width="3" height="9" fill="${aSide}"/>` : '';
-      const deco = L.figure === 'antenna' ? `<rect x="23" y="5" width="2" height="9" fill="${side}"/><rect x="21" y="2" width="6" height="4" fill="${acc}"/>`
-        : L.figure === 'crest' ? `<rect x="16" y="12" width="4" height="4" fill="${aTop}"/><rect x="21" y="10" width="4" height="4" fill="${aTop}"/><rect x="26" y="12" width="4" height="4" fill="${aTop}"/>` : '';
-      const badge = s >= 28 && !o.nobadge ? `<g class="av-tag" transform="translate(31 31)"><rect class="av-tagbg" width="16" height="16" rx="2.5"/><path class="av-sym" transform="translate(2.4 2.4)" d="${spritePath(L.sym, 1.6)}"/></g>` : '';
-      const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true'); v.setAttribute('shape-rendering', 'crispEdges');
-      v.setAttribute('class', 'av' + (o.float ? ' bob' : '') + (o.thinking ? ' thinking' : ''));
-      v.style.setProperty('--bd', `-${(Math.random() * 5).toFixed(1)}s`);
-      v.innerHTML = '<ellipse class="av-ground" cx="22" cy="45.4" rx="15" ry="1.6"/>'
-        + `<g class="av-fig">${back}`
-        + `<path class="av-side" d="M31 19L41 9V33L31 43Z" fill="${side}"/>`
-        + `<path class="av-top" d="M7 19L17 9H41L31 19Z" fill="${top}"/>`
-        + `<rect class="av-front" x="7" y="19" width="24" height="24" fill="${c}"/>`
-        + `<rect x="7" y="19" width="24" height="1" fill="#FFFFFF" opacity=".28"/>${deco}`
-        + `<g transform="translate(7 19) scale(2)" fill="${ink}"><g class="look"><g class="av-eyes"><path d="${FACE_EYES[L.eyes] || FACE_EYES.dot}"/>${EYE_SPEC[L.eyes] ? `<path fill="#FFFFFF" d="${EYE_SPEC[L.eyes]}"/>` : ''}</g>`
-        + `</g><path d="${FACE_BROWS[L.brow] || ''}"/><g class="av-mouth"><path d="${FACE_MOUTHS[L.mouth] || FACE_MOUTHS.smile}"/></g></g></g>${badge}`;
-      return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
-    }
-  // ---------- cursor gaze: one global pointer tracker moves the hovered avatar's eyes, never a listener per tile ----------
+      const L = lookOf(b), c = L.body, top = mix(c, 0.32), side = mix(c, -0.3);
+      const ink = lum(c) > 0.55 ? INK : '#F8FAFC', acc = L.accent;
+      // Pixel silhouettes are stepped, but the head/body reads round rather than as a cube.
+      const silhouettes = {
+        round: ['....#####....','..#########..','.###########.','#############','#############','#############','#############','.###########.','..#########..','...#######...','....#####....'],
+        eagle: ['...##...##...','..####.####..','.############.','#############','#############','#############','.###########.','..#########..','...#######...','....#####....'],
+        hat: ['...########...','..##########..','##############','....#####....','..#########..','.###########.','#############','#############','.###########.','..#########..','...#######...'],
+        cap: ['....#####....','..#########..','.###########.','#############','#############','#############','.###########.','..#########..','...#######...','....#####....']
+      };
+      const kind = L.figure === 'eagle' ? 'eagle' : L.figure === 'hat' ? 'hat' : L.figure === 'cap' ? 'cap' : 'round';
+      const rows = silhouettes[kind], cell = 2.65, ox = 6.1, oy = kind === 'hat' ? 7.5 : 8.5;
+      let front = '', topFaces = '', sideFaces = '';
+      const has = (x,y) => !!(rows[y] && rows[y][x] === '#');
+      for (let y=0;y<rows.length;y++) for(let x=0;x<rows[y].length;x++) if(has(x,y)) {
+        const X=ox+x*cell, Y=oy+y*cell, w=cell;
+        front += '<rect x="'+X+'" y="'+Y+'" width="'+(w+.08)+'" height="'+(w+.08)+'" fill="'+c+'"/>';
+        if(!has(x,y-1)) topFaces += '<path d="M'+X+' '+Y+'l2 -2h'+w+'l-2 2z" fill="'+top+'"/>';
+        if(!has(x+1,y)) sideFaces += '<path d="M'+(X+w)+' '+Y+'l2 -2v'+w+'l-2 2z" fill="'+side+'"/>';
+      }
+      const hat = kind === 'hat' ? '<path d="M13 11h22v5H13z M9 16h30v3H9z" fill="'+mix(acc,.1)+'" stroke="'+side+'" stroke-width=".7"/>' : '';
+      const wings = kind === 'eagle' ? '<path d="M7 23L1 17l2 8 4 3 M41 23l6-6-2 8-4 3" fill="'+acc+'" stroke="'+side+'" stroke-width=".8"/><path d="M5 25l5 3m33-3-5 3" stroke="'+top+'" stroke-width="1.5"/>' : '';
+      const eyes = '<g fill="'+ink+'"><rect x="15" y="24" width="4" height="5" rx="1.2"/><rect x="29" y="24" width="4" height="5" rx="1.2"/></g>';
+      const beak = kind === 'eagle' ? '<path d="M21 30h6l-3 5z" fill="#F5B942"/>' : '<path d="M21 33q3 2 6 0" fill="none" stroke="'+ink+'" stroke-width="1.6" stroke-linecap="round"/>';
+      const badge = s >= 44 && !o.nobadge ? '<g transform="translate(34 34)"><circle r="7" fill="'+acc+'" stroke="#fff" stroke-width="1"/><path d="'+spritePath(L.sym,1.05)+'" transform="translate(-3.7 -3.7)" fill="#fff"/></g>' : '';
+      const v = document.createElementNS(NS,'svg');
+      v.setAttribute('viewBox','0 0 48 48'); v.setAttribute('width',s); v.setAttribute('height',s);
+      v.setAttribute('aria-hidden','true'); v.setAttribute('shape-rendering','crispEdges');
+      v.setAttribute('class','av'+(o.float?' bob':'')+(o.thinking?' thinking':''));
+      v.innerHTML='<ellipse class="av-ground" cx="24" cy="45.5" rx="13" ry="1.4"/><g class="av-fig">'+wings+topFaces+sideFaces+front+hat+eyes+beak+badge+'</g>';
+      return h('span',{class:'avatar',style:'width:'+s+'px;height:'+s+'px'},v);
+    }  // ---------- cursor gaze: one global pointer tracker moves the hovered avatar's eyes, never a listener per tile ----------
   const av3Reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   const av3Fine = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
   const AV3_GAZE_MAX = 2.1;   // 48x48 viewBox units, so the shift stays subtle at every rendered size
