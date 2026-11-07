@@ -555,7 +555,8 @@ def install(app: FastAPI) -> None:
     app.include_router(computer_use.router)
     app.include_router(brain.router)
     app.include_router(admin.router)
-    from app import agent_audit, announcements
+    from app import agent_audit, announcements, notifications
+    app.include_router(notifications.router)
     agent_audit.install(app)
     announcements.install(app)
     app.include_router(governance.router)  # specific routes first, before /{decision}

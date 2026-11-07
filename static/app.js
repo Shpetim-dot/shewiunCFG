@@ -12,7 +12,7 @@ const overlayRoot = (() => {
     wrench: '<path d="M4 20l9-9"/><path d="M12 6l5-3 4 4-3 5-3-3z"/>', scales: '<path d="M12 4v16M6 20h12M5 8h14"/><path d="M5 8l-3 7a3 3 0 0 0 6 0zM19 8l-3 7a3 3 0 0 0 6 0z"/>',
     coins: '<ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3 3 7 3s7-1.3 7-3V7M5 12v5c0 1.7 3 3 7 3s7-1.3 7-3v-5"/>',
     shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>', book: '<path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h10"/>',
-    chat: '<path d="M4 5h16v11H9l-5 4z"/>', spark: '<path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>', menu: '<path d="M4 7h16M4 12h16M4 17h16"/>', plus: '<path d="M12 5v14M5 12h14"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>', bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>', spark: '<path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>', menu: '<path d="M4 7h16M4 12h16M4 17h16"/>', plus: '<path d="M12 5v14M5 12h14"/>',
     graph: '<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8 8l8-1M7 9l4 7M17 8l-4 8"/>',
     council: '<circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M14 20c0-2 1.5-4 3.5-4s3.5 2 3.5 4"/>',
     grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
@@ -1233,13 +1233,40 @@ const overlayRoot = (() => {
     else if (m === 'onboard') parts.push(onboardModal());
     else if (m === 'upsell') parts.push(upsellModal());
     else if (m === 'lead') parts.push(leadModal());
+    else if (m === 'notif') parts.push(notifModal());
     if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);
+  }
+  async function loadNotifs() {
+    try { S.notifs = await api('/api/notifications'); } catch {}
+  }
+  async function openNotifs() {
+    S.modal = 'notif'; syncOverlays();
+    await run(async () => { await loadNotifs(); render(); });
+  }
+  function notifModal() {
+    const n = S.notifs || { items: [], unread: 0 };
+    const close = () => { S.modal = null; syncOverlays(); };
+    const markAll = () => run(async () => {
+      await api('/api/notifications/read', { method: 'POST', body: { keys: n.items.map((i) => i.key) } });
+      await loadNotifs(); syncOverlays();
+    });
+    return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
+      h('div', { class: 'modal', role: 'dialog', 'aria-label': 'Notifications', style: 'max-width:560px' },
+        h('div', { class: 'row2' }, h('h2', { style: 'margin:0;flex:1' }, 'Notifications'),
+          n.unread ? h('span', { class: 'chip warn' }, n.unread + ' unread') : h('span', { class: 'chip ok' }, 'all read'),
+          btn('Mark all read', markAll, 'chip'), btn([icon('x', 16)], close, 'chip', { 'aria-label': 'Close' })),
+        n.items.length ? h('div', { style: 'margin-top:10px' }, n.items.map((i) => h('button', { type: 'button', class: 'notif-item' + (i.read ? ' read' : ''),
+          onclick: () => { S.modal = null; syncOverlays(); go(i.view || 'control'); } },
+          h('span', { class: 'chip ' + (i.kind === 'approval' ? 'warn' : i.kind === 'run' ? 'warn' : 'ok') }, i.kind),
+          h('span', { style: 'flex:1;min-width:0' }, h('b', {}, i.title), h('div', { class: 'muted', style: 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, String(i.detail || ''))),
+          h('span', { class: 'muted mono', style: 'font-size:11px' }, when(i.ts))))) : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Nothing needs your attention right now.'))));
   }
   function render() {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
     const side = h('aside', { class: 'side' },
       h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
+        h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Search notes', onclick: () => go('brain') }, icon('search')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus'))),
       h('div', { class: 'agents' }, groups.map((g) => [h('div', { class: 'group' }, g), S.bots.filter((b) => b.team === g).map((b) => h('button', { class: 'agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false, onclick: () => pick(b.id) }, tile(b, 38), h('span', {}, h('b', {}, b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role))))])),
       meterBlock(),
@@ -1248,6 +1275,7 @@ const overlayRoot = (() => {
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct', type: 'button', 'aria-expanded': S.menu, onclick: () => { S.menu = !S.menu; render(); } }, h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
           h('span', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner'), h('small', {}, S.me && S.me.user ? S.me.user.email + ' · ' + S.me.role : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')), h('small', {}, hd.model_configured ? 'Model connected' : 'No model, demo replies'), h('small', {}, `v${hd.version || '?'}${hd.build ? ' · ' + hd.build : ''}`)))));
+    if (!S.notifs && !S._notifsAsked) { S._notifsAsked = true; loadNotifs().then(() => { if (S.notifs && S.notifs.unread) syncOverlays(); }); }
     const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
     const viewChanged = S._v !== S.view; S._v = S.view;

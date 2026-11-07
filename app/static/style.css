@@ -284,3 +284,11 @@ html { scroll-behavior: smooth; }
 .browser-dots i:nth-child(3) { background: #4CAF7D; }
 .browser-url { flex: 1; font-size: 11px; color: var(--muted, #7C8BA5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-page { padding: 10px 12px; border-radius: 10px; background: rgba(140,160,200,.08); min-height: 64px; }
+
+
+/* --- v24: notifications --- */
+.bell { position: relative; }
+.bell .badge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: #B5543C; color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
+.notif-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel, #fff); margin-bottom: 8px; cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; }
+.notif-item:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
+.notif-item.read { opacity: .62; }
