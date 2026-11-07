@@ -26,7 +26,7 @@ DEPTH = {"quick": (2, 3), "standard": (4, 4), "thorough": (6, 5)}  # sub-questio
 
 
 class ResearchIn(BaseModel):
-    question: str = Field(min_length=8, max_length=1000)
+    question: str = Field(min_length=3, max_length=1000)
     depth: str = Field(default="standard", pattern="^(quick|standard|thorough)$")
     web: bool = False
     context: str = Field(default="", max_length=2000)  # optional second input: audience, constraints, what the answer is for

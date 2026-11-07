@@ -604,12 +604,18 @@ const overlayRoot = (() => {
     const reportText = () => rep ? ('# ' + S.rq + '\n\n' + rep.markdown + '\n\n## Sources\n' + (rep.sources || []).map((s) => '[' + s.n + '] ' + s.title + ' - ' + s.ref).join('\n')) : '';
     const copyReport = () => { if (navigator.clipboard) navigator.clipboard.writeText(reportText()).then(() => { S.info = 'Report copied to the clipboard.'; render(); }); };
     const exportReport = () => { const b = new Blob([reportText()], { type: 'text/markdown' }); const a = h('a', { href: URL.createObjectURL(b), download: 'research-report.md' }); document.body.append(a); a.click(); a.remove(); };
-    const rbtn = btn([icon('lens', 16), r && r.running ? 'Researching…' : 'Start research'], startResearch, 'btn primary', { disabled: S.rq.trim().length < 8 || !!(r && r.running) });
-    q.addEventListener('input', () => { S.rq = q.value; rbtn.disabled = q.value.trim().length < 8 || !!(r && r.running); });
+    const rbtn = btn([icon('lens', 16), r && r.running ? 'Researching…' : 'Start research'], () => {
+      const qv = (S.rq || '').trim();
+      if (qv.length < 3) { S.err = 'Type at least 3 characters as the research question.'; render(); return; }
+      S.err = '';
+      startResearch();
+    }, 'btn primary', { disabled: !!(r && r.running), title: 'Plans sub-questions and writes a cited report' });
+    const qhint = h('div', { class: 'muted', style: 'font-size:11px;margin-top:4px' }, (S.rq || '').trim().length + ' / 1000 characters - at least 3 needed to start');
+    q.addEventListener('input', () => { S.rq = q.value; rbtn.disabled = !!(S.rs && S.rs.running); qhint.textContent = q.value.trim().length + ' / 1000 characters - at least 3 needed to start'; });
     const cite = (t) => t.split(/(\[\d+\])/).map((p) => { const m = p.match(/^\[(\d+)\]$/); if (!m) return p; const s = (rep ? rep.sources : r.sources).find((x) => x.n === +m[1]); return !s ? p : s.kind === 'brain' ? btn(p, () => openNote(s.ref), 'wl') : /^https?:\/\//.test(s.ref) ? h('a', { class: 'wl', href: s.ref, target: '_blank', rel: 'noopener noreferrer' }, p) : p; });
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Deep research'),
       h('p', { class: 'muted' }, 'Plans sub-questions, searches your Brain' + (S.health.search_configured ? ' and the web' : '') + ', and writes a report with numbered citations and a chart. Without a model the report is extractive: it quotes sources and adds no generated claims.'),
-      h('div', { class: 'rbox' }, q, cx), h('div', { class: 'row2', style: 'margin:10px 0;flex-wrap:wrap' }, depthChips,
+      h('div', { class: 'rbox' }, q, qhint, cx), h('div', { class: 'row2', style: 'margin:10px 0;flex-wrap:wrap' }, depthChips,
         chip((S.rweb && webReady ? 'Web: on - ' + (S.ssearch ? S.ssearch.provider : 'search') : 'Web: off'), S.rweb && webReady, () => { if (!webReady) { go('settings'); return; } S.rweb = !S.rweb; render(); }, false),
         webReady ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'No search key in this running instance - set CFA_SEARCH_API_KEY and redeploy, then check Settings > Web search > Test key. ',
           btn('Open settings', () => go('settings'), 'link')), h('span', { class: 'sp' }), rbtn),
