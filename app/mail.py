@@ -27,6 +27,11 @@ def configured() -> bool:
 
 def send(to: str, subject: str, body: str) -> bool:
     """Send one plain-text mail. Returns True only when the SMTP server accepted it."""
+    return send_html(to, subject, body, "")
+
+
+def send_html(to: str, subject: str, body: str, html_body: str = "") -> bool:
+    """Send a mail with a plain-text part and (optionally) an HTML alternative."""
     if not configured():
         log.warning("mail not sent (SMTP_HOST/SMTP_FROM unset): to=%s subject=%r", to, subject)
         return False
@@ -35,6 +40,8 @@ def send(to: str, subject: str, body: str) -> bool:
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body + "\n\n-- \nShewiun CFA")
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
     host = os.getenv("SMTP_HOST", "")
     port = int(os.getenv("SMTP_PORT", "465" if os.getenv("SMTP_SSL") == "1" else "587"))
     timeout = float(os.getenv("SMTP_TIMEOUT", "15"))

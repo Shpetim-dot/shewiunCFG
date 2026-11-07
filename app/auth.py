@@ -671,9 +671,10 @@ def forgot(item: ForgotIn, request: Request) -> dict[str, Any]:
         if row:
             token = _issue_token(con, row["id"], "reset_password", minutes=30)
     if token:
-        from app import mail
-        mail.send(email, "Reset your Shewiun password",
-                  f"Use this link within 30 minutes: /?reset={token}")
+        from app import mail, mail_templates
+        subject, text, html_body = mail_templates.render("password_reset", token,
+                                                         "The link works once and expires in 30 minutes.")
+        mail.send_html(email, subject, text, html_body)
     # Always the same answer: no account enumeration.
     return {"ok": True, **_dev_token(token)}
 
@@ -718,8 +719,9 @@ def resend_verification(request: Request) -> dict[str, Any]:
         if row["email_verified_at"]:
             return {"ok": True, "already": True}
         token = _issue_token(con, row["id"], "verify_email", minutes=1440)
-    from app import mail
-    mail.send(row["email"], "Verify your Shewiun email", f"Confirm within 24 hours: /?verify={token}")
+    from app import mail, mail_templates
+    subject, text, html_body = mail_templates.render("verify_email", token, "Confirm within 24 hours.")
+    mail.send_html(row["email"], subject, text, html_body)
     return {"ok": True, **_dev_token(token)}
 
 
@@ -783,8 +785,9 @@ def invite(item: InviteIn, request: Request) -> dict[str, Any]:
         token = secrets.token_urlsafe(32)
         con.execute("INSERT INTO invitations (id,org_id,email,role,token_hash,invited_by,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)",
                     (str(uuid4()), p["org_id"], email, item.role, _hash(token), p["user_id"] or p["name"], _in(days=7), _now()))
-    from app import mail
-    mail.send(email, "You are invited to Shewiun", f"Accept within 7 days: /?invite={token}")
+    from app import mail, mail_templates
+    subject, text, html_body = mail_templates.render("invitation", token, f"Role: {item.role}. Valid for 7 days.")
+    mail.send_html(email, subject, text, html_body)
     _audit("org.invited", p["name"], {"email": email, "role": item.role})
     return {"ok": True, "email": email, "role": item.role, "expires_in_days": 7, **_dev_token(token)}
 
