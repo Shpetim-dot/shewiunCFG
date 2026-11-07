@@ -1391,76 +1391,111 @@ const overlayRoot = (() => {
   }
   const importAgent = (body, label) => run(async () => { const r = await api('/api/marketplace/import', { method: 'POST', body }); await loadBots(); S.info = `${label} added as "${r.name}".` + (r.note ? ' ' + r.note : ''); });
   function marketView() {
-    if (S.mktQ == null) S.mktQ = '';
-    if (S.mktCat == null) S.mktCat = '';
-    if (S.mktRisk == null) S.mktRisk = '';
-    if (S.mktHfDone == null) S.mktHfDone = false;
+    // Wave-2 marketplace: hero + sticky filters + featured cards + category sections. State is lazy.
+    if (S.mkt2Q == null) S.mkt2Q = '';
+    if (S.mkt2Cat == null) S.mkt2Cat = '';
+    if (S.mkt2Risk == null) S.mkt2Risk = '';
+    if (S.mkt2HfDone == null) S.mkt2HfDone = false;
+    const q = S.mkt2Q.trim().toLowerCase();
+    const matched = S.market.filter((c) => (!q || [c.name, c.description, c.category, ...(c.scopes || [])].join(' ').toLowerCase().includes(q)) && (!S.mkt2Cat || c.category === S.mkt2Cat) && (!S.mkt2Risk || c.risk === S.mkt2Risk));
+    const filtered = !!(q || S.mkt2Cat || S.mkt2Risk);
+    const clearFilters = () => { S.mkt2Q = ''; S.mkt2Cat = ''; S.mkt2Risk = ''; render(); };
     const cats = ['', ...new Set(S.market.map((c) => c.category))], risks = ['', 'low', 'medium', 'high'];
-    const query = S.mktQ.trim().toLowerCase();
-    const rows = S.market.filter((c) => (!query || [c.name, c.description, c.category, ...(c.scopes || [])].join(' ').toLowerCase().includes(query)) && (!S.mktCat || c.category === S.mktCat) && (!S.mktRisk || c.risk === S.mktRisk));
-    const filtered = !!(query || S.mktCat || S.mktRisk);
-    const clearFilters = () => { S.mktQ = ''; S.mktCat = ''; S.mktRisk = ''; render(); };
-    const tabs = h('div', { class: 'row2 mkt-tabs' }, [['curated', 'Curated'], ['hf', 'Hugging Face'], ['card', 'Import a card']].map(([k, l]) => btn(l, () => { S.mtab = k; render(); }, 'chip' + (S.mtab === k ? ' ok' : ''), { 'aria-pressed': S.mtab === k })));
-    const filterRow = (label, values, current, pick) => h('div', { class: 'mkt-filter-row' }, h('span', { class: 'muted mkt-filter-label' }, label), values.map((v) => btn(v || 'All', () => { pick(v); render(); }, 'chip' + (current === v ? ' ok' : ''), { 'aria-pressed': current === v })));
-    const scopeTags = (scopes) => (scopes || []).map((s) => h('span', { class: 'chip mkt-tag' }, s));
-    const scopeTagsFold = (c) => { const scopes = c.scopes || [], extra = scopes.slice(3); return h('div', { class: 'mkt-tags' }, h('span', { class: 'chip mkt-tag mono' }, 'template: ' + c.template), scopeTags(scopes.slice(0, 3)), extra.length ? h('details', { class: 'mkt-more' }, h('summary', {}, `+${extra.length} scopes`), h('div', { class: 'mkt-tags' }, scopeTags(extra))) : null); };
-    const curatedCard = (c) => {
-      const nm = h('input', { class: 'field', value: S.mname[c.id] ?? c.name, maxlength: 40, 'aria-label': 'Name for ' + c.name }); nm.addEventListener('input', () => { S.mname[c.id] = nm.value; });
-      return h('article', { class: 'card mkt-card' },
-        h('div', { class: 'mkt-head' }, h('span', { class: 'mkt-ic', style: 'background:' + (c.color || '#5B6B88') }, icon(c.icon || 'spark', 20)), h('div', { class: 'mkt-title' }, h('b', { class: 'mkt-name' }, c.name)), h('span', { class: 'chip mkt-cat' }, c.category)),
-        h('p', { class: 'mkt-desc' }, c.description),
-        h('div', { class: 'mkt-badges' }, h('span', { class: 'chip ok mkt-trust' }, icon('check', 12), 'Verified source'), h('span', { class: 'chip risk-' + c.risk }, 'risk: ' + c.risk)),
-        scopeTagsFold(c),
-        h('details', { class: 'mkt-prev' }, h('summary', {}, 'Preview'),
-          h('div', { class: 'mkt-prev-body' },
-            h('div', { class: 'mkt-kv' }, h('span', { class: 'mkt-k' }, 'Role'), h('span', {}, c.role || c.template)),
-            h('div', { class: 'mkt-kv' }, h('span', { class: 'mkt-k' }, 'Template scopes'), h('span', { class: 'mkt-tags' }, scopeTags(c.scopes))),
-            h('p', { class: 'mkt-note muted' }, "Curated agents are imported as verified and inherit the template's scopes."))),
-        h('div', { class: 'mkt-foot' }, nm, btn('Add to workspace', () => importAgent({ source: 'curated', ref: c.id, name: nm.value }, c.name), 'btn primary')));
+    const featured = new Set(S.market.slice(0, 3).map((c) => c.id));
+    const trust = (curated) => (curated ? h('span', { class: 'chip ok mkt2-trust' }, icon('check', 12), 'Verified source') : h('span', { class: 'chip warn mkt2-trust' }, 'Unverified external'));
+    const tag = (s, mono) => h('span', { class: 'mkt2-tag' + (mono ? ' mono' : '') }, s);
+    const catChip = (cat) => h('span', { class: 'mkt2-cat' }, cat);
+    const scopesFold = (c, limit = 3) => { const sc = c.scopes || [], extra = sc.slice(limit); return h('div', { class: 'mkt2-tags' }, tag('template: ' + c.template, true), sc.slice(0, limit).map((s) => tag(s)), extra.length ? h('details', { class: 'mkt2-more' }, h('summary', {}, `+${extra.length} scopes`), h('div', { class: 'mkt2-tags' }, extra.map((s) => tag(s)))) : null); };
+    const preview = (c) => h('details', { class: 'mkt2-prev' }, h('summary', {}, 'Preview'),
+      h('div', { class: 'mkt2-prev-body' },
+        h('div', { class: 'mkt2-kv' }, h('span', { class: 'mkt2-k' }, 'Role'), h('span', {}, c.role || c.template)),
+        h('div', { class: 'mkt2-kv' }, h('span', { class: 'mkt2-k' }, 'Template scopes'), h('span', { class: 'mkt2-tags' }, (c.scopes || []).map((s) => tag(s)))),
+        h('p', { class: 'mkt2-note' }, "Curated agents are imported as verified and inherit the template's scopes.")));
+    const nameInput = (c, label) => { const i = h('input', { class: 'field mkt2-nameinput', value: S.mname[c.id] ?? c.name, maxlength: 40, 'aria-label': label }); i.addEventListener('input', () => { S.mname[c.id] = i.value; }); return i; };
+    const addCurated = (c, name) => importAgent({ source: 'curated', ref: c.id, name: name || (S.mname[c.id] ?? c.name) }, c.name);
+    const tabs = h('div', { class: 'mkt2-tabs', role: 'group', 'aria-label': 'Marketplace sources' }, [['curated', 'Curated'], ['hf', 'Hugging Face'], ['card', 'Import a card']].map(([k, l]) => btn(l, () => { S.mtab = k; render(); }, 'mkt2-tab', { role: 'tab', 'aria-selected': S.mtab === k, 'aria-pressed': S.mtab === k })));
+    const hero = h('section', { class: 'mkt2-hero' },
+      h('div', { class: 'mkt2-eyebrow' }, 'Templates and open models'),
+      h('h2', { class: 'mkt2-title' }, 'Marketplace'),
+      h('p', { class: 'mkt2-lede' }, 'Curated agent templates for your workspace, plus open models from Hugging Face. Every import gets a name you choose, and nothing runs until you add it.'),
+      h('div', { class: 'mkt2-trustkey' },
+        h('span', { class: 'mkt2-trustitem' }, icon('check', 14), 'Verified source: curated imports keep the template scopes'),
+        h('span', { class: 'mkt2-trustitem' }, icon('shield', 14), 'Unverified external: Hugging Face models and pasted cards, read-only until reviewed')),
+      tabs);
+    const featCard = (c) => {
+      const nm = nameInput(c, 'Name for featured ' + c.name);
+      return h('article', { class: 'mkt2-featcard', style: '--mkt2-c:' + (c.color || '#5B6B88') },
+        h('div', { class: 'mkt2-feat-top' }, tile(c, 56), h('div', { class: 'mkt2-feat-id' }, h('b', { class: 'mkt2-name' }, c.name), h('span', { class: 'mkt2-role' }, c.role || c.category), catChip(c.category))),
+        h('div', { class: 'mkt2-badges' }, trust(true), h('span', { class: 'chip risk-' + c.risk }, 'risk: ' + c.risk)),
+        h('p', { class: 'mkt2-desc' }, c.description),
+        scopesFold(c),
+        preview(c),
+        h('div', { class: 'mkt2-featfoot' }, nm, btn('Add to workspace', () => addCurated(c, nm.value), 'btn primary')));
     };
-    const curatedPane = () => {
-      const qEl = h('input', { class: 'field mkt-search', placeholder: 'Search curated agents', value: S.mktQ, maxlength: 60, 'aria-label': 'Search curated agents' });
-      qEl.addEventListener('input', () => { S.mktQ = qEl.value; const p = qEl.selectionStart; render(); const e = document.querySelector('input[aria-label="Search curated agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
-      return [
-        h('div', { class: 'mkt-toolbar' }, qEl),
-        h('div', { class: 'mkt-filters' }, filterRow('Category', cats, S.mktCat, (v) => { S.mktCat = v; }), filterRow('Risk', risks, S.mktRisk, (v) => { S.mktRisk = v; })),
-        S.market.length ? h('div', { class: 'row2 mkt-count' }, h('span', { class: 'muted' }, `${rows.length} of ${S.market.length} entries`), filtered ? btn('Clear filters', clearFilters, 'link') : null) : null,
-        !S.market.length ? h('div', { class: 'mkt-grid' }, [0, 1, 2].map(() => h('div', { class: 'card mkt-card' }, h('span', { class: 'skel mkt-skel' }), h('span', { class: 'skel mkt-skel mkt-skel-sm' })))) :
-          rows.length ? h('div', { class: 'mkt-grid' }, rows.map(curatedCard)) : emptyState('search', 'No curated agents match', 'Nothing in the curated catalog matches this search and filter. Clear the filters to see all entries.', btn('Clear filters', clearFilters, 'btn')),
-        h('p', { class: 'muted mkt-note' }, 'Importing needs an admin account and is written to the audit log.')];
+    const row = (c) => {
+      const isFeat = !filtered && featured.has(c.id), nm = isFeat ? null : nameInput(c, 'Name for ' + c.name);
+      return h('article', { class: 'mkt2-row' }, tile(c, 40),
+        h('div', { class: 'mkt2-rowmain' },
+          h('div', { class: 'mkt2-rowhead' }, h('b', { class: 'mkt2-name' }, c.name), isFeat ? h('span', { class: 'mkt2-featmark' }, 'Featured') : null, h('span', { class: 'chip risk-' + c.risk }, 'risk: ' + c.risk)),
+          h('p', { class: 'mkt2-desc' }, c.description),
+          scopesFold(c),
+          preview(c)),
+        h('div', { class: 'mkt2-rowadd' }, catChip(c.category), trust(true), nm,
+          btn('Add', () => addCurated(c, nm ? nm.value : null), 'btn primary')));
     };
+    const groups = () => {
+      const sections = [...new Set(S.market.map((c) => c.category))].map((cat) => ({ cat, items: matched.filter((c) => c.category === cat) })).filter((s) => s.items.length);
+      if (!sections.length) return emptyState('search', 'No curated agents match', 'Nothing in the curated catalog matches this search and filter. Clear the filters to see all entries.', btn('Clear filters', clearFilters, 'btn'));
+      return sections.map((s) => h('section', { class: 'mkt2-sec', 'aria-label': s.cat + ' curated agents' },
+        h('div', { class: 'mkt2-sec-head' }, h('h3', {}, s.cat), h('span', { class: 'muted' }, 'Curated templates'), h('span', { class: 'mkt2-sec-count' }, `${s.items.length} agent${s.items.length === 1 ? '' : 's'}`)),
+        h('div', { class: 'mkt2-list' }, s.items.map(row))));
+    };
+    const qEl = h('input', { class: 'mkt2-search', placeholder: 'Search curated agents', value: S.mkt2Q, maxlength: 60, 'aria-label': 'Search curated agents' });
+    qEl.addEventListener('input', () => { S.mkt2Q = qEl.value; const p = qEl.selectionStart; render(); const e = document.querySelector('input[aria-label="Search curated agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
+    const chipRow = (label, values, current, set) => h('div', { class: 'mkt2-frow' }, h('span', { class: 'mkt2-flabel' }, label), values.map((v) => btn(v || 'All', () => { set(v); render(); }, 'mkt2-chip', { 'aria-pressed': current === v })));
+    const toolbar = h('div', { class: 'mkt2-sticky' },
+      h('div', { class: 'mkt2-trow' }, h('div', { class: 'mkt2-searchwrap' }, icon('search', 16), qEl),
+        h('div', { class: 'mkt2-hits' }, h('span', {}, `${matched.length} of ${S.market.length} entries`), filtered ? btn('Clear filters', clearFilters, 'link') : null)),
+      h('div', { class: 'mkt2-filters' }, chipRow('Category', cats, S.mkt2Cat, (v) => { S.mkt2Cat = v; }), chipRow('Risk', risks, S.mkt2Risk, (v) => { S.mkt2Risk = v; })));
+    const featuredSec = (!filtered && S.market.length > 3) ? h('section', { class: 'mkt2-featsec', 'aria-label': 'Featured curated agents' },
+      h('div', { class: 'mkt2-sec-head' }, h('h3', {}, 'Featured'), h('span', { class: 'muted' }, 'Three templates from the curated catalog')),
+      h('div', { class: 'mkt2-featpanel' }, h('div', { class: 'mkt2-featrow' }, S.market.slice(0, 3).map(featCard)))) : null;
+    const skeleton = h('div', { class: 'mkt2-featpanel' }, h('div', { class: 'mkt2-featrow' }, [0, 1, 2].map(() => h('div', { class: 'mkt2-featcard' }, h('span', { class: 'skel mkt2-skel' }), h('span', { class: 'skel mkt2-skel mkt2-skel-sm' })))));
+    const curatedPane = h('div', { class: 'mkt2-pane' }, S.market.length ? toolbar : null, S.market.length ? featuredSec : skeleton, S.market.length ? groups() : null,
+      h('p', { class: 'muted mkt2-footnote' }, 'Importing needs an admin account and is written to the audit log.'));
     const hfPane = () => {
-      const q = h('input', { class: 'field', placeholder: 'Search open models, for example llama or qwen', value: S.hfq, maxlength: 60, 'aria-label': 'Search Hugging Face' }); q.addEventListener('input', () => { S.hfq = q.value; });
-      const search = () => run(async () => { try { S.hf = await api('/api/marketplace/huggingface?q=' + encodeURIComponent(S.hfq)); S.mktHfDone = true; } catch (e) { S.hf = []; S.mktHfDone = false; throw e; } });
+      const hfq = h('input', { class: 'mkt2-search', placeholder: 'Search open models, for example llama or qwen', value: S.hfq, maxlength: 60, 'aria-label': 'Search Hugging Face' }); hfq.addEventListener('input', () => { S.hfq = hfq.value; });
+      const search = () => run(async () => { try { S.hf = await api('/api/marketplace/huggingface?q=' + encodeURIComponent(S.hfq)); S.mkt2HfDone = true; } catch (e) { S.hf = []; S.mkt2HfDone = false; throw e; } });
       const hfCard = (m) => {
-        const nm = h('input', { class: 'field', value: S.hfname[m.id] ?? m.id.split('/')[1], maxlength: 40, 'aria-label': 'Name for ' + m.id }); nm.addEventListener('input', () => { S.hfname[m.id] = nm.value; });
-        return h('article', { class: 'card mkt-card' },
-          h('div', { class: 'mkt-head' }, h('span', { class: 'mkt-ic mkt-ic-neu' }, icon('store', 20)), h('div', { class: 'mkt-title' }, h('b', { class: 'mkt-name mono', title: m.id }, m.id))),
-          h('div', { class: 'mkt-badges' }, h('span', { class: 'chip warn mkt-trust' }, 'Unverified external')),
-          h('div', { class: 'mkt-tags' }, h('span', { class: 'chip mkt-tag' }, `${m.downloads.toLocaleString()} downloads`), h('span', { class: 'chip mkt-tag' }, `${m.likes} likes`), m.pipeline_tag ? h('span', { class: 'chip mkt-tag' }, m.pipeline_tag) : null, (m.tags || []).map((t) => h('span', { class: 'chip mkt-tag' }, t))),
-          h('a', { class: 'link mkt-link', href: m.url, target: '_blank', rel: 'noopener noreferrer' }, 'Model card on Hugging Face'),
-          h('div', { class: 'mkt-foot' }, nm, btn('Import as agent', () => importAgent({ source: 'huggingface', ref: m.id, name: nm.value }, m.id), 'btn primary')));
+        const nm = h('input', { class: 'field mkt2-nameinput', value: S.hfname[m.id] ?? m.id.split('/')[1], maxlength: 40, 'aria-label': 'Name for ' + m.id }); nm.addEventListener('input', () => { S.hfname[m.id] = nm.value; });
+        return h('article', { class: 'mkt2-hfcard' },
+          h('div', { class: 'mkt2-hfhead' }, h('span', { class: 'mkt2-hfic' }, icon('store', 18)), h('div', { class: 'mkt2-hfid' }, h('b', { class: 'mkt2-name mono', title: m.id }, m.id), h('span', { class: 'mkt2-role' }, m.pipeline_tag || 'Open model')), trust(false)),
+          h('div', { class: 'mkt2-tags' }, tag(`${m.downloads.toLocaleString()} downloads`), tag(`${m.likes} likes`), (m.tags || []).map((x) => tag(x))),
+          h('a', { class: 'link mkt2-modellink', href: m.url, target: '_blank', rel: 'noopener noreferrer' }, 'Model card on Hugging Face'),
+          h('div', { class: 'mkt2-hffoot' }, nm, btn('Import as agent', () => importAgent({ source: 'huggingface', ref: m.id, name: nm.value }, m.id), 'btn primary')));
       };
-      return [
-        h('p', { class: 'muted' }, 'Finds open models on Hugging Face. An imported model becomes an agent that starts unverified with read-only rights. To run it, point CFA_MODEL_BASE_URL at an OpenAI-compatible endpoint that serves it.'),
-        h('div', { class: 'row2 mkt-toolbar mkt-hf-search' }, q, btn([icon('search', 16), 'Search'], search, 'btn primary')),
-        S.hf.length ? [h('div', { class: 'row2 mkt-count' }, h('span', { class: 'muted' }, `${S.hf.length} model${S.hf.length === 1 ? '' : 's'} from Hugging Face`)), h('div', { class: 'mkt-grid' }, S.hf.map(hfCard))] :
-          S.mktHfDone ? emptyState('search', 'No open models found', 'Hugging Face returned no models for this search. Try another word.', null) :
-            h('div', { class: 'card mkt-hint' }, h('b', {}, 'Search Hugging Face'), h('p', { class: 'muted mkt-desc', style: 'margin-top:6px' }, 'Results show the model id, downloads, likes and tags from the Hugging Face API. Nothing is preloaded and nothing is installed without your click.'))];
+      return h('div', { class: 'mkt2-pane' },
+        h('div', { class: 'mkt2-notecard' }, icon('shield', 18), h('div', {}, h('b', {}, 'External models start unverified'), h('p', { class: 'mkt2-desc' }, 'An imported model becomes an agent with read-only rights. To run it, point CFA_MODEL_BASE_URL at an OpenAI-compatible endpoint that serves it. Every import is recorded in the audit log.'))),
+        h('div', { class: 'mkt2-sticky' }, h('div', { class: 'mkt2-trow' }, h('div', { class: 'mkt2-searchwrap' }, icon('search', 16), hfq), btn([icon('search', 16), 'Search'], search, 'btn primary mkt2-searchbtn'),
+          S.mkt2HfDone ? h('div', { class: 'mkt2-hits' }, h('span', {}, `${S.hf.length} model${S.hf.length === 1 ? '' : 's'} from Hugging Face`)) : null)),
+        S.hf.length ? h('div', { class: 'mkt2-hfgrid' }, S.hf.map(hfCard)) :
+          S.mkt2HfDone ? emptyState('search', 'No open models found', 'Hugging Face returned no models for this search. Try another word.', null) :
+            h('div', { class: 'mkt2-hint' }, icon('store', 20), h('div', {}, h('b', {}, 'Search Hugging Face'), h('p', { class: 'mkt2-desc' }, 'Results show the real model id, downloads, likes and tags from the Hugging Face API. Nothing is preloaded and nothing is installed without your click.'))));
     };
     const cardPane = () => {
-      const ta = h('textarea', { class: 'field', rows: 8, placeholder: 'Paste an agent card (JSON exported from another workspace)', 'aria-label': 'Agent card JSON' }); ta.value = S.card; ta.addEventListener('input', () => { S.card = ta.value; });
-      const nm = h('input', { class: 'field', value: S.cardname, placeholder: 'Name for the agent', maxlength: 40, 'aria-label': 'Card agent name' }); nm.addEventListener('input', () => { S.cardname = nm.value; });
-      return h('div', { class: 'card mkt-card mkt-import-card' },
-        h('div', { class: 'mkt-head' }, h('span', { class: 'mkt-ic mkt-ic-neu' }, icon('doc', 20)), h('div', { class: 'mkt-title' }, h('b', { class: 'mkt-name' }, 'Paste an agent card'), h('span', { class: 'muted mkt-sub' }, 'JSON from another workspace'))),
-        h('div', { class: 'mkt-badges' }, h('span', { class: 'chip warn mkt-trust' }, 'Unverified external')),
-        h('p', { class: 'mkt-desc' }, 'Cards carry a role and a system prompt, never memory or keys. Imported cards start unverified with read-only rights. Review the prompt before granting more.'),
+      const ta = h('textarea', { class: 'field mkt2-json', rows: 8, placeholder: 'Paste an agent card (JSON exported from another workspace)', 'aria-label': 'Agent card JSON' }); ta.value = S.card; ta.addEventListener('input', () => { S.card = ta.value; });
+      const nm = h('input', { class: 'field mkt2-nameinput', value: S.cardname, placeholder: 'Name for the agent', maxlength: 40, 'aria-label': 'Card agent name' }); nm.addEventListener('input', () => { S.cardname = nm.value; });
+      return h('div', { class: 'mkt2-pane' }, h('div', { class: 'mkt2-importcard' },
+        h('div', { class: 'mkt2-importhead' }, h('span', { class: 'mkt2-hfic' }, icon('doc', 18)), h('div', { class: 'mkt2-hfid' }, h('b', { class: 'mkt2-name' }, 'Paste an agent card'), h('span', { class: 'mkt2-role' }, 'JSON from another workspace')), trust(false)),
+        h('p', { class: 'mkt2-desc' }, 'Cards carry a role and a system prompt, never memory or keys. Imported cards start unverified with read-only rights. Review the prompt before granting more.'),
         ta, nm,
-        h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Import card', () => { let card; try { card = JSON.parse(S.card); } catch { S.err = 'That is not valid JSON.'; return render(); } importAgent({ source: 'card', name: S.cardname, card }, 'Card'); }, 'btn primary')));
+        h('div', { class: 'mkt2-importfoot' }, btn('Import card', () => { let card; try { card = JSON.parse(S.card); } catch { S.err = 'That is not valid JSON.'; return render(); } importAgent({ source: 'card', name: S.cardname, card }, 'Card'); }, 'btn primary'),
+          h('span', { class: 'mkt2-note' }, 'Admin only. Every import is written to the audit log.'))));
     };
-    const body = S.mtab === 'hf' ? h('div', { class: 'mkt-pane' }, hfPane()) : S.mtab === 'card' ? h('div', { class: 'mkt-pane' }, cardPane()) : h('div', { class: 'mkt-pane' }, curatedPane());
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Marketplace'), h('p', { class: 'muted' }, 'Curated agents come from the built-in catalog and are imported as verified. Hugging Face models and pasted cards are external: they start unverified with read-only rights. Name every import yourself.'), tabs, body));
+    const pane = S.mtab === 'hf' ? hfPane() : S.mtab === 'card' ? cardPane() : curatedPane;
+    return h('div', { class: 'body' }, h('div', { class: 'wide mkt2' }, hero, pane));
   }
+
 
   // ---------- control ----------
   const ctlLabel = (d) => (d === 'allow' ? 'Allow' : d === 'approval_required' ? 'Approval required' : 'Deny');

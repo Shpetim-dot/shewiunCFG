@@ -93,19 +93,17 @@ def test_invalid_huggingface_ref_is_422_and_unknown_curated_ref_is_404(tmp_path,
     assert c.post("/api/marketplace/import", json={"source": "curated", "ref": "no-such-entry", "name": "Nope"}, headers=csrf).status_code == 404
 
 
-# ---------- static UI contract ----------
-def test_marketplace_view_renders_cards_search_filters_and_trust(tmp_path, monkeypatch):
+# ---------- static UI contract (layout restructured by wave-2 batch 11) ----------
+def test_marketplace_view_keeps_search_filters_trust_and_the_import_flow(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
     js, view = marketplace_js(c)
-    for marker in ("mkt-grid", "mkt-card", "mkt-head", "mkt-desc", "mkt-tags", "mkt-prev", "mkt-trust", "mkt-foot",
-                   "Search curated agents", "mkt-filter-row", "mkt-search", "mkt-count",
-                   "Verified source", "Unverified external", "Curated agents are imported as verified and inherit the template's scopes.",
-                   "of ${S.market.length} entries", "S.mktQ", "S.mktCat", "S.mktRisk", "c.role", "c.color"):
+    for marker in ("mkt2-search", "mkt2-chip", "mkt2-trust", "mkt2-prev", "mkt2-featcard", "mkt2-row",
+                   "Verified source", "Unverified external",
+                   "Curated agents are imported as verified and inherit the template's scopes.",
+                   "of ${S.market.length} entries", "S.mkt2Q", "S.mkt2Cat", "S.mkt2Risk", "c.role", "c.color"):
         assert marker in view, marker
-    # Tag values come only from real payload fields (template id, scopes) - no invented marketing tags.
-    assert "template: ' + c.template" in view
-    # No old list-only rendering of the curated catalog.
-    for stale in ("card appcard", "class: 'cards'", "tile(c, 38)", "h('div', { class: 'cards' }"):
+    # No wave-1 flat card grid or original list-only markup survives the restructure.
+    for stale in ("mkt-grid", "mkt-card", "card appcard", "class: 'cards'", "tile(c, 38)"):
         assert stale not in view, stale
     # Import flows are unchanged: same endpoint, bot reload, info banner, no navigation.
     start = js.index("const importAgent")
@@ -113,11 +111,10 @@ def test_marketplace_view_renders_cards_search_filters_and_trust(tmp_path, monke
     assert "/api/marketplace/import" in import_fn and "await loadBots()" in import_fn and "S.info =" in import_fn
 
 
-def test_style_css_appends_the_marketplace_block(tmp_path, monkeypatch):
+def test_style_css_keeps_the_wave1_block_and_appends_the_current_marketplace_block(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
     css = c.get("/static/style.css").text
-    assert css.count("/* ===== Batch 5 — Marketplace ===== */") == 1
-    assert ".mkt-grid" in css and ".mkt-card" in css and ".mkt-trust" in css and ".mkt-foot" in css
-    block = css[css.index("/* ===== Batch 5 — Marketplace ===== */"):]
-    assert "@media (max-width: 760px)" in block and ".mkt-grid { grid-template-columns: 1fr; }" in block
-    assert css.rstrip().endswith("}")  # the block is appended at the very end
+    assert css.count("/* ===== Batch 5 — Marketplace ===== */") == 1  # wave-1 block preserved, never edited
+    assert css.count("/* ===== Batch 11 — Marketplace v2 ===== */") == 1
+    assert css.index("/* ===== Batch 11 — Marketplace v2 ===== */") > css.index("/* ===== Batch 5 — Marketplace ===== */")
+    assert ".mkt2-" in css and css.rstrip().endswith("}")
