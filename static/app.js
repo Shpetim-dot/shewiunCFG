@@ -262,8 +262,8 @@ const overlayRoot = (() => {
     const r = S.room;
     if (ev.type === 'start') { r.agents = ev.agents; r.mode = ev.mode; r.rounds = ev.rounds || 1; }
     else if (ev.type === 'activity') r.activity.push(ev.text);
-    else if (ev.type === 'round') { r.thinking = r.agents.map((a) => a.id); r.activity.push(ev.label); }
-    else if (ev.type === 'turn') { r.events.push(ev); r.thinking = r.thinking.filter((id) => id !== ev.bot_id); r.activity.push(`${ev.name} spoke${ev.revised ? ' and changed position' : ''}`); }
+    else if (ev.type === 'round') { r.thinking = r.agents.map((a) => a.id); r.turnStart = Date.now(); r.activity.push(ev.label); }
+    else if (ev.type === 'turn') { ev.ms = Math.max(0, Date.now() - (r.turnStart || Date.now())); r.elapsed = Math.max(0, Date.now() - (r.t0 || Date.now())); r.events.push(ev); r.thinking = r.thinking.filter((id) => id !== ev.bot_id); r.activity.push(`${ev.name} spoke${ev.revised ? ' and changed position' : ''}`); }
     else if (ev.type === 'decision') { r.decision = ev.text; r.plan = ev.plan; r.map = ev.map; }
     else if (ev.type === 'done') { r.done = true; r.id = ev.id; r.draft = ev.draft_note_ids; }
     else if (ev.type === 'error') S.err = ev.detail;
@@ -282,7 +282,7 @@ const overlayRoot = (() => {
   }
   async function startCall() {
     const ids = [...S.picked]; if (ids.length < 2) { S.err = 'Pick at least two agents.'; return render(); }
-    S.room = { live: true, agents: [], events: [], activity: ['Connecting the agents…'], thinking: [], done: false }; S.planDone = {}; S.err = ''; render();
+    S.room = { live: true, agents: [], events: [], activity: ['Connecting the agents…'], thinking: [], done: false, t0: Date.now(), turnStart: Date.now(), elapsed: 0 }; S.planDone = {}; S.err = ''; render();
     try { await stream('/api/calls/stream', { topic: S.topic, bot_ids: ids, rounds: +S.rounds }, (ev) => { onCall(ev); render(); }); }
     catch (e) { S.err = e.message; if (!S.room.events.length) S.room = null; }
     try { S.calls = await api('/api/calls'); } catch {}
@@ -309,22 +309,33 @@ const overlayRoot = (() => {
     const ev = r.events, cur = ev[ev.length - 1];
     const stanceChip = (s) => h('span', { class: 'chip ' + (s === 'support' ? 'ok' : s === 'unsure' ? 'warn' : ''), style: s === 'oppose' ? 'background:#B5543C;color:#fff' : '' }, STANCE[s] || s || '–');
     const lastOf = (id) => [...ev].reverse().find((e) => e.bot_id === id);
-    const tiles = r.agents.map((a) => {
+    const fmtSecs = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+    const tiles = r.agents.map((a, i) => {
       const last = lastOf(a.id), thinking = r.thinking.includes(a.id) && !r.done, b = botBy(a.id);
-      return h('button', { type: 'button', class: 'board-tile' + (thinking ? ' speaking' : '') + (cur && cur.bot_id === a.id ? ' current' : ''), 'aria-label': 'Jump to the latest statement of ' + a.name,
+      return h('button', { type: 'button', style: 'animation-delay:' + (i * 60) + 'ms', class: 'board-tile rise' + (thinking ? ' speaking' : '') + (cur && cur.bot_id === a.id ? ' current' : ''), 'aria-label': 'Jump to the latest statement of ' + a.name,
           onclick: () => { if (last) { const tl = document.getElementById('turn-' + last.id); if (tl) tl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } },
         h('span', { class: 'board-avatar', style: '--c:' + ((b && b.color) || '#2F5BD3') }, tile(b, 44, { thinking })),
         h('span', { class: 'board-meta' }, h('b', {}, a.name), h('span', { class: 'muted' }, thinking ? 'is speaking…' : last ? (last.round === 0 ? 'Opening statement' : 'Round ' + last.round) : 'joining')),
         thinking ? h('span', { class: 'chip warn' }, 'thinking') : last ? stanceChip(last.stance) : h('span', { class: 'chip' }, 'joining'));
     });
-    const bubble = (e) => h('div', { class: 'turn' + (cur && cur.id === e.id ? ' latest' : ''), id: 'turn-' + e.id }, tile(botBy(e.bot_id), 34),
-      h('div', { class: 'turn-body' },
-        h('div', { class: 'row2' }, h('b', {}, e.name), stanceChip(e.stance), h('span', { class: 'muted mono', style: 'font-size:11px' }, e.round === 0 ? 'opening' : 'round ' + e.round), e.revised ? h('span', { class: 'chip' }, 'changed position') : null),
-        h('div', { class: 'turn-text', id: cur && cur.id === e.id ? 'cur-turn' : '' }, e.text),
-        (e.used || []).length ? h('div', { class: 'muted mono', style: 'font-size:11px;margin-top:6px' }, 'read: ' + e.used.join(', ')) : null));
+    const bubble = (e) => {
+      const idx = ev.indexOf(e), prev = ev.slice(0, idx).reverse().find((x) => x.bot_id === e.bot_id);
+      const moved = e.revised && prev && prev.stance !== e.stance;
+      const used = (e.used || []).map((title) => { const n = S.notes.find((x) => x.title === title); return n ? btn(title, () => { go('brain'); run(() => openNote(n.id)); }, 'link') : h('span', {}, title); });
+      return h('div', { class: 'turn' + (cur && cur.id === e.id ? ' latest' : ''), id: 'turn-' + e.id }, tile(botBy(e.bot_id), 34),
+        h('div', { class: 'turn-body' },
+          h('div', { class: 'row2' }, h('b', {}, e.name), stanceChip(e.stance),
+            moved ? h('span', { class: 'chip stance-move' }, (STANCE[prev.stance] || '?') + ' → ' + (STANCE[e.stance] || '?')) : null,
+            h('span', { class: 'muted mono', style: 'font-size:11px' }, e.round === 0 ? 'opening' : 'round ' + e.round),
+            e.ms ? h('span', { class: 'muted mono', style: 'font-size:11px' }, (e.ms / 1000).toFixed(1) + ' s') : null),
+          h('div', { class: 'turn-text', id: cur && cur.id === e.id ? 'cur-turn' : '' }, e.text),
+          used.length ? h('div', { class: 'muted mono', style: 'font-size:11px;margin-top:6px' }, 'read: ', used.map((u) => [u, ' '])) : null));
+    };
     const transcript = h('div', { class: 'transcript', role: 'log', 'aria-live': 'polite', id: 'transcript' },
       (!ev.length) ? h('div', { class: 'waiting' }, h('div', { class: 'dots' }, h('i'), h('i'), h('i')), h('span', { class: 'muted' }, 'Agents are taking their seats…')) : null,
-      ev.map(bubble));
+      ev.flatMap((e, i) => (i === 0 || ev[i - 1].round !== e.round)
+        ? [h('div', { class: 'round-sep' }, e.round === 0 ? 'Opening statements' : 'Round ' + e.round + ' — cross-examination'), bubble(e)]
+        : [bubble(e)]));
     const stepper = h('div', { class: 'row2', style: 'flex-wrap:wrap' }, Array.from({ length: r.rounds || 1 }, (_, i) => h('span', { class: 'chip' + (cur && cur.round === i ? ' ok' : '') }, 'Round ' + (i + 1))),
       h('span', { class: 'chip' + (r.done ? ' ok' : ' warn') }, r.done ? 'concluded' : 'in session'));
     const stanceSummary = () => {
@@ -343,6 +354,9 @@ const overlayRoot = (() => {
     const copyMinutes = () => { if (navigator.clipboard) navigator.clipboard.writeText(minutes()).then(() => { S.info = 'Minutes copied to the clipboard.'; render(); }); };
     const downloadMinutes = () => { const b = new Blob([minutes()], { type: 'text/markdown' }); const a = h('a', { href: URL.createObjectURL(b), download: 'council-minutes.md' }); document.body.append(a); a.click(); a.remove(); };
     const board = h('aside', { class: 'council-board' }, h('h3', {}, 'The board'), h('div', { class: 'board-list' }, tiles),
+      h('p', { class: 'muted', style: 'font-size:12px;margin:12px 0 0' }, r.thinking.length && !r.done
+        ? 'Up next: ' + r.thinking.map((id) => (r.agents.find((a) => a.id === id) || {}).name).filter(Boolean).join(' → ')
+        : (r.done ? 'Call concluded - the chair wrote the decision.' : 'Waiting for the first statement…')),
       h('h3', { style: 'margin-top:14px' }, 'Activity'),
       h('div', { class: 'feed' }, [...(r.activity || [])].reverse().slice(0, 8).map((a) => h('div', {}, a))),
       r.mode === 'demo' ? h('p', { class: 'chip warn' }, 'Demo mode: scripted statements') : null);
@@ -362,7 +376,9 @@ const overlayRoot = (() => {
     return h('div', { class: 'body' }, h('div', { class: 'wide council-room' },
       h('div', { class: 'card council-head' },
         h('div', { class: 'row2', style: 'align-items:flex-start' }, h('h2', { style: 'margin:0;flex:1' }, S.topic), stepper),
-        h('div', { class: 'row2', style: 'margin-top:10px' }, btn([icon('council', 16), 'New call'], () => { S.room = null; S.typedId = ''; render(); }), h('span', { class: 'muted' }, r.live ? 'Live — statements stream in as the agents finish them.' : 'Recorded call.'))),
+        h('div', { class: 'row2', style: 'margin-top:10px' }, btn([icon('council', 16), 'New call'], () => { S.room = null; S.typedId = ''; render(); }),
+          h('span', { class: 'chip mono' }, 'Call ' + fmtSecs(r.elapsed || 0)),
+          h('span', { class: 'muted' }, r.live ? 'Live — statements stream in as the agents finish them.' : 'Recorded call.'))),
       h('div', { class: 'council-stage' },
         board,
         h('div', { class: 'council-main' },
