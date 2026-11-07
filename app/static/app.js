@@ -1523,7 +1523,21 @@ const overlayRoot = (() => {
     return h('div', { class: 'monitor' }, h('div', { class: 'monhead' }, r.agent ? tile(r.agent, 38, { thinking: r.running, float: !r.running }) : icon('lens', 24), h('div', { style: 'flex:1' }, h('b', {}, r.agent ? r.agent.name : 'Research agent'), h('div', { style: 'font-size:12px;opacity:.7' }, r.running ? `working: step ${pr.done} of ${pr.total}` : rep ? 'finished' : 'idle')), h('span', { class: 'chip ' + (r.running ? 'ok' : '') }, r.running ? 'LIVE' : 'DONE')),
       h('div', { class: 'progress dark' }, h('i', { style: `width:${pct}%` })), readerView(r), h('div', { class: 'monbody' }, r.activity.length ? [...r.activity].reverse().map((a) => h('div', {}, a)) : h('div', { style: 'opacity:.7' }, 'Waiting to start…')));
   }
-  async function upgrade(plan) { track('upgrade_click'); await run(async () => { const r = await api('/api/billing/checkout', { method: 'POST', body: { plan } }); location.href = r.url; }); }
+  function upgrade(plan, seats) {
+    track('upgrade_click');
+    const b = S.bill || {}, wanted = Math.round(+seats), current = (b.usage && b.usage.seats) || 1;
+    const base = wanted || (S.qseats != null ? S.qseats : current);
+    const n = Math.max(1, Math.min(200, base || 1));
+    S.up = { plan, seats: n, quote: null, busy: false, err: '', timer: null };
+    S.modal = 'upgrade';
+    render();
+    if (!(b.plans || []).some((x) => x.id === plan)) { S.up.err = 'That plan is not available on this deployment.'; syncOverlays(true); return; }
+    api(`/api/billing/quote?plan=${encodeURIComponent(plan)}&seats=${n}`).then((q) => {
+      if (S.up && S.up.plan === plan && S.up.seats === n) { S.up.quote = q; syncOverlays(true); }
+    }).catch((e) => {
+      if (S.up && S.up.plan === plan && S.up.seats === n) { S.up.err = e.message; syncOverlays(true); }
+    });
+  }
   async function applyPreset(id) {
     track('preset_applied');
     await run(async () => { const r = await api(`/api/presets/${id}/apply`, { method: 'POST' }); await Promise.all([loadBots(), loadNotes(), loadTeams(), api('/api/billing').then((x) => { S.bill = x; })]); S.modal = null; S.onb = { done: true, suggest: false }; S.topic = r.topic; S.info = `Preset ready: ${r.created} agents, team "${r.team}" and ${r.notes} starter notes. Try the sample question in a council call.`; if (r.first_agent) await pick(r.first_agent); });
@@ -1553,18 +1567,180 @@ const overlayRoot = (() => {
   }
   function plansView() {
     const b = S.bill; if (!b) return h('div', { class: 'body' }, h('p', { class: 'muted' }, 'Loading…'));
-    const fmt = (n) => (n >= 100000 ? 'unlimited' : n.toLocaleString());
-    const cta = (p) => (p.id === b.plan ? h('span', { class: 'chip ok' }, 'Current plan') : p.id === 'free' ? null : p.id === 'pilot' ? btn('Request a pilot', () => { track('cta_pilot'); S.modal = 'lead'; render(); }, 'btn primary')
-      : b.checkout ? btn('Upgrade to ' + p.name, () => upgrade(p.id), 'btn primary') : btn('Ask for ' + p.name, () => { S.modal = 'lead'; render(); }, 'btn'));
+    const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+    const eur = (v) => (v == null ? 'Custom' : '€' + Number(v).toFixed(2));
+    const perBlockSeat = (p) => (p.price_eur == null ? 'Custom' : '€' + (p.price_eur / Math.max(1, (p.limits && p.limits.seats) || 1)).toFixed(2));
+    const plans = b.plans || [];
+    const cur = plans.find((p) => p.id === b.plan) || plans[0] || { id: b.plan, name: b.plan_name || b.plan, price_eur: null, tagline: '', limits: b.limits || {} };
+    if (S.qseats == null) S.qseats = Math.max(1, Math.min(200, (b.usage && b.usage.seats) || 1));
+    S.qseats = Math.max(1, Math.min(200, Math.round(S.qseats) || 1));
+    const mk = (p, seats) => { const inc = Math.max(1, (p.limits && p.limits.seats) || 1), blocks = Math.max(1, Math.ceil(seats / inc)); return { seats, inc, blocks, total: p.price_eur == null ? null : blocks * p.price_eur, custom: p.price_eur == null }; };
+    const local = mk(cur, S.qseats);
+    const q = S.quote && S.quote.plan === b.plan && S.quote.seats === S.qseats ? S.quote : null;
+    const v = q ? { seats: q.seats, inc: q.included_seats, blocks: q.blocks, total: q.monthly_total_eur, custom: !!q.custom } : local;
+    const qkey = b.plan + ':' + S.qseats;
+    // The server quote is the source of truth; the local block math above only bridges the gap while it loads.
+    if (!q && S.qkey !== qkey && S.qerrKey !== qkey) {
+      S.qkey = qkey;
+      api(`/api/billing/quote?plan=${encodeURIComponent(b.plan)}&seats=${S.qseats}`).then((r) => { if (S.qkey === qkey) { S.quote = r; S.qkey = null; S.qerr = ''; } render(); })
+        .catch((e) => { if (S.qkey === qkey) { S.qkey = null; S.qerrKey = qkey; S.qerr = e.message; } render(); });
+    }
+    const seatsIn = h('input', { class: 'field planx-seatinput', type: 'number', min: 1, max: 200, value: S.qseats, 'aria-label': 'Seats to quote' });
+    seatsIn.addEventListener('input', () => {
+      S.qseats = Math.max(1, Math.min(200, Math.round(+seatsIn.value || 1)));
+      S.quote = null; S.qerr = ''; S.qerrKey = null;
+      if (S.qtimer) clearTimeout(S.qtimer);
+      S.qtimer = setTimeout(() => {
+        if (S.view !== 'plans') return;
+        render();
+        const el = document.querySelector('input[aria-label="Seats to quote"]');
+        if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} }
+      }, 350);
+    });
+    const stat = (label, value, title) => h('div', { class: 'planx-stat', title: title || null }, h('div', { class: 'planx-stat-lab' }, label), h('div', { class: 'planx-stat-val' }, value));
+    const cta = (p) => {
+      if (p.id === b.plan) return h('span', { class: 'chip ok' }, 'Current plan');
+      if (p.id === 'enterprise') return btn('Request a pilot', () => { track('cta_pilot'); S.modal = 'lead'; render(); }, 'btn');
+      if (p.id === 'free') return h('span', { class: 'muted planx-note' }, 'Free tier');
+      return b.enabled && b.checkout ? btn('Upgrade', () => upgrade(p.id, S.qseats), 'btn primary') : btn('See invoice', () => upgrade(p.id, S.qseats), 'btn');
+    };
+    const cell = (x, cls) => h('td', { class: cls || null }, x);
+    const row = (p) => h('tr', { class: p.id === b.plan ? 'planx-current' : null },
+      h('th', { scope: 'row' }, h('b', {}, p.name), h('div', { class: 'muted planx-tag' }, p.tagline || '')),
+      cell(p.price_eur == null ? 'Custom' : eur(p.price_eur), 'planx-num'), cell(fmt(p.limits.seats), 'planx-num'),
+      cell(perBlockSeat(p), 'planx-num'), cell(fmt(p.limits.agents), 'planx-num'), cell(fmt(p.limits.messages), 'planx-num'),
+      cell(fmt(p.limits.calls), 'planx-num'), cell(fmt(p.limits.research), 'planx-num'), cell(fmt(p.limits.api_calls), 'planx-num'),
+      cell(fmt(p.limits.audit_days) + ' days', 'planx-num'), cell(fmt(p.limits.storage_mb) + ' MB', 'planx-num'), cell(cta(p)));
+    const usage = Object.keys(b.labels || {}).map((k) => {
+      const lim = (b.limits || {})[k], used = (b.usage || {})[k] || 0, pct = Math.min(100, Math.round((used / Math.max(lim || 0, 1)) * 100));
+      return h('div', { class: 'planx-usage' }, h('div', { class: 'row2' }, h('span', { style: 'flex:1' }, b.labels[k]), h('span', { class: 'muted mono' }, `${used} / ${fmt(lim)}`)),
+        h('div', { class: 'progress' + (pct >= 90 ? ' hot' : '') }, h('i', { style: `width:${pct}%` })));
+    });
+    if (b.enabled && b.portal && S.billInv === undefined) {
+      S.billInv = { loading: true };
+      api('/api/billing/invoices').then((r) => { S.billInv = r; render(); })
+        .catch((e) => { S.billInv = { invoices: [], note: 'Invoices could not be loaded: ' + e.message }; render(); });
+    }
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Plans and usage'),
-      !b.enabled ? h('div', { class: 'banner', style: 'border:1px solid var(--line);border-radius:12px;margin-bottom:14px' }, 'Billing is off on this deployment: self-hosted installs have no limits. Set CFA_BILLING=on to enforce plans.') : null,
-      b.status === 'past_due' ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad);margin-bottom:14px' }, 'Your last payment failed. Update your payment method to keep your plan.') : null,
-      h('div', { class: 'cards' }, b.plans.map((p) => h('div', { class: 'card plan' + (p.id === b.plan ? ' current' : '') }, h('b', { style: 'font-size:16px' }, p.name), h('div', { class: 'price' }, p.price_eur === null ? 'Custom' : p.price_eur === 0 ? '€0' : `€${p.price_eur}`, p.price_eur ? h('small', {}, ' / month') : null), h('div', { class: 'muted' }, p.tagline),
-        h('ul', {}, ['messages', 'calls', 'research', 'uploads', 'agents', 'mcp_servers'].map((k) => h('li', {}, `${fmt(p.limits[k])} ${b.labels[k]}${['agents', 'mcp_servers'].includes(k) ? '' : ' / month'}`))), cta(p)))),
-      b.portal ? h('p', {}, btn('Manage billing and invoices', () => run(async () => { const r = await api('/api/billing/portal', { method: 'POST' }); location.href = r.url; }))) : null,
-      h('h2', {}, 'Usage this month'), h('div', { class: 'card' }, Object.keys(b.labels).map((k) => { const lim = b.limits[k], pct = lim >= 100000 ? 4 : Math.min(100, Math.round((b.usage[k] / Math.max(lim, 1)) * 100));
-        return h('div', { style: 'margin:10px 0' }, h('div', { class: 'row2' }, h('span', { style: 'flex:1' }, b.labels[k]), h('span', { class: 'muted mono' }, `${b.usage[k]} / ${fmt(lim)}`)), h('div', { class: 'progress' + (pct >= 90 ? ' hot' : '') }, h('i', { style: `width:${pct}%` }))); })),
-      h('p', { class: 'muted', style: 'font-size:12px' }, 'Limits reset on the first of each month. Prices are launch prices and may change. Plans apply to this workspace.')));
+      !b.enabled ? h('div', { class: 'banner planx-banner' }, 'Billing is off on this deployment: self-hosted installs have no limits, no online checkout and no invoices. The prices below are this release\'s launch prices, for reference only.') : null,
+      b.status === 'past_due' ? h('div', { class: 'banner planx-banner', role: 'alert', style: 'color:var(--bad)' }, 'Your last payment failed. Update your payment method in Manage billing to keep your plan.') : null,
+      b.cancel_at_period_end ? h('div', { class: 'banner planx-banner' }, 'This plan is cancelled and stays active until ' + when(b.period_end) + '.') : null,
+      h('h2', {}, 'Plan and seat quote'),
+      h('div', { class: 'card planx-quote' },
+        h('div', { class: 'row2 planx-quote-head' },
+          h('div', { style: 'flex:1;min-width:0' }, h('div', { class: 'row2' }, h('b', { style: 'font-size:16px' }, (cur.name || b.plan_name) + ' plan'), h('span', { class: 'chip ' + (b.status === 'active' || b.status === 'trialing' ? 'ok' : 'warn') }, b.status || 'active')), h('div', { class: 'muted' }, cur.tagline || '')),
+          h('label', { class: 'planx-seatfield' }, h('span', { class: 'muted' }, 'Seats'), seatsIn)),
+        h('div', { class: 'planx-stats' },
+          stat('Price / month', v.custom ? 'Custom' : eur(v.total)),
+          stat('Included seats', fmt(v.inc), 'Seats covered by one plan block.'),
+          stat('Seat blocks', v.custom ? '—' : fmt(v.blocks), 'A partly filled block is billed as a whole block.'),
+          stat('€ / seat', v.custom || v.total == null ? 'Custom' : '€' + (v.total / Math.max(1, v.seats)).toFixed(2), 'Monthly total divided by the seats you quote.')),
+        h('p', { class: 'planx-line' }, v.custom ? `${fmt(v.seats)} seats and ${fmt(v.blocks)} seat block${v.blocks === 1 ? '' : 's'} of ${fmt(v.inc)}: enterprise is invoiced per contract, so request a pilot for a quote.`
+          : `${fmt(v.seats)} seat${v.seats === 1 ? '' : 's'} -> ${fmt(v.blocks)} block${v.blocks === 1 ? '' : 's'} of ${fmt(v.inc)} -> ${eur(v.total)} / month`),
+        h('p', { class: 'muted planx-fine' }, 'One block covers the plan\'s included seats and never splits. The euro-per-seat figure is derived from the block price; there is no separate per-seat rate.'),
+        b.enabled && cur.id === 'free' && v.seats > v.inc ? h('p', { class: 'muted planx-fine' }, `The Free plan includes ${fmt(v.inc)} seats and has no self-serve seat blocks; upgrade to add more people.`) : null,
+        S.qerr ? h('p', { class: 'muted planx-fine' }, 'The live server quote could not be loaded (' + S.qerr + '). The numbers above use the same plan prices.') : null),
+      h('h2', {}, 'Compare plans'),
+      h('div', { class: 'tbl-wrap planx-table' }, h('table', {},
+        h('caption', { class: 'muted planx-caption' }, 'Prices are in EUR per organisation and per month. Included seats are the size of one seat block.'),
+        h('thead', {}, h('tr', {}, ['Plan', 'Price / month', 'Included seats', '€ / seat at full block', 'Agents', 'Messages', 'Council calls', 'Research', 'API calls', 'Audit days', 'Storage', 'Choose'].map((t, i) => h('th', { scope: 'col', class: i > 0 && i < 11 ? 'planx-num' : null }, t)))),
+        h('tbody', {}, plans.map(row)))),
+      h('p', { class: 'muted planx-fine' }, 'Prices are launch prices in EUR, per organisation, billed monthly. Seat blocks do not split; a new block starts when the previous one is full. Cancel anytime.'),
+      b.enabled ? h('h2', {}, 'Invoices') : null,
+      b.enabled ? h('div', { class: 'card planx-invoices' },
+        h('div', { class: 'row2 planx-actions' },
+          b.portal ? btn('Manage billing and invoices', () => run(async () => { const r = await api('/api/billing/portal', { method: 'POST' }); location.href = r.url; })) : h('span', { class: 'muted' }, 'No paid subscription yet: online billing is not set up for this workspace.'),
+          b.contact ? h('a', { class: 'link', href: b.contact, target: '_blank', rel: 'noopener' }, 'Talk to us') : null),
+        !b.portal ? h('p', { class: 'muted planx-fine' }, 'No invoices yet.') :
+          !S.billInv || S.billInv.loading ? h('p', { class: 'muted planx-fine' }, 'Loading invoices…') :
+            (S.billInv.invoices || []).length ? h('div', { class: 'tbl-wrap' }, h('table', {},
+              h('thead', {}, h('tr', {}, ['Number', 'Status', 'Amount', 'Created', 'Invoice'].map((t) => h('th', { scope: 'col' }, t)))),
+              h('tbody', {}, S.billInv.invoices.map((i) => h('tr', {},
+                h('td', { class: 'mono' }, i.number || i.id || '—'),
+                h('td', { class: 'muted' }, i.status || '—'),
+                h('td', {}, i.amount_due == null ? '—' : (Number(i.amount_due) / 100).toFixed(2) + ' ' + String(i.currency || 'eur').toUpperCase()),
+                h('td', { class: 'muted' }, when(i.created)),
+                h('td', {}, i.invoice_pdf ? h('a', { href: i.invoice_pdf, target: '_blank', rel: 'noopener' }, 'PDF') : i.hosted_invoice_url ? h('a', { href: i.hosted_invoice_url, target: '_blank', rel: 'noopener' }, 'View') : h('span', { class: 'muted' }, '—')))))))
+              : h('p', { class: 'muted planx-fine' }, S.billInv.note || 'No invoices yet.')) : null,
+      h('h2', {}, 'Usage this month'), h('div', { class: 'card planx-usage-card' }, usage),
+      h('p', { class: 'muted planx-fine' }, 'Limits reset on the first of each month. Usage counts this workspace only.')));
+  }
+  function upgradeModal() {
+    const u = S.up || { plan: 'starter', seats: 1, quote: null, busy: false, err: '', timer: null };
+    const b = S.bill || {}, plans = b.plans || [];
+    const p = plans.find((x) => x.id === u.plan) || { id: u.plan, name: u.plan, price_eur: null, tagline: '', limits: {} };
+    const q = u.quote && u.quote.plan === u.plan && u.quote.seats === u.seats ? u.quote : null;
+    const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+    const eur = (x) => (x == null ? 'Custom' : '€' + Number(x).toFixed(2));
+    const inc = q ? q.included_seats : Math.max(1, (p.limits && p.limits.seats) || 1);
+    const blocks = q ? q.blocks : Math.max(1, Math.ceil(u.seats / inc));
+    const custom = q ? q.custom : p.price_eur == null;
+    const total = q ? q.monthly_total_eur : (p.price_eur == null ? null : blocks * p.price_eur);
+    const price = q ? q.unit_price_eur : p.price_eur;
+    const canPay = !!(b.enabled && q && q.checkout && !custom && !u.busy);
+    const closeUp = () => { if (u.timer) clearTimeout(u.timer); S.modal = null; S.up = null; syncOverlays(true); };
+    const pilot = () => { if (u.timer) clearTimeout(u.timer); S.modal = 'lead'; S.up = null; render(); };
+    const focusSeats = () => { try { const el = document.querySelector('input[aria-label="Seats for this invoice"]'); if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } } catch {} };
+    const pull = (n) => {
+      if (u.timer) { clearTimeout(u.timer); u.timer = null; }
+      u.seats = Math.max(1, Math.min(200, Math.round(n) || 1)); u.quote = null; u.err = '';
+      syncOverlays(true); focusSeats();
+      const want = u.seats;
+      api(`/api/billing/quote?plan=${encodeURIComponent(u.plan)}&seats=${want}`).then((r) => {
+        if (S.up === u && S.up.seats === want) { S.up.quote = r; syncOverlays(true); focusSeats(); }
+      }).catch((e) => {
+        if (S.up === u && S.up.seats === want) { S.up.err = e.message; syncOverlays(true); focusSeats(); }
+      });
+    };
+    const si = h('input', { class: 'field planx-seatinput', type: 'number', min: 1, max: 200, value: u.seats, 'aria-label': 'Seats for this invoice' });
+    si.addEventListener('input', () => {
+      u.seats = Math.max(1, Math.min(200, Math.round(+si.value || 1))); u.quote = null; u.err = '';
+      if (u.timer) clearTimeout(u.timer);
+      u.timer = setTimeout(() => { if (S.modal === 'upgrade' && S.up === u) pull(u.seats); }, 320);
+    });
+    const pay = async () => {
+      const cur = S.up;
+      if (!cur || cur.busy || !cur.quote) return;
+      cur.busy = true; cur.err = '';
+      syncOverlays(true);
+      try {
+        const r = await api('/api/billing/checkout', { method: 'POST', body: { plan: cur.plan, seats: cur.seats } });
+        location.href = r.url;
+      } catch (e) {
+        if (S.up === cur) { cur.busy = false; cur.err = e.message; syncOverlays(true); }
+      }
+    };
+    const LBL = Object.assign({}, b.labels || {}, { audit_days: 'days of audit log', storage_mb: 'MB stored knowledge' });
+    const limits = q ? q.limits : (p.limits || {});
+    const lineLabel = q && q.line_items && q.line_items[0] ? q.line_items[0].label : `${p.name || u.plan} plan — seat block (${fmt(inc)} seats)`;
+    return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) closeUp(); } },
+      h('div', { class: 'modal planx-modal', role: 'dialog', 'aria-label': 'Upgrade plan', style: 'max-width:600px' },
+        h('div', { class: 'modal-h' }, h('h2', { style: 'margin:0;flex:1' }, 'Upgrade to ' + (p.name || u.plan)), btn([icon('x', 16)], closeUp, 'chip', { 'aria-label': 'Close' })),
+        h('p', { class: 'muted' }, `You are on the ${b.plan_name || 'current'} plan. Pick the seats you need; the invoice below uses this deployment's plan prices.`),
+        !b.enabled ? h('div', { class: 'banner planx-banner' }, 'Billing is off on this deployment: these prices are for reference only and checkout is disabled.') : null,
+        u.err ? h('div', { class: 'banner planx-banner', role: 'alert', style: 'color:var(--bad)' }, u.err) : null,
+        h('div', { class: 'planx-seatrow' }, h('span', { class: 'muted' }, 'Seats'),
+          h('div', { class: 'planx-stepper' }, btn('-', () => pull(u.seats - 1), 'chip', { 'aria-label': 'One seat less' }), si, btn('+', () => pull(u.seats + 1), 'chip', { 'aria-label': 'One seat more' })),
+          h('span', { class: 'muted planx-hint' }, `1 block = ${fmt(inc)} seats`)),
+        h('p', { class: 'muted planx-line' }, `${fmt(u.seats)} seat${u.seats === 1 ? '' : 's'} -> ${fmt(blocks)} block${blocks === 1 ? '' : 's'} of ${fmt(inc)}`),
+        h('div', { class: 'planx-invoice', 'aria-label': 'Monthly invoice' },
+          h('div', { class: 'planx-inv-head' }, h('b', {}, 'Monthly invoice'), h('span', { class: 'chip' }, 'EUR')),
+          h('div', { class: 'planx-inv-item' },
+            h('div', { class: 'planx-inv-label' }, h('b', {}, lineLabel), h('span', { class: 'muted' }, custom ? 'Invoiced per contract' : `${eur(price)} per block`)),
+            h('div', { class: 'planx-inv-qty' }, '× ' + fmt(blocks)),
+            h('div', { class: 'planx-inv-amount' }, custom ? 'Custom' : eur(total))),
+          h('div', { class: 'planx-inv-row' }, h('span', { class: 'muted' }, 'Subtotal'), h('span', {}, custom ? 'Custom' : eur(total))),
+          h('div', { class: 'planx-inv-row planx-total' }, h('b', {}, 'Total per month'), h('b', {}, custom ? 'Custom' : eur(total))),
+          h('p', { class: 'muted planx-fine' }, custom ? 'Enterprise is invoiced per contract. Request a pilot for a seat-based quote.' : 'Billed monthly, no hidden fees. Prices are in EUR; taxes may apply.'),
+          !q && b.enabled ? h('p', { class: 'muted planx-fine' }, 'Refreshing the server quote…') : null),
+        h('div', { class: 'planx-limits' }, h('div', { class: 'muted planx-limits-head' }, 'Included in the ' + (p.name || u.plan) + ' plan'),
+          h('div', { class: 'row2 planx-chips' }, Object.keys(limits).map((k) => h('span', { class: 'chip' }, fmt(limits[k]) + ' ' + (LBL[k] || k))))),
+        h('div', { class: 'row2 planx-actions' },
+          custom ? btn('Request a pilot', pilot, 'btn primary') : btn(u.busy ? 'Starting checkout…' : 'Continue to checkout', pay, 'btn primary', { disabled: !canPay }),
+          !custom && b.enabled && q && !q.checkout ? btn('Request a pilot', pilot, 'btn') : null,
+          !b.enabled ? btn('Request a pilot', pilot, 'btn') : null,
+          btn('Not now', closeUp)),
+        h('p', { class: 'muted planx-fine' }, 'Continue opens Stripe Checkout for this invoice. The subscription is billed monthly and you can cancel anytime.')));
   }
   function settingsView() {
     const m = S.models, k = S.keys, mt = S.mtest;
@@ -1839,7 +2015,8 @@ const overlayRoot = (() => {
   }
 
   function syncOverlays(force) {
-    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '');
+    const upSig = S.up && S.modal === 'upgrade' ? '|up:' + S.up.plan + ':' + S.up.seats + ':' + (S.up.quote ? 'q' : '') + ':' + (S.up.busy ? 'b' : '') + ':' + (S.up.err || '') : '';
+    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig;
     if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
     S._ovlSig = sig;
     const parts = [];
@@ -1851,6 +2028,7 @@ const overlayRoot = (() => {
     else if (m === 'upsell') parts.push(upsellModal());
     else if (m === 'lead') parts.push(leadModal());
     else if (m === 'notif') parts.push(notifModal());
+    else if (m === 'upgrade') parts.push(upgradeModal());
     if (S.ctx) parts.push(...agentCtx());
     if (S.tmodal) parts.push(teamModal());
     if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);

@@ -76,6 +76,39 @@ def limits_for(plan: str) -> dict[str, int]:
     return PLANS[canonical(plan)]["limits"]
 
 
+CURRENCY = "EUR"
+
+
+def quote(plan: str, seats: int) -> dict[str, Any]:
+    """Monthly invoice for `seats` people on `plan`, computed only from PLANS.
+
+    A plan is charged per seat block and a block never splits: it covers PLANS[*].limits.seats
+    people, so 17 Starter seats are two 10-seat blocks at 29 EUR each. There is no per-seat
+    rate and no discount rate in this product, so the quote derives neither: the volume effect
+    is the block model plus the euro-per-seat figure the UI shows. Enterprise has no list price.
+    """
+    key = (plan or "").strip().lower()
+    key = ALIASES.get(key, key)
+    if key not in PLANS:
+        raise HTTPException(404, "unknown plan")
+    if isinstance(seats, bool) or not isinstance(seats, int):
+        raise HTTPException(422, "seats must be an integer")
+    if seats < 1 or seats > 10_000:
+        raise HTTPException(422, "seats must be between 1 and 10000")
+    spec = PLANS[key]
+    included = int(spec["limits"]["seats"])
+    blocks = max(1, -(-seats // included))  # ceil: a partly filled block is a whole block
+    price = spec["price_eur"]
+    custom = price is None
+    amount = None if custom else blocks * int(price)
+    return {"plan": key, "plan_name": spec["name"], "seats": seats, "included_seats": included,
+            "blocks": blocks, "unit_price_eur": price, "amount_eur": amount,
+            "monthly_total_eur": amount, "currency": CURRENCY, "custom": custom,
+            "tagline": spec["tagline"], "limits": dict(spec["limits"]),
+            "line_items": [{"label": f"{spec['name']} plan — seat block ({included} seats)",
+                            "quantity": blocks, "unit_price_eur": price, "amount_eur": amount}]}
+
+
 CORE_AGENTS = ("strategist", "skeptic", "builder", "chair")
 
 
@@ -248,9 +281,20 @@ def billing() -> dict[str, Any]:
             "last_invoice_status": rowd.get("last_invoice_status"),
             "limits": PLANS[plan]["limits"], "usage": {k: usage.get(k, 0) for k in LABEL}, "labels": LABEL,
             "plans": [{"id": k, "name": v["name"], "price_eur": v["price_eur"], "tagline": v["tagline"],
-                       "limits": v["limits"]} for k, v in PLANS.items()],
+                       "seats_included": v["limits"]["seats"], "limits": v["limits"]} for k, v in PLANS.items()],
             "checkout": stripe_ready, "portal": bool(rowd.get("customer_id") and os.getenv("STRIPE_SECRET_KEY")),
             "contact": os.getenv("CFA_CONTACT_URL", "")}
+
+
+@router.get("/api/billing/quote")
+def quote_endpoint(plan: str, seats: int = 1) -> dict[str, Any]:
+    """Price calculator for a plan and a seat count. Works with billing enforcement off: it
+    only reads the PLANS list. Stripe readiness is reported per plan, not globally."""
+    q = quote(plan, seats)
+    q["enabled"] = enabled()
+    q["checkout"] = bool(os.getenv("STRIPE_SECRET_KEY") and os.getenv(f"STRIPE_PRICE_{q['plan'].upper()}"))
+    q["contact"] = os.getenv("CFA_CONTACT_URL", "")
+    return q
 
 
 @router.get("/api/org/revenue")
@@ -336,6 +380,7 @@ def _iso(ts: Any) -> str | None:
 
 class CheckoutIn(BaseModel):
     plan: str = Field(pattern="^(starter|professional|enterprise|pro|team|pilot)$")
+    seats: int | None = Field(default=None, ge=1, le=10_000)
 
 
 @router.post("/api/billing/checkout")
@@ -344,23 +389,28 @@ async def checkout(item: CheckoutIn, request: Request) -> dict[str, str]:
     plan = canonical(item.plan)
     if plan not in STRIPE_PLANS:
         raise HTTPException(422, "this plan is not sold through Stripe; use the pilot process")
+    seats = item.seats if item.seats is not None else 1
+    q = quote(plan, seats)
+    blocks = q["blocks"]
     price = os.getenv(f"STRIPE_PRICE_{plan.upper()}")
     if not price:
         raise HTTPException(503, "this plan has no Stripe price configured")
     base, oid = _base(request), pf.org()
     with pf.db() as con:
         row = _billing_row(con, oid)
-    data = {"mode": "subscription", "line_items[0][price]": price, "line_items[0][quantity]": "1",
+    data = {"mode": "subscription", "line_items[0][price]": price, "line_items[0][quantity]": str(blocks),
             "success_url": base + "/?billing=success", "cancel_url": base + "/?billing=cancel",
             "client_reference_id": oid, "metadata[plan]": plan, "metadata[org_id]": oid,
+            "metadata[seats]": str(seats), "metadata[blocks]": str(blocks),
             "subscription_data[metadata][plan]": plan, "subscription_data[metadata][org_id]": oid,
+            "subscription_data[metadata][seats]": str(seats), "subscription_data[metadata][blocks]": str(blocks),
             "allow_promotion_codes": "true"}
     if row and row["customer_id"]:
         data["customer"] = row["customer_id"]
     url = (await _stripe("/v1/checkout/sessions", data)).get("url", "")
     if not url.startswith("https://checkout.stripe.com/"):
         raise HTTPException(502, "unexpected checkout address")
-    pf._m().append_audit("billing.checkout_started", p["name"], {"plan": plan})
+    pf._m().append_audit("billing.checkout_started", p["name"], {"plan": plan, "seats": seats, "blocks": blocks})
     return {"url": url}
 
 

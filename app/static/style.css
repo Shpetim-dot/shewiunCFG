@@ -620,3 +620,62 @@ html { scroll-behavior: smooth; }
   .mkt-hf-search .field { flex: 1 1 100%; max-width: none; }
   .mkt-k { min-width: 84px; }
 }
+
+
+/* ===== Batch 6 — Plans ===== */
+.planx-banner { margin-bottom: 14px; border-radius: 12px; }
+.planx-quote { display: flex; flex-direction: column; gap: 12px; }
+.planx-quote-head { justify-content: space-between; }
+.planx-seatfield { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.planx-seatinput { width: 96px; min-width: 0; padding: 8px 10px; }
+.planx-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.planx-stat { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--side); }
+.planx-stat-lab { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.planx-stat-val { font-size: 20px; font-weight: 700; letter-spacing: -.01em; margin-top: 2px; }
+.planx-line { margin: 0; font-size: 14px; padding: 8px 12px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 0 8px 8px 0; }
+.planx-fine { font-size: 12px; margin: 6px 0; }
+.planx-table { margin: 4px 0 6px; }
+.planx-table table { min-width: 1000px; font-size: 12.5px; }
+.planx-table th, .planx-table td { padding: 7px 8px; vertical-align: middle; }
+.planx-table thead th { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 600; vertical-align: bottom; }
+.planx-table tbody th { font-weight: 600; }
+.planx-num { text-align: right; font-variant-numeric: tabular-nums; }
+.planx-tag { font-size: 11px; font-weight: 400; line-height: 1.35; margin-top: 2px; }
+.planx-current { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.planx-caption { caption-side: bottom; text-align: left; font-size: 12px; padding-top: 8px; }
+.planx-note { font-size: 12px; }
+.planx-actions { margin: 4px 0 2px; }
+.planx-invoices .tbl-wrap { margin-top: 10px; }
+.planx-usage { margin: 10px 0; }
+.planx-usage:first-child { margin-top: 0; }
+.planx-modal { display: flex; flex-direction: column; gap: 2px; }
+.planx-modal > * { flex-shrink: 0; }
+.planx-seatrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 4px; }
+.planx-stepper { display: flex; align-items: center; gap: 6px; }
+.planx-stepper .planx-seatinput { width: 86px; text-align: center; padding: 8px; }
+.planx-hint { font-size: 12px; }
+.planx-invoice { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 10px 0 6px; background: var(--surface); }
+.planx-inv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; background: var(--side); border-bottom: 1px solid var(--line); }
+.planx-inv-item { display: grid; grid-template-columns: minmax(0, 1fr) 48px 96px; gap: 10px; align-items: start; padding: 12px; }
+.planx-inv-label { min-width: 0; }
+.planx-inv-label b { display: block; }
+.planx-inv-label .muted { display: block; font-size: 12px; margin-top: 2px; }
+.planx-inv-qty { text-align: right; color: var(--muted); }
+.planx-inv-amount { text-align: right; font-variant-numeric: tabular-nums; }
+.planx-inv-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.planx-total { background: var(--side); padding: 10px 12px; font-size: 14px; }
+.planx-invoice .planx-fine { margin: 8px 12px 12px; }
+.planx-limits { margin: 10px 0 4px; }
+.planx-limits-head { font-size: 12px; margin-bottom: 6px; }
+.planx-chips .chip { font-size: 12px; }
+@media (prefers-color-scheme: dark) {
+  .planx-current { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+}
+@media (max-width: 760px) {
+  .planx-quote-head { flex-direction: column; align-items: stretch; }
+  .planx-seatfield { flex-direction: row; align-items: center; gap: 8px; }
+  .planx-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .planx-inv-item { grid-template-columns: minmax(0, 1fr) 36px 78px; gap: 8px; }
+  .planx-actions .btn { flex: 1; justify-content: center; }
+  .planx-table table { min-width: 900px; }
+}
