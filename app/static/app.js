@@ -2005,7 +2005,7 @@ const overlayRoot = (() => {
       configured ? null : h('div', { class: 'agx-model-warn' }, h('b', {}, AGX_MODEL_MISSING), h('p', { class: 'muted' }, 'This agent has no live model, so replies are scripted demo text. Enter a model id below or connect a provider in Settings.')),
       h('div', { class: 'row2 agx-model-actions' }, inp, btn('Save model', () => agxSaveModel(b, inp), 'btn primary'), dlist),
       h('div', { class: 'agx-model-links' },
-        btn('Provider settings', () => { if (S.modal === 'agentSettings') { S.agx = null; S.modal = null; syncOverlays(true); } go('settings'); }, 'link'),
+        btn('Settings', () => openSettings('models'), 'link'),
         h('span', { class: 'muted agx-hint' }, 'Model ids look like hf:owner/model or a plain provider model name.')));
   }
 
@@ -3177,7 +3177,8 @@ const overlayRoot = (() => {
     const agxSig = S.modal === 'agentSettings' && S.agx ? '|agx:' + S.agx.bot + ':' + S.agx.section + ':' + (S.agx.loading ? 'l' : '') + ':' + (S.agx.busy ? 'b' : '') : '';
     // Settings has its own section/loading/status state; include it so a section switch rebuilds the dialog.
     const setSig = S.modal === 'settings' ? '|set:' + (S.setSection || '') + (S.setLoading ? ':L' : '') + (S.setLoadErr ? ':E' : '') + (S.setInfo ? ':I' : '') + (S.setArm ? ':A' : '') + (S.err ? ':X' : '') : '';
-    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig + agxSig + setSig;    if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
+    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig + agxSig + setSig;
+    if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
     S._ovlSig = sig;
     const parts = [];
     if (S.drawer) parts.push(...drawer());

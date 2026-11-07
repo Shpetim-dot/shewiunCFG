@@ -1,3 +1,54 @@
+# Implementation changelog (v20 — wave 2 UI: batches 7–12)
+
+Tests: `python -m pytest -q` -> **341 passed**, 0 failed (298 + 43 new across six wave-2 test files).
+Every screen and overlay was verified in headless Edge at 1440 px and 390 px (light+dark where it
+matters): zero console/page errors, and the new interactions were exercised end-to-end (cursor gaze,
+walk animation, settings saves, connector grants, inventory bulk actions, marketplace import, settings
+persistence, research scroll).
+
+## Batch 7 — 3-D avatars, cursor gaze, walk animation and sidebar
+- The hand-built SVG faces now look dimensional (gradient plate light, rim highlight, contact shadow,
+  specular eye highlights) while keeping each agent's identity and all existing animations.
+- One global pointer tracker makes every avatar's eyes follow the cursor (disabled for reduced motion).
+- When an agent replies in chat, a small avatar walks from the sidebar/panel edge to the new message
+  bubble (short CSS animation; skipped for reduced motion; history loads do not animate).
+- Left sidebar: bold uppercase sticky group headings, member counts, accent active bar, pin/unread
+  indicators, polished MCP button (status dot + count) and account footer; same in the mobile drawer.
+
+## Batch 8 — Agent settings v2
+- Right-hand agent panel redesigned: 3-D avatar header, team/status/model chips, "Model must be
+  configured" state, segmented Overview/Activity/Memory/Apps tabs, facts grid, permission switches,
+  controls, and real per-agent audit activity.
+- New full agent settings overlay (left nav, Shewiun design): General (rename, model, criticality),
+  Permissions (scopes), Accountability, Activity (audit chain + verify/export), Apps & tools and
+  Danger (suspend/resume/trust/delete). Every action uses the existing audited endpoints.
+
+## Batch 9 — MCP / apps connector v2
+- "Connect apps" rebuilt as a connector surface: Catalog / My connectors / Add MCP server tabs, search
+  with caret preservation, category filters, cards with live/demo status and risk tool counts, a
+  per-agent grant matrix with switches and save, "try a call", refresh/remove/disconnect, and a
+  security-explained add-MCP form. Existing endpoints and the approval flow are preserved.
+
+## Batch 10 — Inventory dashboard v2
+- Inventory is now a dashboard: KPI cards, accountability gap meters, model coverage and four real SVG
+  charts (risk distribution, trust mix, team distribution, model coverage), plus the agent table with
+  3-D avatars, trust rings, risk badges, model technical data (id/channel, ready / no API key,
+  "Model must be configured") and last activity. Search, filters, bulk actions and the rights panel
+  remain. `GET /api/inventory` additively returns `model` and `model_configured`.
+
+## Batch 11 — Marketplace v2 (Shewiun style)
+- Marketplace restructured: hero with trust key, sticky search/filter toolbar, a Featured rail and
+  category sections in catalog order, with 3-D avatars, real tags/scopes, risk badges and honest trust
+  status. Hugging Face and import-a-card tabs kept and restyled. No invented ratings/authors/tags.
+
+## Batch 12 — App settings overlay v2 and research scroll fix
+- App settings moved into a polished overlay with left navigation (Readiness, Models, Search, Access
+  keys, Two-factor, Backups & data, Danger); all existing actions still work, with honest
+  loading/error states and a mobile full-screen layout.
+- Fixed the deep-research scroll jump: the SPA now preserves the main scroll position across stream
+  re-renders (with a guarded chat stick-to-bottom fallback), so a running research no longer snaps to
+  the top whenever a source is found.
+
 # Implementation changelog (v19 — six UI batches)
 
 Tests: `python -m pytest -q` -> **298 passed** (249 + 49 new across six batch test files), 0 failed.
