@@ -243,6 +243,7 @@ const overlayRoot = (() => {
     document.body.append(walker);
   }
   const when = (t) => (t || '').slice(0, 16).replace('T', ' ');
+  const notif = window.ShewiunNotif ? window.ShewiunNotif({ h, when, icon, btn, openNote: (...args) => openNote(...args) }) : null;
   const botBy = (id) => S.bots.find((b) => b.id === id) || { color: '#5B6B88', icon: 'spark', name: id };
   const admin = (t) => h('p', { class: 'muted', style: 'font-size:12px' }, t);
   const badge = (n) => (n ? h('span', { class: 'badge' }, String(n)) : null);
