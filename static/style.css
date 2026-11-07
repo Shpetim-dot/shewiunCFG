@@ -1456,3 +1456,22 @@ h2.mkt2-title { margin: 8px 0; padding: 0; border: 0; font-size: 32px; line-heig
   .monitor .monhead { flex-wrap: wrap; }
   .research-run .feed { max-height: 22vh; }
 }
+
+
+
+/* Voxel agent avatars */
+@media (prefers-reduced-motion: no-preference) {
+  .av.bob { animation: av3-bob 3.8s ease-in-out infinite; }
+  .av.thinking .av-fig { animation: av3-hop .42s ease-in-out infinite alternate; transform-origin: 24px 40px; }
+  .av.thinking .av-mouth { animation: av3-talk .32s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: center; }
+  .av .av-fig { transform-box: fill-box; }
+  @keyframes av3-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes av3-hop { from { transform: translateY(0); } to { transform: translateY(-2.2px); } }
+  @keyframes av3-talk { from { transform: scaleY(.65); } to { transform: scaleY(1.3); } }
+}
+.av .av-tagbg { fill: #172033; stroke: rgba(255,255,255,.9); stroke-width: 1; }
+.av .av-sym { fill: #FFFFFF; }
+.av .av-ground { fill: rgba(15,23,42,.18); }
+@media (prefers-reduced-motion: reduce) {
+  .av, .av .av-fig, .av .av-mouth { animation: none !important; }
+}
