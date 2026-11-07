@@ -698,6 +698,10 @@ html { scroll-behavior: smooth; }
 .av3-drop-out { stop-color: rgba(15, 23, 42, 0); }
 .av .av3-base { fill: rgba(15, 23, 42, .13); }
 .av .av3-gloss { stroke: rgba(255, 255, 255, .75); }
+/* The body is filled by the per-agent SVG gradient; the tint adds the secondary ring colour as a glow. */
+.av .av3-body { stroke: rgba(15, 23, 42, .12); stroke-width: .6; }
+.av .av3-tint { mix-blend-mode: soft-light; }
+.av .av3-plate { mix-blend-mode: soft-light; }
 .av .av3-spec { fill: #FFFFFF; opacity: .92; }
 .av .av3-arc-sh { stroke: rgba(15, 23, 42, .24); }
 .av .av3-arc-hi { stroke: rgba(255, 255, 255, .38); }

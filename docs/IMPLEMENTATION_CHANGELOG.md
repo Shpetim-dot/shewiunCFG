@@ -1,4 +1,22 @@
-# Implementation changelog (v20 — wave 2 UI: batches 7–12)
+# Implementation changelog (v21 — colour-filled 3-D agent figures)
+
+Tests: `python -m pytest -q` -> **341 passed**, 0 failed. Verified in headless Edge at 1440 px and 390 px,
+light and dark: the figures render in every size (sidebar 38 px, chat header 56 px, inventory 32 px,
+teams 56 px) with zero console errors.
+
+## Batch 13 — colour-filled 3-D agent figures
+- The agent avatars are no longer white plates with coloured rings: each figure now has a **body filled
+  with its own palette** — a radial gradient in the agent's primary colour (light from the top-left),
+  a soft glow in its secondary colour, a rim light, a gloss arc and a contact shadow.
+- All identity attributes are unchanged (core agents keep their colours, arcs pattern, eyes, brows and
+  mouth; custom agents derive their palette from their colour field), and the face still follows the
+  cursor and animates while thinking.
+- The identity ring arcs are now a pale tint of the secondary colour, so they read as an embossed
+  pattern on the coloured body instead of competing with it. Light and dark mode both verified.
+- `tile(b, s = 40, o = {})` stays the single entry point; every screen (sidebar, chat, teams,
+  inventory, marketplace, council) inherits the new figures automatically.
+
+# Implementation changelog (v20 — wave 2 UI: batches 7–12)# Implementation changelog (v20 — wave 2 UI: batches 7–12)
 
 Tests: `python -m pytest -q` -> **341 passed**, 0 failed (298 + 43 new across six wave-2 test files).
 Every screen and overlay was verified in headless Edge at 1440 px and 390 px (light+dark where it
