@@ -199,3 +199,10 @@ h2{border-left:3px solid var(--accent);padding-left:10px}
 .empty svg { opacity:.45; margin-bottom:10px; }
 .empty h3 { margin:4px 0; color: var(--text, #0F2740); }
 .gwrap .skel { height: 520px; }
+
+
+/* --- v17: brain rail (Obsidian-like) --- */
+.it .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.it { display: flex; align-items: center; gap: 6px; }
+.chip { white-space: nowrap; }
+.chip.muted { opacity: .6; }

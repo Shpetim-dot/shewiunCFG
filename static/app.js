@@ -19,6 +19,7 @@
     table: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 10h17M9 10v9"/>', check: '<path d="M5 12l4 4 10-10"/>',
   };
   const KIND = { rule: 'shield', fact: 'book', decision: 'scales', lesson: 'compass', chat: 'chat', hypothesis: 'lens', note: 'doc' };
+  const KIND_COLOR = { note: '#2F5BD3', fact: '#1B7F79', decision: '#7A4E9C', rule: '#B7791F', hypothesis: '#B5543C', lesson: '#3D7A4F' };
   const SPACE_COLOR = (s) => (s === 'shared' ? '#8FB1FF' : s === 'finance' ? '#4FC3D9' : (s || '').startsWith('team:') ? '#6EE7B7' : '#F4B860');
   const S = { usage: { models: [], by_kind: {}, budget: { monthly_cap: null, spent_this_month_known_cost: 0 }, note: 'Loading…', cost_is_partial: false, fallback_models: [] }, provs: [], prices: [], cu: { status: 'unconfigured', problems: [], note: '' }, invSum: null, pnew: { id: '', base_url: '', api_key: '' }, ptest: {}, pr: { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }, fb: '', cap: '', chans: {}, chan: null, cmsgs: [], cdraft: '', cbusy: '', invEdit: null, bs: { q: '', res: null }, view: 'chat', bots: [], bot: null, msgs: [], health: {}, drawer: false, menu: false, modal: null, panel: true, tab: 'overview', draft: '', busy: false,
     notes: [], note: null, versions: [], edit: false, q: '', filter: '', space: '', graph: true, graphAgent: '', gStatus: '', gSpace: '', gzoom: 1, newNote: false, activity: [], seen: new Set(), pulse: {}, actSince: '',
@@ -417,7 +418,11 @@
     q.addEventListener('input', () => { S.q = q.value; const pos = q.selectionStart; render(); const el = document.querySelector('input[aria-label="Search notes"]'); if (el) { el.focus(); el.setSelectionRange(pos, pos); } });
     const list = S.notes.filter((n) => (!S.q || (n.title + n.preview).toLowerCase().includes(S.q.toLowerCase())) && (!S.filter || n.status === S.filter) && (!S.space || n.space === S.space));
     const tree = h('div', { class: 'tree' }, [...new Set(list.map((n) => n.space))].sort().map((sp) => h('details', { open: true }, h('summary', {}, `${sp} (${list.filter((n) => n.space === sp).length})`),
-      list.filter((n) => n.space === sp).map((n) => h('button', { type: 'button', class: 'it', 'aria-current': S.note && S.note.id === n.id ? 'true' : false, onclick: () => (S.graph ? selectNode(n.id) : openNote(n.id)) }, icon(KIND[n.kind] || 'doc', 16), h('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, n.title), n.status !== 'verified' ? h('span', { class: 'chip' }, n.status) : null)))));
+      list.filter((n) => n.space === sp).map((n) => { const lc = (n.links || []).length + (n.backlinks_count || 0);
+        return h('button', { type: 'button', class: 'it', 'aria-current': S.note && S.note.id === n.id ? 'true' : false, onclick: () => (S.graph ? selectNode(n.id) : openNote(n.id)) },
+          h('span', { class: 'dot', style: 'background:' + (KIND_COLOR[n.kind] || '#7C8BA5') }),
+          icon(KIND[n.kind] || 'doc', 16), h('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, n.title),
+          lc ? h('span', { class: 'muted', style: 'font-size:10px;flex:none' }, lc + ' lnk') : null, n.status !== 'verified' ? h('span', { class: 'chip' }, n.status) : null); }))));
     const drop = h('div', { class: 'drop' }, icon('doc', 18), h('span', { style: 'flex:1' }, 'Drop a file or ', btn('upload', pickFile, 'link')), h('small', { class: 'muted' }, '.md .txt .csv .json .pdf'));
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); }); drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); uploadFile(e.dataTransfer.files[0]); });
@@ -450,6 +455,10 @@
         h('div', { class: 'row2', style: 'margin-top:12px' }, S.edit ? null : btn('Edit', () => { S.edit = true; render(); }),
           n.status === 'draft' || flagged ? btn(flagged ? 'Review and acknowledge' : 'Verify', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/verify` + (flagged ? '?acknowledge=true' : ''), { method: 'POST' }); await reload(); }), 'btn primary') : null,
           n.status === 'draft' ? btn('Reject', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/reject`, { method: 'POST' }); await reload(); })) : null),
+        h('div', { class: 'row2', style: 'flex-wrap:wrap;margin-top:14px' },
+          h('span', { class: 'chip', style: 'background:' + (KIND_COLOR[n.kind] || '#2F5BD3') + ';color:#fff' }, n.kind),
+          (n.links || []).map((l) => { const x = S.notes.find((y) => y.title === l); return x ? btn('-> ' + l, () => openNote(x.id), 'chip') : h('span', { class: 'chip muted' }, '-> ' + l + ' (missing)'); }),
+          (n.backlinks || []).map((l) => { const x = S.notes.find((y) => y.title === l); return x ? btn('<- ' + l, () => openNote(x.id), 'chip') : h('span', { class: 'chip muted' }, '<- ' + l); })),
         h('details', { style: 'margin-top:20px' }, h('summary', { class: 'muted' }, `Version history (${S.versions.length})`), S.versions.map((v) => h('div', { class: 'card', style: 'margin:8px 0' }, h('span', { class: 'mono' }, `v${v.version} · ${when(v.created_at)} · ${v.actor} · ${v.reason} · ${v.status}`), h('div', { class: 'muted' }, v.body.slice(0, 120)),
           btn('Roll back to this version', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/rollback`, { method: 'POST', body: { version: v.version } }); await reload(); }), 'link')))));
     } else mid = S.notes.length ? h('p', { class: 'muted' }, 'Select a note.') : emptyState('graph', 'Dein Brain ist leer', 'Erstelle Notizen oder lade die Demo-Workspace, um das Gedaechtnis der Agenten zu sehen.', btn([icon('plus', 16), 'New note'], () => { S.newNote = true; render(); }, 'btn primary'));

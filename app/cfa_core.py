@@ -683,8 +683,15 @@ def note_out(con, r, full: bool = False) -> dict[str, Any]:
 def list_notes(q: str = "", status: str = "") -> list[dict[str, Any]]:
     with db() as con:
         rows = con.execute("SELECT * FROM notes WHERE org_id=? ORDER BY updated_at DESC LIMIT 300", (org(),)).fetchall()
-        return [note_out(con, r) for r in rows
-                if (not status or r["status"] == status) and (not q or q.lower() in (r["title"] + r["body"]).lower())]
+        out = [note_out(con, r) for r in rows
+               if (not status or r["status"] == status) and (not q or q.lower() in (r["title"] + r["body"]).lower())]
+        counts: dict[str, int] = {}
+        for n in out:
+            for title in n.get("links", []):
+                counts[title] = counts.get(title, 0) + 1
+        for n in out:
+            n["backlinks_count"] = counts.get(n["title"], 0)
+        return out
 
 
 @router.post("/api/brain/notes", status_code=201)
