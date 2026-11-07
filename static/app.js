@@ -1389,8 +1389,9 @@ const overlayRoot = (() => {
       if (st.auth_required) { S.me = await api('/api/auth/me').catch(() => null); }
     } catch (e) { S.err = e.message; }
     try { S.health = await api('/api/health'); } catch (e) { S.err = e.message; }
-    // No forced login/setup screen: a fresh (or demo) workspace opens directly.
-    // The sign-in view only appears when the API actually answers 401.
+    // Fail-closed production: without any account the API rejects everything, so offer the
+    // first-run setup form instead of showing an empty workspace with an error banner.
+    if (S.setup) { S.setup = true; S.auth = true; S.tokenErr = ''; render(); return; }
     if (S.auth) { render(); return; }
     try {
       S.bots = await api('/api/bots'); S.bot = S.bots[0]; const t = await api('/api/templates'); S.caps = (t.find((x) => x.capabilities) || {}).capabilities || [];
