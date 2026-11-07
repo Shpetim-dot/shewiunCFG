@@ -60,6 +60,7 @@ const overlayRoot = (() => {
     // 7x7 pixel symbols for the badge. '#' = filled pixel. A name that is not in this map falls back to "spark".
     const SPRITES = {
       spark: ['...#...', '...#...', '..###..', '#######', '..###..', '...#...', '...#...'],
+      eagle: ['..#....', '.###...', '#####..', '#######', '.#####.', '..###..', '...##..'],
       shield: ['.#####.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
       lens: ['.###...', '#...#..', '#...#..', '#...#..', '.###.#.', '......#', '.......'],
       compass: ['..###..', '.#...#.', '#..#..#', '#.###.#', '#..#..#', '.#...#.', '..###..'],
@@ -85,8 +86,8 @@ const overlayRoot = (() => {
       lock: ['..###..', '.#...#.', '.#...#.', '#######', '##...##', '##.#.##', '#######'],
     };
     const SYMBOLS = Object.keys(SPRITES);
-    const FIGURES = ['round', 'eagle', 'hat', 'cap'];
-    const FIGURE_LABEL = { round: 'Rundkopf', eagle: 'Adler', hat: 'Hut', cap: 'Kappe' };
+    const FIGURES = ['block', 'antenna', 'ears', 'crest'];
+    const FIGURE_LABEL = { block: 'Block', antenna: 'Antenne', ears: 'Ohren', crest: 'Kamm' };
     const AV_COLORS = ['#2F5BD3', '#3B82F6', '#1B7F79', '#16A37F', '#3D7A4F', '#B7791F', '#E5484D', '#B5543C', '#7A4E9C', '#DB2777', '#5B6B88', '#0F172A'];
     const spriteCache = {};
     const spritePath = (name, u) => {
@@ -151,35 +152,26 @@ const overlayRoot = (() => {
     // state: o.thinking = the agent is working or answering (it hops and the mouth moves); o.float = a calm idle bob
     // for the one hero avatar of a screen. Every other figure is static markup, so lists of agents cost nothing.
     function tile(b, s = 40, o = {}) {
-      const L = lookOf(b), c = L.body, top = mix(c, 0.32), side = mix(c, -0.3);
-      const ink = lum(c) > 0.55 ? INK : '#F8FAFC', acc = L.accent;
-      // Pixel silhouettes are stepped, but the head/body reads round rather than as a cube.
-      const silhouettes = {
-        round: ['....#####....','..#########..','.###########.','#############','#############','#############','#############','.###########.','..#########..','...#######...','....#####....'],
-        eagle: ['...##...##...','..####.####..','.############.','#############','#############','#############','.###########.','..#########..','...#######...','....#####....'],
-        hat: ['...########...','..##########..','##############','....#####....','..#########..','.###########.','#############','#############','.###########.','..#########..','...#######...'],
-        cap: ['....#####....','..#########..','.###########.','#############','#############','#############','.###########.','..#########..','...#######...','....#####....']
+      const L=lookOf(b), c=L.body, top=mix(c,.32), side=mix(c,-.3), ink=lum(c)>.55?INK:'#F8FAFC', acc=L.accent;
+      // Four HTML-inspired voxel silhouettes. Eagle is a pixel badge, not wings.
+      const shapes={
+        block:['############','############','############','############','############','############','############','############','############','############'],
+        antenna:['.....##.....','.....##.....','.....##.....','..########..','.##########.','############','############','############','############','############'],
+        ears:['##........##','###......###','############','############','############','############','############','############','############','############'],
+        crest:['....##......','...####......','..######.....','############','############','############','############','############','############','############']
       };
-      const kind = L.figure === 'eagle' ? 'eagle' : L.figure === 'hat' ? 'hat' : L.figure === 'cap' ? 'cap' : 'round';
-      const rows = silhouettes[kind], cell = 2.65, ox = 6.1, oy = kind === 'hat' ? 7.5 : 8.5;
-      let front = '', topFaces = '', sideFaces = '';
-      const has = (x,y) => !!(rows[y] && rows[y][x] === '#');
-      for (let y=0;y<rows.length;y++) for(let x=0;x<rows[y].length;x++) if(has(x,y)) {
-        const X=ox+x*cell, Y=oy+y*cell, w=cell;
-        front += '<rect x="'+X+'" y="'+Y+'" width="'+(w+.08)+'" height="'+(w+.08)+'" fill="'+c+'"/>';
-        if(!has(x,y-1)) topFaces += '<path d="M'+X+' '+Y+'l2 -2h'+w+'l-2 2z" fill="'+top+'"/>';
-        if(!has(x+1,y)) sideFaces += '<path d="M'+(X+w)+' '+Y+'l2 -2v'+w+'l-2 2z" fill="'+side+'"/>';
+      const rows=shapes[L.figure]||shapes.block, cell=2.8, ox=7.2, oy=12, has=(x,y)=>!!(rows[y]&&rows[y][x]==='#');
+      let front='',tops='',sides='';
+      for(let y=0;y<rows.length;y++)for(let x=0;x<rows[y].length;x++)if(has(x,y)){
+        const X=ox+x*cell,Y=oy+y*cell;
+        front+='<rect x="'+X+'" y="'+Y+'" width="'+(cell+.08)+'" height="'+(cell+.08)+'" fill="'+c+'"/>';
+        if(!has(x,y-1))tops+='<path d="M'+X+' '+Y+'l2 -2h'+cell+'l-2 2z" fill="'+top+'"/>';
+        if(!has(x+1,y))sides+='<path d="M'+(X+cell)+' '+Y+'l2 -2v'+cell+'l-2 2z" fill="'+side+'"/>';
       }
-      const hat = kind === 'hat' ? '<path d="M13 11h22v5H13z M9 16h30v3H9z" fill="'+mix(acc,.1)+'" stroke="'+side+'" stroke-width=".7"/>' : '';
-      const wings = kind === 'eagle' ? '<path d="M7 23L1 17l2 8 4 3 M41 23l6-6-2 8-4 3" fill="'+acc+'" stroke="'+side+'" stroke-width=".8"/><path d="M5 25l5 3m33-3-5 3" stroke="'+top+'" stroke-width="1.5"/>' : '';
-      const eyes = '<g fill="'+ink+'"><rect x="15" y="24" width="4" height="5" rx="1.2"/><rect x="29" y="24" width="4" height="5" rx="1.2"/></g>';
-      const beak = kind === 'eagle' ? '<path d="M21 30h6l-3 5z" fill="#F5B942"/>' : '<path d="M21 33q3 2 6 0" fill="none" stroke="'+ink+'" stroke-width="1.6" stroke-linecap="round"/>';
-      const badge = s >= 44 && !o.nobadge ? '<g transform="translate(34 34)"><circle r="7" fill="'+acc+'" stroke="#fff" stroke-width="1"/><path d="'+spritePath(L.sym,1.05)+'" transform="translate(-3.7 -3.7)" fill="#fff"/></g>' : '';
-      const v = document.createElementNS(NS,'svg');
-      v.setAttribute('viewBox','0 0 48 48'); v.setAttribute('width',s); v.setAttribute('height',s);
-      v.setAttribute('aria-hidden','true'); v.setAttribute('shape-rendering','crispEdges');
-      v.setAttribute('class','av'+(o.float?' bob':'')+(o.thinking?' thinking':''));
-      v.innerHTML='<ellipse class="av-ground" cx="24" cy="45.5" rx="13" ry="1.4"/><g class="av-fig">'+wings+topFaces+sideFaces+front+hat+eyes+beak+badge+'</g>';
+      const face='<g fill="'+ink+'"><rect x="15" y="25" width="4" height="5"/><rect x="29" y="25" width="4" height="5"/></g><path d="M20 34h8" stroke="'+ink+'" stroke-width="1.6"/>';
+      const badge=s>=28&&!o.nobadge?'<g class="av-tag" transform="translate(34 34)"><rect width="13" height="13" rx="2" fill="'+acc+'" stroke="#fff" stroke-width=".8"/><path d="'+spritePath(L.sym,1.05)+'" transform="translate(3 3)" fill="#fff"/></g>':'';
+      const v=document.createElementNS(NS,'svg'); v.setAttribute('viewBox','0 0 48 48');v.setAttribute('width',s);v.setAttribute('height',s);v.setAttribute('aria-hidden','true');v.setAttribute('shape-rendering','crispEdges');v.setAttribute('class','av'+(o.float?' bob':'')+(o.thinking?' thinking':''));
+      v.innerHTML='<ellipse class="av-ground" cx="24" cy="45.5" rx="14" ry="1.5"/><g class="av-fig">'+tops+sides+front+face+'</g>'+badge;
       return h('span',{class:'avatar',style:'width:'+s+'px;height:'+s+'px'},v);
     }  // ---------- cursor gaze: one global pointer tracker moves the hovered avatar's eyes, never a listener per tile ----------
   const av3Reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
@@ -279,7 +271,7 @@ const overlayRoot = (() => {
       let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const line = chunk.split('\n').find((l) => l.startsWith('data: ')); if (line) onEv(JSON.parse(line.slice(6))); }
     }
   }
-  const run = async (f) => { S.err = ''; try { await f(); } catch (e) { S.err = e.message; if (S.upsell) { S.modal = 'upsell'; S.err = ''; } } render(); };
+  const run = async (f) => { S.err = ''; try { await f(); } catch (e) { S.err = e.message; if (notif && !S.upsell) notif.toast(e.message, 'bad'); if (S.upsell) { S.modal = 'upsell'; S.err = ''; } } render(); };
   const loadBots = async () => { S.bots = await api('/api/bots'); if (S.bot) S.bot = S.bots.find((b) => b.id === S.bot.id) || S.bots[0]; };
   const loadNotes = async () => { S.notes = await api('/api/brain/notes'); };
   const loadApps = async () => { S.apps = await api('/api/apps'); };
@@ -362,12 +354,10 @@ const overlayRoot = (() => {
       h('div', { class: 'bar' }, tile(b, 34, { float: true, thinking: S.busy }), h('h1', {}, b.name), h('span', { class: 'muted' }, b.role), b.status === 'suspended' ? h('span', { class: 'chip warn' }, 'suspended') : null, h('span', { class: 'sp' }), S.bill && S.bill.enabled && S.bill.plan === 'free' ? btn('Upgrade', () => { track('upgrade_click'); go('plans'); }, 'btn primary') : null, h('span', { class: 'chip' }, b.model),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Toggle agent details', 'aria-pressed': S.panel, onclick: () => { S.panel = !S.panel; render(); } }, icon('panel'))),
       h('div', { class: 'body', id: 'scroll', 'aria-live': 'polite' }, h('div', { class: 'col' }, checklist(), h('div', { class: 'msgs' },
-        S.msgs.length ? S.msgs.map((m) => h('div', { class: 'msg ' + m.role }, m.content,
-          m.role === 'agent' ? h('small', { class: 'muted' }, m.used && m.used.length ? ['Based on: ', m.used.flatMap((u) => [btn(u.title, () => openNote(u.id), 'link'), ' '])] : 'Based on no verified notes') : null,
-          m.note ? h('small', {}, btn('Saved to Brain as draft', () => openNote(m.note), 'link')) : null))
-          : h('p', { class: 'empty muted' }, `Start a conversation with ${b.name}. Replies are scripted until a model key is set.`),
-        S.busy ? h('div', { class: 'msg agent muted' }, `${b.name} is answering…`) : null))),
-      h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb)));
+         S.msgs.length ? S.msgs.map((m,i)=>notif?notif.chatRow(b,m,S.msgs[i-1],tile):h('div',{class:'msg '+m.role},m.content))
+           : h('p', { class: 'empty muted' }, `Start a conversation with ${b.name}. Replies are scripted until a model key is set.`),
+         S.busy ? (notif?notif.chatTyping(b,tile):h('div',{class:'msg agent muted'},`${b.name} is answering…`)) : null))),
+       h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb)));
   }
   function passport() {
     const b = S.bot; if (!b) return null;
