@@ -1002,8 +1002,24 @@ const overlayRoot = (() => {
         h('p', { class: 'muted' }, 'Deep research can cite live web pages. The provider and key are environment variables (CFA_SEARCH_PROVIDER, CFA_SEARCH_API_KEY); Google also needs CFA_SEARCH_CX.'),
         S.ssearch ? h('div', { class: 'row2', style: 'flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.ssearch.configured ? 'ok' : 'warn') }, S.ssearch.provider + (S.ssearch.configured ? ' - key set' : ' - no key')),
           S.ssearch.provider === 'google' ? h('span', { class: 'chip ' + (S.ssearch.google_cx_set ? 'ok' : 'warn') }, 'CX ' + (S.ssearch.google_cx_set ? 'set' : 'missing')) : null) : null,
-        h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Check configuration', () => run(async () => { S.ssearch = await api('/api/search/status'); S.stest = null; render(); }), 'btn'),
-          btn('Test key', () => run(async () => { S.stest = await api('/api/search/test', { method: 'POST' }); render(); }), 'btn primary')),
+        S.ssearch && S.ssearch.key_source === 'environment'
+          ? h('p', { class: 'muted', style: 'font-size:12px;margin:8px 0 0' }, 'The key comes from the environment variable CFA_SEARCH_API_KEY. Change it on the host, not here.')
+          : h('div', { class: 'rbox', style: 'margin-top:8px' },
+            h('select', { class: 'field', id: 'sprov', 'aria-label': 'Search provider', style: 'width:auto' },
+              [['', 'auto detect'], ['tavily', 'Tavily'], ['brave', 'Brave'], ['google', 'Google CSE']].map(([v, l]) => h('option', { value: v, selected: (S.ssearch || {}).provider === v }, l))),
+            h('input', { class: 'field', id: 'skey', type: 'password', placeholder: 'Search API key (stored encrypted)', autocomplete: 'off', 'aria-label': 'Search API key' })),
+        h('div', { class: 'row2', style: 'margin-top:8px;flex-wrap:wrap' },
+          btn('Save key', () => run(async () => {
+            const provider = (document.getElementById('sprov') || {}).value || '';
+            const api_key = (document.getElementById('skey') || {}).value || '';
+            if (!api_key) { S.stest = { ok: false, detail: 'Paste a key first.' }; render(); return; }
+            const r = await api('/api/search/config', { method: 'PUT', body: { provider, api_key } });
+            S.ssearch = { ...r, providers: ['brave', 'tavily', 'google'] }; S.stest = null;
+            S.info = 'Search key saved for ' + r.provider + '.'; render();
+          }), 'btn primary'),
+          btn('Test key', () => run(async () => { S.stest = await api('/api/search/test', { method: 'POST' }); render(); }), 'btn'),
+          btn('Check configuration', () => run(async () => { S.ssearch = await api('/api/search/status'); S.stest = null; render(); }), 'btn'),
+          (S.ssearch && S.ssearch.key_source === 'database') ? btn('Remove stored key', () => run(async () => { await api('/api/search/config', { method: 'DELETE' }); S.ssearch = await api('/api/search/status'); S.stest = null; render(); }), 'link') : null),
         S.stest ? h('div', { style: 'margin-top:10px' }, h('span', { class: 'chip ' + (S.stest.ok ? 'ok' : 'warn') }, S.stest.ok ? 'search works' : 'problem'),
           h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:12px' }, S.stest.detail + (S.stest.hint ? ' ' + S.stest.hint : '') + (S.stest.results ? ' (' + S.stest.results + ' results in ' + S.stest.ms + ' ms)' : '')),
           (S.stest.sample || []).length ? h('ul', { class: 'muted', style: 'font-size:12px;margin:6px 0 0;padding-left:18px' }, S.stest.sample.map((x) => h('li', {}, x.title))) : null) : null),

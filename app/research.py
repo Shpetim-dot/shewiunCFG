@@ -86,13 +86,59 @@ def _clean(text: Any, limit: int) -> str:
     return re.sub(r"<[^>]+>", "", str(text or ""))[:limit].strip()
 
 
+def _db_setting(key: str) -> str:
+    try:
+        with pf.db() as con:
+            row = con.execute("SELECT value FROM org_settings WHERE org_id=? AND key=?", (pf.org(), "search_" + key)).fetchone()
+        return (row["value"] if row else "") or ""
+    except Exception:
+        return ""
+
+
+def _guess_provider(key: str) -> str:
+    key = (key or "").strip()
+    if key.startswith("tvly-"):
+        return "tavily"
+    if key.startswith("AIza"):
+        return "google"
+    return "brave"
+
+
+def search_key() -> str:
+    """The web search key: environment wins, otherwise the encrypted organisation setting."""
+    env = (os.getenv("CFA_SEARCH_API_KEY") or "").strip()
+    if env:
+        return env
+    stored = _db_setting("api_key")
+    if not stored:
+        return ""
+    try:
+        from app import mcp_apps
+        f = mcp_apps._fernet()
+        return f.decrypt(stored.encode()).decode() if f else ""
+    except Exception:
+        return ""
+
+
+def key_source() -> str:
+    if (os.getenv("CFA_SEARCH_API_KEY") or "").strip():
+        return "environment"
+    return "database" if _db_setting("api_key") else "none"
+
+
 def search_provider() -> str:
-    return (os.getenv("CFA_SEARCH_PROVIDER") or "brave").strip().lower()
+    explicit = (os.getenv("CFA_SEARCH_PROVIDER") or "").strip().lower()
+    if explicit:
+        return explicit
+    stored = (_db_setting("provider") or "").strip().lower()
+    if stored:
+        return stored
+    return _guess_provider(search_key())
 
 
 async def _search_raw(q: str, k: int) -> tuple[int, list[dict[str, Any]], str]:
     """One search request. Returns (http_status, results, detail) so callers can diagnose errors."""
-    key = (os.getenv("CFA_SEARCH_API_KEY") or "").strip()
+    key = search_key()
     if not key:
         return 0, [], "no search key configured"
     provider = search_provider()
@@ -148,11 +194,50 @@ DIAGNOSIS = {
 @router.get("/api/search/status")
 def search_status() -> dict[str, Any]:
     """Which provider is configured and whether a key is present (never returns the key)."""
-    return {"provider": search_provider(),
-            "configured": bool((os.getenv("CFA_SEARCH_API_KEY") or "").strip()),
+    source = key_source()
+    return {"provider": search_provider(), "configured": source != "none", "key_source": source,
             "google_cx_set": bool(os.getenv("CFA_SEARCH_CX")),
             "providers": ["brave", "tavily", "google"],
-            "note": "Set CFA_SEARCH_PROVIDER and CFA_SEARCH_API_KEY as environment variables."}
+            "note": "A key from the environment wins; otherwise the encrypted value saved here is used."}
+
+
+class SearchConfigIn(BaseModel):
+    provider: str = Field(default="", max_length=20)
+    api_key: str = Field(default="", max_length=200)
+
+
+@router.put("/api/search/config")
+def set_search_config(item: SearchConfigIn, request: Request) -> dict[str, Any]:
+    """Save the web search provider and key per organisation (encrypted with CFA_SECRET_KEY)."""
+    p = pf.need_admin(request)
+    provider = (item.provider or "").strip().lower()
+    if provider and provider not in ("brave", "tavily", "google"):
+        raise HTTPException(422, "provider must be brave, tavily or google")
+    from app import mcp_apps
+    with pf.db() as con:
+        if provider:
+            con.execute("INSERT OR REPLACE INTO org_settings (org_id, key, value) VALUES (?,?,?)",
+                        (pf.org(), "search_provider", provider))
+        key = (item.api_key or "").strip()
+        if key:
+            f = mcp_apps._fernet()
+            if not f:
+                raise HTTPException(409, "CFA_SECRET_KEY is required to store the search key")
+            con.execute("INSERT OR REPLACE INTO org_settings (org_id, key, value) VALUES (?,?,?)",
+                        (pf.org(), "search_api_key", f.encrypt(key.encode()).decode()))
+        con.commit()
+    pf._m().append_audit("search.configured", p["name"], {"provider": search_provider(), "key_changed": bool(item.api_key)})
+    return {"provider": search_provider(), "configured": key_source() != "none", "key_source": key_source()}
+
+
+@router.delete("/api/search/config")
+def clear_search_config(request: Request) -> dict[str, Any]:
+    p = pf.need_admin(request)
+    with pf.db() as con:
+        con.execute("DELETE FROM org_settings WHERE org_id=? AND key IN ('search_api_key','search_provider')", (pf.org(),))
+        con.commit()
+    pf._m().append_audit("search.cleared", p["name"], {})
+    return {"configured": key_source() != "none", "key_source": key_source()}
 
 
 @router.post("/api/search/test")
