@@ -49,7 +49,7 @@ MIGRATIONS = [("bots", "scopes", "TEXT"), ("bots", "spaces", "TEXT"), ("bots", "
               ("bots", "source", "TEXT DEFAULT 'builtin'"), ("bots", "trust", "TEXT DEFAULT 'verified'"), ("bots", "created_at", "TEXT"), ("bots", "source_ref", "TEXT"), ("bots", "owner", "TEXT"), ("selftests", "share_token", "TEXT"),
               ("notes", "space", "TEXT DEFAULT 'shared'"), ("notes", "flags", "TEXT DEFAULT '[]'"),
               ("bot_messages", "used", "TEXT DEFAULT '[]'"), ("pending_calls", "payload_hash", "TEXT"), ("pending_calls", "expires_at", "TEXT"), ("pending_calls", "policy_version", "TEXT"),
-              ("bots", "sponsor", "TEXT"), ("bots", "purpose", "TEXT"),
+              ("bots", "sponsor", "TEXT"), ("bots", "purpose", "TEXT"), ("bots", "figure", "TEXT"),
               ("teams", "icon", "TEXT DEFAULT 'teams'"), ("teams", "color", "TEXT DEFAULT '#2F5BD3'")]
 CORE_ICONS = {"strategist": "compass", "skeptic": "lens", "builder": "wrench", "chair": "scales"}
 INTERNAL = uuid4().hex  # lets the in-process self-test bypass the rate limiter
@@ -123,7 +123,7 @@ REBUILD_DDL = {
         scopes TEXT, spaces TEXT, template TEXT, icon TEXT, team TEXT,
         status TEXT DEFAULT 'active', criticality TEXT DEFAULT 'medium',
         source TEXT DEFAULT 'builtin', trust TEXT DEFAULT 'verified',
-        created_at TEXT, source_ref TEXT, owner TEXT, sponsor TEXT, purpose TEXT,
+        created_at TEXT, source_ref TEXT, owner TEXT, sponsor TEXT, purpose TEXT, figure TEXT,
         org_id TEXT NOT NULL, PRIMARY KEY (org_id, id))""",
     "notes": """CREATE TABLE notes_v8 (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT, kind TEXT, status TEXT,
@@ -767,7 +767,7 @@ def list_bots() -> list[dict[str, Any]]:
         for b in con.execute("SELECT * FROM bots WHERE org_id=?", (org(),)):
             last = con.execute("SELECT content FROM bot_messages WHERE bot_id=? AND org_id=? ORDER BY created_at DESC LIMIT 1", (b["id"], org())).fetchone()
             out.append({"id": b["id"], "name": b["name"], "role": b["role"], "color": b["color"], "scopes": json.loads(b["scopes"] or "[]"),
-                        "spaces": json.loads(b["spaces"] or "[]"), "template": b["template"], "icon": b["icon"] or "spark", "team": b["team"] or "General", "status": b["status"] or "active", "criticality": b["criticality"] or "medium",
+                        "spaces": json.loads(b["spaces"] or "[]"), "template": b["template"], "icon": b["icon"] or "spark", "figure": (b["figure"] if "figure" in b.keys() else None) or "", "team": b["team"] or "General", "status": b["status"] or "active", "criticality": b["criticality"] or "medium",
                         "source": b["source"] or "builtin", "trust": b["trust"] or "verified", "created_at": b["created_at"], "owner": b["owner"],
                         "model": (b["model"] + ("" if model_live(b["model"]) else " (no key)")) if b["model"] else (os.getenv("CFA_MODEL_NAME", "default model") if model_live(None) else "demo mode"),
                         "preview": (last["content"][:70] if last else "")})
