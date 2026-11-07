@@ -441,6 +441,29 @@ async def run_research(item: ResearchIn, pace: float):
             yield {"type": "source", **sources[-1]}
         per_q.append(new)
         done += 1
+
+    # R1: gap-driven second pass. A sub-question that produced no source gets a rephrased retry,
+    # so a thin first pass does not silently end up as "no evidence".
+    if web_on:
+        gaps = [i for i, n in enumerate(per_q) if n == 0][:3]
+        for i in gaps:
+            retry_query = subs[i] + " evidence data report source"
+            retry = await web_search(retry_query, min(k * 2, 10), f"Fill the evidence gap for: {subs[i]}")
+            retry = diversify(retry, sources, int(os.getenv("CFA_RESEARCH_PER_DOMAIN", "2")))
+            added = 0
+            for f in retry:
+                key = f["kind"] + ":" + f["ref"]
+                if key in seen:
+                    continue
+                seen.add(key)
+                sources.append({**f, "n": len(sources) + 1, "q": i, "retry": True})
+                added += 1
+                yield {"type": "source", **sources[-1]}
+            per_q[i] += added
+            yield {"type": "activity",
+                   "text": f"Gap for sub-question {i + 1}: {added} extra source(s) from a follow-up search"}
+        done += len(gaps)
+        yield {"type": "progress", "done": min(done, total), "total": total}
         _log(agent, f"searched: {sq[:80]} ({new} new source(s))")
         yield {"type": "search", "index": i, "question": sq, "found": new}
         yield {"type": "progress", "done": done, "total": total}
