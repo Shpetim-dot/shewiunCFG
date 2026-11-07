@@ -50,9 +50,25 @@ def _log(agent: dict[str, Any] | None, text: str) -> None:
             pf.log_act(con, agent["id"], "research", text)
 
 
+def research_subject(q: str) -> str:
+    """Short subject of a research question, so demo sub-questions do not repeat the whole prompt."""
+    text = re.sub(r"^(research|research the latest news about|analyse|analyze|prepare|identify|describe|screen|compare)\s+", "",
+                  (q or "").strip(), flags=re.IGNORECASE)
+    text = re.split(r"(?<=[.!?])\s|\n|:", text, maxsplit=1)[0].strip()
+    return (text[:120] or (q or "").strip()[:120]).rstrip(".,; ")
+
+
 def split_question(q: str, n: int) -> list[str]:
-    base = [q, f"What evidence supports this: {q}", f"What are the risks or counterarguments: {q}", f"What are the constraints and costs: {q}",
-            f"What do similar cases show: {q}", f"What remains unknown: {q}"]
+    subject = research_subject(q)
+    base = [subject,
+            f"What evidence supports this about {subject}?",
+            f"What are the risks or counterarguments around {subject}?",
+            f"What are the constraints and costs of {subject}?",
+            f"What do similar cases show about {subject}?",
+            f"What remains unknown about {subject}?",
+            f"What happened most recently regarding {subject}?",
+            f"Who are the key players or sources on {subject}?",
+            f"What numbers or dates are documented for {subject}?"]
     return base[:n]
 
 
@@ -268,7 +284,7 @@ def valid_chart(c: Any) -> dict[str, Any] | None:
 
 async def run_research(item: ResearchIn, pace: float):
     n_sub, k = DEPTH[item.depth]
-    web_on = item.web and bool(os.getenv("CFA_SEARCH_API_KEY"))
+    web_on = item.web and bool(search_key())
     mode = "live" if pf.live() else "demo"
     if item.web and not web_on:
         yield {"type": "activity", "text": "Web search is not configured (set CFA_SEARCH_API_KEY). Researching the Brain only."}

@@ -552,7 +552,7 @@ const overlayRoot = (() => {
   const bars = (c) => { const max = Math.max(...c.values, 1); return h('div', {}, h('div', { class: 'muted', style: 'margin-bottom:6px' }, c.title), c.labels.map((l, i) => h('div', { class: 'bar-row' }, h('span', {}, l), h('span', {}, h('i', { style: `width:${Math.max(2, (c.values[i] / max) * 100)}%` })), h('span', { class: 'mono' }, String(c.values[i]))))); };
   async function startResearch() {
     S.rs = { activity: [], sources: [], questions: [], report: null, running: true, done: [], prog: { done: 0, total: 1 }, agent: null }; render();
-    try { await stream('/api/research/stream', { question: S.rq, depth: S.rdepth, web: S.rweb, context: S.rctx }, (ev) => { const r = S.rs;
+    try { await stream('/api/research/stream', { question: S.rq, depth: S.rdepth, web: !!(S.rweb && (S.ssearch ? S.ssearch.configured : S.health.search_configured)), context: S.rctx }, (ev) => { const r = S.rs;
       if (ev.type === 'agent') r.agent = ev.agent; else if (ev.type === 'progress') r.prog = { done: ev.done, total: ev.total }; else if (ev.type === 'plan') { r.questions = ev.questions; r.qfound = {}; r.activity.push(`Planned ${ev.questions.length} sub-questions`); } else if (ev.type === 'activity') r.activity.push(ev.text); else if (ev.type === 'source') { r.sources.push(ev); r.cur = ev; r.activity.push(`Read source [${ev.n}] ${ev.title.slice(0, 60)}`); }
       else if (ev.type === 'search') { r.done.push(ev.index); r.qfound = r.qfound || {}; r.qfound[ev.index] = ev.found; r.qtext = r.qtext || {}; r.qtext[ev.index] = ev.question; r.activity.push(`Searched: ${ev.question.slice(0, 70)} (${ev.found} new source(s))`); } else if (ev.type === 'done') { r.report = ev.report; r.id = ev.id; r.mode = ev.mode; } else if (ev.type === 'error') S.err = ev.detail; render(); }); }
     catch (e) { S.err = e.message; }
@@ -580,6 +580,7 @@ const overlayRoot = (() => {
     const DEPTHS = [['quick', 'Quick', '3 sub-questions, fast scan'], ['standard', 'Standard', '6 sub-questions, balanced depth'], ['thorough', 'Thorough', '9 sub-questions, deepest coverage']];
     const depthChips = DEPTHS.map(([v, l, d]) => h('button', { type: 'button', class: 'depth-card' + (S.rdepth === v ? ' on' : ''), 'aria-pressed': S.rdepth === v, onclick: () => { S.rdepth = v; render(); } }, h('b', {}, l), h('span', { class: 'muted' }, d)));
     const webReady = !!(S.ssearch ? S.ssearch.configured : S.health.search_configured);
+    if (S.rweb === undefined || S.rweb === null) S.rweb = webReady;  // default: use the web when a key is configured
     const r = S.rs, rep = r && r.report;
     const srcKinds = () => { const k = { brain: 0, web: 0, other: 0 }; (r ? r.sources : []).forEach((s) => { k[s.kind === 'brain' ? 'brain' : s.kind === 'web' ? 'web' : 'other'] += 1; }); return k; };
     const kindDonut = () => {
