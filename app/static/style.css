@@ -1686,3 +1686,10 @@ h2.mkt2-title { margin: 8px 0; padding: 0; border: 0; font-size: 32px; line-heig
 @media (prefers-reduced-motion: reduce) {
   .av, .av .av-fig, .av .av-mouth { animation: none !important; }
 }
+
+/* Voxel character cleanup: transparent wrapper and rounded character silhouettes */
+.avatar,.av3-agentav,.msgav { background: transparent !important; box-shadow: none !important; }
+.avatar { overflow: visible; }
+.avatar svg { display:block; background:transparent !important; border:0 !important; }
+.av-tagbg { display:none; }
+.av .av-ground { fill: rgba(15,23,42,.12); }
