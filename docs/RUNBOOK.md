@@ -15,7 +15,7 @@ host; it is the first thing to read after a break of a few weeks.
 | Caddy certificate data | Docker volume `caddy-data` |
 | Compose stack | `/opt/shewiun/docker-compose.yml` + `Caddyfile` |
 
-Public URL: `https://34.60.114.40.nip.io` (Caddy terminates TLS, proxies to the `cfa` container on
+Public URL: `https://shewiun.duckdns.org` (Caddy terminates TLS, proxies to the `cfa` container on
 port 8000; the app port is intentionally not published).
 
 ## Daily operation
@@ -41,7 +41,7 @@ cd /opt/shewiun
 git pull
 docker compose up -d --build
 docker compose ps
-curl -s https://34.60.114.40.nip.io/api/health/ready
+curl -s https://shewiun.duckdns.org/api/health/ready
 ```
 
 ## Backups
@@ -60,7 +60,7 @@ cd /opt/shewiun
 docker compose stop cfa
 docker compose run --rm cfa sh -c 'cp /data/backups/cfa-<stamp>.db /data/cfa.db'
 docker compose start cfa
-curl -s https://34.60.114.40.nip.io/api/health/ready
+curl -s https://shewiun.duckdns.org/api/health/ready
 ```
 
 Restore drill performed on: ______________________

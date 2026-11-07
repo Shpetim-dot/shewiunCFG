@@ -107,6 +107,7 @@ const overlayRoot = (() => {
   const when = (t) => (t || '').slice(0, 16).replace('T', ' ');
   const botBy = (id) => S.bots.find((b) => b.id === id) || { color: '#5B6B88', icon: 'spark', name: id };
   const admin = (t) => h('p', { class: 'muted', style: 'font-size:12px' }, t);
+  const badge = (n) => (n ? h('span', { class: 'badge' }, String(n)) : null);
   const dl = async (path, name) => { const r = await fetch(path, { headers: token ? { Authorization: 'Bearer ' + token } : {}, credentials: 'same-origin' }); if (!r.ok) throw new Error(`Download failed (${r.status})`); h('a', { href: URL.createObjectURL(await r.blob()), download: name }).click(); };
 
   // Session cookie auth needs a CSRF header; bearer tokens do not. Both are supported.
@@ -170,7 +171,7 @@ const overlayRoot = (() => {
       if (view === 'inventory') { S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }
       if (view === 'usage') { [S.usage, S.provs, S.prices, S.cu] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices'), api('/api/computer-use/status')]); }
       if (view === 'market') S.market = (await api('/api/marketplace')).curated;
-      if (view === 'control') [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=15').then((d) => d.events || []), api('/api/security/policies').then((d) => d.policies), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary')]);
+      if (view === 'control') { S.afilter = {}; S.policyDraft = {}; S.auditOpen = {}; [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=200').then((d) => { S.audit = d.events || []; S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered; return S.audit; }), api('/api/security/policies').then((d) => { S.policyMeta = d; return d.policies; }), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary')]); }
     });
   }
   async function pick(id) {
@@ -698,7 +699,6 @@ const overlayRoot = (() => {
   }
 
   // ---------- teams, inventory, marketplace ----------
-  function memberBoxes(sel) { return S.bots.filter((b) => b.id !== 'chair' || true).map((b) => h('label', { class: 'row' }, h('input', { type: 'checkbox', value: b.id, checked: sel.includes(b.id) }), tile(b, 20), b.name)); }
   const picked = (boxes) => boxes.map((l) => l.firstChild).filter((i) => i.checked).map((i) => i.value);
   async function openChannels(t, cid) {
     if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; }
@@ -751,154 +751,679 @@ const overlayRoot = (() => {
       h('div', { class: 'row2', style: 'margin-top:8px' }, inp, btn('Send', send, 'btn primary', { disabled: !!S.cbusy })));
   }
   function teamsView() {
-    const nm = h('input', { class: 'field', placeholder: 'Team name, for example Finance desk', maxlength: 40, value: S.tnew.name, 'aria-label': 'Team name' }); nm.addEventListener('input', () => { S.tnew.name = nm.value; });
-    const ms = h('input', { class: 'field', placeholder: 'Mission (optional)', maxlength: 300, value: S.tnew.mission, 'aria-label': 'Mission' }); ms.addEventListener('input', () => { S.tnew.mission = ms.value; });
-    const boxes = memberBoxes(S.tnew.members);
-    const TEAM_ICONS = ['teams', 'compass', 'rocket', 'shield', 'coins', 'book', 'chat', 'wrench', 'chart', 'radar', 'spark', 'lens'];
-    const TEAM_COLORS = ['#2F5BD3', '#1B7F79', '#B5543C', '#7A4E9C', '#1F6F8B', '#B7791F', '#3D7A4F'];
-    const pickers = h('div', { class: 'row2', style: 'flex-wrap:wrap;margin:8px 0' }, TEAM_ICONS.map((ic) => h('button', { type: 'button', class: 'btn', 'aria-label': 'Icon ' + ic, style: S.tnew.icon === ic ? 'border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)' : '', onclick: () => { S.tnew.icon = ic; render(); } }, h('span', { class: 'tile', style: 'width:26px;height:26px;background:' + (S.tnew.color || TEAM_COLORS[0]) + ';color:#fff' }, icon(ic, 14)))), TEAM_COLORS.map((c) => h('button', { type: 'button', class: 'btn', 'aria-label': 'Color ' + c, style: S.tnew.color === c ? 'border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)' : '', onclick: () => { S.tnew.color = c; render(); } }, h('span', { style: 'display:inline-block;width:16px;height:16px;border-radius:50%;background:' + c }))));
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Teams'), h('p', { class: 'muted' }, 'A team is a unit with its own shared memory space. Members can read it, other agents cannot. Start a council call with a whole team.'),
+    const avatarStack = (t) => {
+      const ms = t.members || [], extra = ms.length - 5;
+      return h('div', { class: 'tm-stack', title: ms.length ? ms.map((m) => m.name).join(', ') : 'No members yet' },
+        ms.slice(0, 5).map((m) => tile(m, 24)),
+        extra > 0 ? h('span', { class: 'tm-more', title: `${extra} more member${extra === 1 ? '' : 's'}` }, '+' + extra) : null);
+    };
+    const teamCard = (t) => {
+      const members = t.members || [], chanCount = S.chanCounts && S.chanCounts[t.id];
+      return h('div', { class: 'card appcard tm-card' },
+        h('div', { class: 'tm-card-top' },
+          h('span', { class: 'tile', style: 'width:38px;height:38px;background:' + (t.color || '#2F5BD3') + ';color:#fff' }, icon(t.icon || 'teams', 20)),
+          h('b', { class: 'tm-name', title: t.name }, t.name),
+          h('span', { class: 'chip' }, t.space)),
+        h('p', { class: 'tm-mission', title: t.mission || 'No mission set' }, t.mission || 'No mission set'),
+        h('div', { class: 'tm-meta' }, avatarStack(t), h('span', {}, `${members.length} member${members.length === 1 ? '' : 's'}`), h('span', {}, '·'), h('span', {}, `${t.notes} note${t.notes === 1 ? '' : 's'}`),
+          chanCount ? h('span', { class: 'badge', title: 'Unread channel messages' }, String(chanCount)) : null),
+        h('div', { class: 'tm-actions' },
+          btn('Channels', () => run(() => openChannels(t)), 'btn'),
+          btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'),
+          btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); }),
+          btn([icon('pen', 16), 'Edit'], () => openTeamModal(t.id), 'btn', { 'aria-label': 'Edit team ' + t.name })));
+    };
+    return h('div', { class: 'body' }, h('div', { class: 'wide' },
+      h('div', { class: 'tm-head' },
+        h('div', { class: 'tm-headtext' }, h('h2', {}, 'Teams'), h('p', { class: 'muted' }, 'A team is a unit with its own shared memory space. Members can read it, other agents cannot. Start a council call with a whole team.')),
+        btn([icon('plus', 16), 'New team'], () => openTeamModal(null), 'btn primary', { 'aria-label': 'New team' })),
       S.chan ? channelPanel() : null,
-      h('div', { class: 'cards' }, S.teams.map((t) => { const eb = memberBoxes(t.members.map((m) => m.id));
-        return h('div', { class: 'card appcard' }, h('div', { class: 'row2' }, h('span', { class: 'tile', style: 'width:30px;height:30px;background:' + (t.color || '#2F5BD3') + ';color:#fff' }, icon(t.icon || 'teams', 16)), h('b', { style: 'flex:1' }, t.name), h('span', { class: 'chip' }, t.space)), h('div', { class: 'muted' }, t.mission || 'No mission set'),
-          h('div', { class: 'row2' }, t.members.map((m) => h('span', { class: 'row2' }, tile(m, 24), m.name))), h('div', { class: 'muted' }, `${t.notes} team note(s)`),
-          h('div', { class: 'row2' }, h('span', { class: 'row2' }, btn('Channels', () => run(() => openChannels(t)), 'btn'), S.chanCounts && S.chanCounts[t.id] ? badge(S.chanCounts[t.id]) : null), btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(t.members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'), btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); })),
-          h('details', {}, h('summary', { class: 'muted' }, 'Edit members'), h('div', { style: 'margin-top:8px' }, eb), h('div', { class: 'row2' }, btn('Save', () => run(async () => { await api('/api/teams/' + t.id, { method: 'PUT', body: { name: t.name, mission: t.mission, members: picked(eb) } }); await Promise.all([loadTeams(), loadBots()]); }), 'btn'), btn('Delete team', () => run(async () => { await api('/api/teams/' + t.id, { method: 'DELETE' }); await Promise.all([loadTeams(), loadBots()]); }), 'link'))));
-      })), S.teams.length ? null : emptyState('teams', 'No teams yet', 'A team is a unit with its own memory. Create one or load the demo workspace.', btn('Load demo workspace', loadDemo, 'btn')),
-      h('h2', {}, 'New team'), nm, h('div', { style: 'height:8px' }), ms, h('div', { style: 'margin:10px 0' }, boxes),
-      pickers, btn([icon('plus', 16), 'Create team'], () => run(async () => { await api('/api/teams', { method: 'POST', body: { name: S.tnew.name, mission: S.tnew.mission, members: picked(boxes), icon: S.tnew.icon, color: S.tnew.color } }); S.tnew = { name: '', icon: 'teams', color: '#2F5BD3', mission: '', members: [] }; await Promise.all([loadTeams(), loadBots()]); }), 'btn primary')));
+      S.teams.length ? h('div', { class: 'cards tm-cards' }, S.teams.map(teamCard)) : emptyState('teams', 'No teams yet', 'A team is a unit with its own memory. Create one or load the demo workspace.', h('div', { class: 'row2', style: 'justify-content:center' }, btn([icon('plus', 16), 'New team'], () => openTeamModal(null), 'btn primary'), btn('Load demo workspace', loadDemo, 'btn')))));
   }
   function usageView() {
-    const u = S.usage, money = (v, c) => (v == null ? 'unknown' : `${v.toFixed(4)} ${c || ''}`), inp = (o, k, ph, type = 'text') => { const i = h('input', { class: 'field', type, placeholder: ph, 'aria-label': ph, value: o[k] || '', autocomplete: 'off' }); i.addEventListener('input', () => { o[k] = i.value; }); return i; };
+    const u = S.usage, budget = u.budget || {}, cap = budget.monthly_cap;
+    const num = (n) => Number(n || 0).toLocaleString();
+    const money = (v, c) => (v == null ? 'unknown' : `${v.toFixed(4)}${c ? ' ' + c : ''}`);
+    const fmt = (n) => (n >= 100000 ? 'unlimited' : Number(n || 0).toLocaleString());
+    const inp = (o, k, ph, type = 'text') => { const i = h('input', { class: 'field', type, placeholder: ph, 'aria-label': ph, value: o[k] || '', autocomplete: 'off' }); i.addEventListener('input', () => { o[k] = i.value; }); return i; };
     const reload = async () => { [S.usage, S.provs, S.prices] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices')]); };
-    const cap = u.budget.monthly_cap;
-    const uBars = () => {
-      const d = u.daily || [], W = 720, H = 190, pad = 26;
-      const max = Math.max(1, ...d.map((x) => x.calls || 0));
-      const s = svg(W, H), bw = (W - pad * 2) / Math.max(d.length, 1);
-      d.forEach((x, i) => {
-        const hh = ((x.calls || 0) / max) * (H - pad * 2);
-        sadd(s, 'rect', { x: pad + i * bw + 2, y: H - pad - hh, width: Math.max(2, bw - 4), height: hh, rx: 3, fill: '#2F5BD3', opacity: '.85' });
+    // Plan limits live only on this screen, so billing is fetched lazily here instead of in the shared go() loader.
+    if (!S.bill && !S.useBillLoading && !S.useBillErr) {
+      S.useBillLoading = true;
+      run(async () => {
+        try { S.bill = await api('/api/billing'); }
+        catch (e) { S.useBillErr = e.message || 'Plan limits could not be loaded.'; throw e; }
+        finally { S.useBillLoading = false; }
       });
-      sadd(s, 'line', { x1: pad, y1: H - pad, x2: W - pad, y2: H - pad, stroke: 'currentColor', 'stroke-opacity': '.25' });
-      sadd(s, 'text', { x: pad, y: H - 8, 'font-size': 9, fill: 'currentColor' }, d.length ? `Calls per day, last ${d.length} days (max ${max})` : 'No calls in this period yet.');
+    }
+    const models = u.models || [], kinds = Object.entries(u.by_kind || {}), daily = u.daily || [];
+    const sum = (f) => models.reduce((a, m) => a + (f(m) || 0), 0);
+    const totalCalls = sum((m) => m.calls), totalErrors = sum((m) => m.errors), tokensIn = sum((m) => m.tokens_in), tokensOut = sum((m) => m.tokens_out);
+    const fallbacks = sum((m) => m.fallback_calls), unpriced = sum((m) => m.calls_with_unknown_cost);
+    const latCalls = models.reduce((a, m) => a + (m.avg_latency_ms ? m.calls : 0), 0);
+    const avgLatency = latCalls ? Math.round(models.reduce((a, m) => a + (m.avg_latency_ms || 0) * m.calls, 0) / latCalls) : 0;
+    const priced = models.filter((m) => m.cost != null), currencies = [...new Set(priced.map((m) => m.currency || ''))];
+    const knownCost = priced.reduce((a, m) => a + m.cost, 0);
+    const costLabel = !priced.length ? 'unknown' : currencies.length > 1 ? 'mixed currencies' : `${knownCost.toFixed(4)}${currencies[0] ? ' ' + currencies[0] : ''}`;
+    // The API's daily series only lists days that had calls; every other day in the window had none.
+    const windowDays = u.days || 30, nowMs = Date.now(), byDay = {};
+    daily.forEach((d) => { byDay[d.day] = d; });
+    const series = [];
+    for (let i = windowDays - 1; i >= 0; i -= 1) { const day = new Date(nowMs - i * 86400000).toISOString().slice(0, 10); series.push({ day, calls: byDay[day] ? byDay[day].calls : 0 }); }
+    const peak = series.reduce((a, d) => (d.calls > a.calls ? d : a), { day: '', calls: 0 });
+    const kindTotal = kinds.reduce((a, [, n]) => a + (n || 0), 0);
+    const KIND_COLOR = { chat: '#2F5BD3', research: '#B5543C', channel: '#1B7F79', call: '#7A4E9C', council: '#B7791F', computer: '#1F6F8B' };
+    const kindColor = (k) => KIND_COLOR[k] || '#7C8BA5';
+    const tile = (k, v, s, warn) => h('div', { class: 'use-tile' + (warn ? ' warn' : '') }, h('span', { class: 'use-tile-k' }, k), h('span', { class: 'use-tile-v' }, v), s ? h('span', { class: 'use-tile-s' }, s) : null);
+    const cardHead = (title, right) => h('div', { class: 'use-card-head' }, h('b', {}, title), right ? h('span', { class: 'muted use-small' }, right) : null);
+    const uBars = () => {
+      const W = 720, H = 210, L = 44, R = 10, T = 16, B = 34, plotW = W - L - R, plotH = H - T - B;
+      const max = Math.max(1, peak.calls), s = svg(W, H), step = plotW / Math.max(series.length, 1);
+      s.setAttribute('role', 'img');
+      s.setAttribute('aria-label', `Calls per day over the last ${windowDays} days. ${num(totalCalls)} calls in total${peak.calls ? `, peak ${peak.calls} on ${peak.day}` : ''}.`);
+      [0, 0.5, 1].forEach((f) => {
+        const y = T + plotH - plotH * f;
+        sadd(s, 'line', { x1: L, y1: y, x2: W - R, y2: y, stroke: 'currentColor', 'stroke-opacity': f === 0 ? '.32' : '.1' });
+        if (peak.calls || f === 0) sadd(s, 'text', { x: L - 6, y: y + 3, 'text-anchor': 'end', 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.65' }, String(Math.round(peak.calls * f)));
+      });
+      series.forEach((d, i) => {
+        if (!d.calls) return;
+        const hh = (d.calls / max) * plotH, gap = Math.min(4, step * 0.36);
+        sadd(s, 'rect', { x: (L + i * step + gap / 2).toFixed(2), y: (T + plotH - hh).toFixed(2), width: Math.max(2, step - gap).toFixed(2), height: hh.toFixed(2), rx: Math.min(3, step / 3).toFixed(2), fill: '#2F5BD3', opacity: '.82' });
+      });
+      if (!peak.calls) sadd(s, 'text', { x: L + plotW / 2, y: T + plotH / 2, 'text-anchor': 'middle', 'font-size': 12, fill: 'currentColor', 'fill-opacity': '.6' }, 'No calls in this period yet.');
+      sadd(s, 'text', { x: L, y: H - 10, 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.65' }, series[0] ? series[0].day : '');
+      sadd(s, 'text', { x: W - R, y: H - 10, 'text-anchor': 'end', 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.65' }, series.length ? series[series.length - 1].day : '');
       return s;
     };
     const uDonut = () => {
-      const K = { chat: '#2F5BD3', research: '#B5543C', channel: '#1B7F79', call: '#7A4E9C', council: '#B7791F', computer: '#1F6F8B' };
-      const entries = Object.entries(u.by_kind || {});
-      const tot = entries.reduce((a, [, n]) => a + n, 0) || 1, s = svg(140, 140), cx = 70, cy = 70, r = 56;
-      let ang = -Math.PI / 2;
-      entries.forEach(([k, n]) => {
-        const a = (n / tot) * 2 * Math.PI;
-        const x1 = cx + r * Math.cos(ang), y1 = cy + r * Math.sin(ang);
-        const x2 = cx + r * Math.cos(ang + a), y2 = cy + r * Math.sin(ang + a);
-        sadd(s, 'path', { d: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${a > Math.PI ? 1 : 0} 1 ${x2} ${y2} Z`, fill: K[k] || '#7C8BA5' });
-        ang += a;
-      });
-      sadd(s, 'circle', { cx: cx, cy: cy, r: r * 0.55, fill: 'var(--panel, #fff)' });
-      sadd(s, 'text', { x: cx, y: cy + 4, 'text-anchor': 'middle', 'font-size': 12, fill: 'currentColor' }, String(tot));
+      const s = svg(168, 168), cx = 84, cy = 84, r = 68, positive = kinds.filter(([, n]) => n > 0);
+      s.setAttribute('role', 'img');
+      s.setAttribute('aria-label', `Distribution of ${num(kindTotal)} calls by type.`);
+      if (!kindTotal) sadd(s, 'circle', { cx: cx, cy: cy, r: r - 6, fill: 'none', stroke: 'var(--line)', 'stroke-width': 12 });
+      else if (positive.length === 1) sadd(s, 'circle', { cx: cx, cy: cy, r: r, fill: kindColor(positive[0][0]) });
+      else {
+        let ang = -Math.PI / 2;
+        kinds.forEach(([k, n]) => {
+          if (!n) return;
+          const a = (n / kindTotal) * 2 * Math.PI, x1 = cx + r * Math.cos(ang), y1 = cy + r * Math.sin(ang), x2 = cx + r * Math.cos(ang + a), y2 = cy + r * Math.sin(ang + a);
+          sadd(s, 'path', { d: `M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${a > Math.PI ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`, fill: kindColor(k), stroke: 'var(--surface)', 'stroke-width': 1 });
+          ang += a;
+        });
+      }
+      sadd(s, 'circle', { cx: cx, cy: cy, r: r * 0.56, fill: 'var(--surface)' });
+      sadd(s, 'text', { x: cx, y: cy + 2, 'text-anchor': 'middle', 'font-size': 16, 'font-weight': 600, fill: 'currentColor' }, num(kindTotal));
+      sadd(s, 'text', { x: cx, y: cy + 17, 'text-anchor': 'middle', 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.6' }, 'calls');
       return s;
     };
-    const uChart = h('div', { class: 'cards', style: 'margin:10px 0' },
-      h('div', { class: 'card', style: 'padding:10px;min-width:0' }, h('b', {}, 'Calls per day'), h('div', { class: 'gwrap', style: 'overflow:auto' }, uBars())),
-      h('div', { class: 'card', style: 'padding:10px' }, h('b', {}, 'Distribution by type'), h('div', { class: 'row2', style: 'align-items:center' }, uDonut(), h('div', {}, Object.entries(u.by_kind || {}).map(([k, n]) => h('div', { class: 'muted', style: 'font-size:12px' }, `${k}: ${n}`))))));
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Models & usage'), uChart,
-      h('p', { class: 'muted' }, u.note + (u.cost_is_partial ? ' Some calls have no price record, so the cost total is partial.' : '')),
-      h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Model', 'Provider', 'Calls', 'Errors', 'Tokens in / out', 'Avg latency', 'Cost', 'Fallbacks'].map((c) => h('th', {}, c)))),
-        h('tbody', {}, u.models.length ? u.models.map((m) => h('tr', {}, h('td', { class: 'mono' }, m.model), h('td', {}, m.provider), h('td', {}, m.calls), h('td', {}, m.errors), h('td', { class: 'mono' }, `${m.tokens_in} / ${m.tokens_out}`), h('td', {}, m.avg_latency_ms + ' ms'), h('td', {}, money(m.cost, m.currency) + (m.calls_with_unknown_cost && m.cost != null ? ' + unpriced calls' : '')), h('td', {}, m.fallback_calls))) : h('tr', {}, h('td', { colspan: 8, class: 'muted' }, 'No model calls in this period. Demo replies make no model calls.'))))),
-      h('div', { class: 'row2', style: 'margin:8px 0;flex-wrap:wrap' }, Object.entries(u.by_kind).map(([k, n]) => h('span', { class: 'chip' }, `${k}: ${n}`))),
-      h('h3', {}, 'Monthly budget'), h('p', { class: 'muted' }, cap ? `Cap ${cap.amount} ${cap.currency}. Spent this month (priced calls only): ${u.budget.spent_this_month_known_cost}. Calls stop when the cap is reached.` : 'No cap set. Calls are never stopped by cost.'),
-      h('div', { class: 'row2' }, inp(S, 'cap', 'Amount, for example 20', 'number'), btn('Set cap', () => run(async () => { await api('/api/usage/budget', { method: 'PUT', body: { amount: S.cap ? Number(S.cap) : null, currency: (cap && cap.currency) || 'USD' } }); await reload(); }), 'btn')),
-      h('h3', {}, 'Providers'), h('p', { class: 'muted' }, 'Add any OpenAI-compatible provider. Keys are stored encrypted and never shown again. Use a model as provider-id:model-name in an agent\'s model field.'),
-      S.provs.length ? h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Provider', 'Base URL', 'Status', 'Test with model', ''].map((c) => h('th', {}, c)))), h('tbody', {}, S.provs.map((p) => { const tm = h('input', { class: 'field', placeholder: 'model name', 'aria-label': 'Test model ' + p.id, value: S.ptest[p.id] || '' }); tm.addEventListener('input', () => { S.ptest[p.id] = tm.value; });
-        return h('tr', {}, h('td', {}, h('b', {}, p.id)), h('td', { class: 'mono' }, p.base_url), h('td', {}, h('span', { class: 'chip ' + (p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'warn' : '') }, p.status)), h('td', {}, tm),
-          h('td', {}, h('span', { class: 'row2' }, btn('Test', () => run(async () => { const r = await api(`/api/providers/${p.id}/test`, { method: 'POST', body: { model: S.ptest[p.id] || '' } }); S.info = r.status === 'ok' ? `${p.id} answered.` : `${p.id} failed: ${r.detail}`; await reload(); }), 'link'), btn('Remove', () => run(async () => { await api('/api/providers/' + p.id, { method: 'DELETE' }); await reload(); }), 'link')))); })))) : h('p', { class: 'muted' }, 'No custom providers yet.'),
-      h('div', { class: 'rbox', style: 'margin-top:8px' }, inp(S.pnew, 'id', 'Provider id, for example mistral'), inp(S.pnew, 'base_url', 'Base URL, for example https://api.mistral.ai/v1'), inp(S.pnew, 'api_key', 'API key', 'password')),
-      h('div', { style: 'margin-top:8px' }, btn('Add provider', () => run(async () => { await api('/api/providers', { method: 'POST', body: S.pnew }); S.pnew = { id: '', base_url: '', api_key: '' }; await reload(); }), 'btn primary')),
-      h('h3', {}, 'Fallback models'), h('p', { class: 'muted' }, 'Used only after a provider failure (credits, rate limit, outage). Every use is recorded above. Up to 3, comma separated.'),
-      h('div', { class: 'row2' }, inp(S, 'fb', (u.fallback_models || []).join(', ') || 'for example provider:model'), btn('Save', () => run(async () => { await api('/api/fallbacks', { method: 'PUT', body: { models: S.fb.split(',').map((x) => x.trim()).filter(Boolean) } }); await reload(); }), 'btn')),
-      h('h3', {}, 'Prices'), h('p', { class: 'muted' }, 'Costs are calculated only from price records you add, each with a source. Prices per million tokens.'),
-      S.prices.length ? h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Provider', 'Model', 'Input', 'Output', 'Currency', 'From', 'Source'].map((c) => h('th', {}, c)))), h('tbody', {}, S.prices.map((p) => h('tr', {}, h('td', {}, p.provider), h('td', { class: 'mono' }, p.model), h('td', {}, p.input_per_mtok), h('td', {}, p.output_per_mtok), h('td', {}, p.currency), h('td', { class: 'mono' }, when(p.effective_from)), h('td', {}, p.source)))))) : h('p', { class: 'muted' }, 'No prices yet, so every cost shows as unknown.'),
+    const legend = kinds.map(([k, n]) => {
+      const pct = kindTotal ? (n / kindTotal) * 100 : 0;
+      return h('div', { class: 'use-leg-row' }, h('i', { class: 'use-leg-dot', style: 'background:' + kindColor(k) }), h('span', { class: 'use-leg-k' }, k), h('span', { class: 'use-leg-n mono' }, num(n)), h('span', { class: 'use-leg-p' }, n && pct < 1 ? '<1%' : `${Math.round(pct)}%`));
+    });
+    const barsBox = h('div', { class: 'use-bars' }, uBars());
+    // On narrow screens the bar chart scrolls; start at the most recent days instead of the oldest.
+    requestAnimationFrame(() => { if (barsBox.scrollWidth - barsBox.clientWidth > 4) barsBox.scrollLeft = barsBox.scrollWidth; });
+    const uChart = h('div', { class: 'use-charts' },
+      h('div', { class: 'card use-chart-card' }, cardHead('Calls per day', `Last ${windowDays} days${series.length ? ` · ${series[0].day} → ${series[series.length - 1].day}` : ''}`),
+        barsBox, h('div', { class: 'use-chart-foot muted' }, totalCalls ? `${num(totalCalls)} calls in this period.` : 'No calls recorded in this period yet.')),
+      h('div', { class: 'card use-chart-card' }, cardHead('Usage by type', 'Calls by kind'),
+        kinds.length ? h('div', { class: 'use-donut-wrap' }, uDonut(), h('div', { class: 'use-legend' },
+          h('div', { class: 'use-leg-row use-leg-head' }, h('i', { class: 'use-leg-dot' }), h('span', {}, 'Type'), h('span', { class: 'use-leg-n' }, 'Calls'), h('span', { class: 'use-leg-p' }, 'Share')), legend)) : h('p', { class: 'muted use-empty-chart' }, 'No calls in this period yet.')));
+    const tiles = h('div', { class: 'use-totals' },
+      tile('Total calls', num(totalCalls)),
+      tile('Errors', num(totalErrors), totalErrors ? 'failed calls' : 'no failed calls', totalErrors > 0),
+      tile('Input tokens', num(tokensIn)),
+      tile('Output tokens', num(tokensOut)),
+      tile('Known cost', costLabel, totalCalls ? `${num(unpriced)} calls unpriced` : 'no calls yet'),
+      tile('Avg latency', avgLatency ? `${num(avgLatency)} ms` : '—', avgLatency ? 'weighted by calls' : 'no timing recorded'),
+      tile('Fallback calls', num(fallbacks)));
+    const bill = S.bill, planEntry = bill && bill.plans ? bill.plans.find((p) => p.id === bill.plan) : null;
+    const planPrice = (p) => (p == null || p.price_eur == null ? 'Custom' : p.price_eur === 0 ? '€0' : `€${p.price_eur} / month`);
+    const limitOrder = ['seats', 'agents', 'messages', 'calls', 'research', 'api_calls', 'uploads', 'mcp_servers', 'storage_mb'];
+    const planBody = () => {
+      if (!bill) return S.useBillErr ? h('div', {}, h('p', { class: 'warn-text' }, S.useBillErr), h('div', { style: 'margin-top:8px' }, btn('Retry', () => { S.useBillErr = ''; render(); }, 'btn'))) : h('p', { class: 'muted' }, 'Loading plan limits…');
+      if (!bill.enabled) return h('div', {}, h('p', { class: 'use-off' }, 'Billing is off on this deployment — no plan limits are enforced.'), h('p', { class: 'muted use-small' }, 'Self-hosted workspaces have no plan, seat or usage caps. Set CFA_BILLING=on to enforce plans.'));
+      const usage = bill.usage || {}, limits = bill.limits || {}, labels = bill.labels || {};
+      return h('div', {},
+        h('div', { class: 'use-plan-name' }, h('b', {}, bill.plan_name || bill.plan || 'Unknown plan'), h('span', { class: 'muted' }, planPrice(planEntry))),
+        planEntry && planEntry.tagline ? h('p', { class: 'muted use-small use-plan-tag' }, planEntry.tagline) : null,
+        h('div', { class: 'use-limits' }, limitOrder.filter((k) => labels[k] && limits[k] != null).map((k) => {
+          const used = Number(usage[k] || 0), lim = Number(limits[k] || 0), unlimited = lim >= 100000, pct = unlimited ? 2 : Math.min(100, Math.round((used / Math.max(lim, 1)) * 100)), unit = k === 'storage_mb' ? ' MB' : '';
+          return h('div', { class: 'use-limit' }, h('div', { class: 'row2' }, h('span', { class: 'use-limit-k' }, labels[k]), h('span', { class: 'muted mono' }, `${num(used)} / ${fmt(lim)}${unit}`)), h('div', { class: 'progress' + (pct >= 90 ? ' hot' : '') }, h('i', { style: `width:${pct}%` })));
+        })),
+        h('p', { class: 'muted use-small' }, 'Monthly limits reset on the first of the month. Seats, agents, MCP servers and storage show current totals.'),
+        h('div', { class: 'use-plan-cta' }, btn('Upgrade / manage plan', () => go('plans'), 'link')));
+    };
+    const planCard = h('div', { class: 'card use-plan' },
+      h('div', { class: 'use-card-head' }, h('b', {}, 'Plan limits'), bill && bill.enabled ? h('span', { class: 'chip ' + (bill.status === 'active' || bill.status === 'trialing' ? 'ok' : 'warn') }, bill.status || 'unknown') : null), planBody());
+    const modelRows = models.length ? models.map((m) => h('tr', {},
+      h('td', { class: 'mono' }, m.model), h('td', {}, m.provider), h('td', {}, num(m.calls)), h('td', { class: m.errors ? 'use-err' : '' }, num(m.errors)),
+      h('td', { class: 'mono' }, num(m.tokens_in)), h('td', { class: 'mono' }, num(m.tokens_out)), h('td', {}, m.avg_latency_ms ? `${num(m.avg_latency_ms)} ms` : '—'),
+      h('td', {}, money(m.cost, m.currency), m.calls_with_unknown_cost ? h('span', { class: 'muted use-small' }, ` · ${num(m.calls_with_unknown_cost)} unpriced calls`) : null),
+      h('td', {}, num(m.fallback_calls)))) : h('tr', {}, h('td', { colspan: 9, class: 'muted' }, 'No model calls in this period. Demo replies make no model calls.'));
+    const modelsTable = h('div', { class: 'card use-table-card' }, h('div', { class: 'tbl-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Model', 'Provider', 'Calls', 'Errors', 'Input tokens', 'Output tokens', 'Avg latency', 'Known cost', 'Fallbacks'].map((c) => h('th', {}, c)))), h('tbody', {}, modelRows))));
+    const budgetCard = h('div', { class: 'card use-section' },
+      h('p', { class: 'muted', style: 'margin-top:0' }, cap ? `Cap ${cap.amount} ${cap.currency}. Spent this month on priced calls: ${budget.spent_this_month_known_cost} ${cap.currency}. Calls stop when the cap is reached.` : 'No cap set. Calls are never stopped by cost.'),
+      cap ? h('div', { class: 'progress' + (budget.spent_this_month_known_cost >= cap.amount ? ' hot' : '') }, h('i', { style: `width:${Math.min(100, Math.round((budget.spent_this_month_known_cost / Math.max(cap.amount, 1)) * 100))}%` })) : null,
+      cap ? h('p', { class: 'muted use-small', style: 'margin-top:4px' }, 'Only priced calls count against the cap; unpriced calls are not included.') : null,
+      h('div', { class: 'row2', style: 'margin-top:8px' }, inp(S, 'cap', 'Amount, for example 20', 'number'), btn('Set cap', () => run(async () => { await api('/api/usage/budget', { method: 'PUT', body: { amount: S.cap ? Number(S.cap) : null, currency: (cap && cap.currency) || 'USD' } }); await reload(); }), 'btn')),
+      h('p', { class: 'muted use-small' }, 'An empty or zero amount clears the cap; the server never stores a zero budget.'));
+    const provChip = (p) => h('span', { class: 'chip ' + (p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'warn' : '') }, p.status || 'untested');
+    const provCard = (p) => {
+      const mi = h('input', { class: 'field', placeholder: 'Model to test, for example llama-3.1-8b', 'aria-label': 'Test model for ' + p.id, value: S.ptest[p.id] || '' });
+      mi.addEventListener('input', () => { S.ptest[p.id] = mi.value; });
+      return h('div', { class: 'card use-prov' },
+        h('div', { class: 'use-prov-head' }, h('b', {}, p.id), provChip(p)),
+        p.name && p.name !== p.id ? h('div', { class: 'muted use-small' }, p.name) : null,
+        h('div', { class: 'mono use-prov-url', title: p.base_url }, p.base_url),
+        h('div', { class: 'row2 use-prov-meta' }, h('span', { class: 'chip ' + (p.has_key ? 'ok' : ''), title: 'The API key is stored encrypted and never returned by the API.' }, p.has_key ? 'Key set' : 'No key'), h('span', { class: 'muted use-small' }, p.last_test ? 'Last test ' + when(p.last_test) : 'Not tested yet')),
+        h('div', { class: 'use-prov-test' }, mi, btn('Test', () => { const model = (S.ptest[p.id] || '').trim(); if (!model) { S.err = `Enter a model name to test ${p.id}.`; render(); return; } run(async () => { const r = await api(`/api/providers/${p.id}/test`, { method: 'POST', body: { model } }); S.info = r.status === 'ok' ? `${p.id} answered.` : `${p.id} failed: ${r.detail || 'no detail returned'}`; await reload(); }); }, 'btn')),
+        h('div', { class: 'row2 use-prov-actions' }, btn('Remove', () => run(async () => { await api('/api/providers/' + p.id, { method: 'DELETE' }); S.info = `Provider ${p.id} removed.`; await reload(); }), 'link')));
+    };
+    const addProvider = h('div', { class: 'card use-prov use-add' },
+      h('b', {}, 'Add provider'),
+      h('p', { class: 'muted use-small' }, 'Any OpenAI-compatible provider. The key is encrypted at rest and never returned. Adding requires CFA_SECRET_KEY on the host; without it the server refuses the request and its error appears at the top of this screen.'),
+      h('div', { class: 'rbox' }, inp(S.pnew, 'id', 'Provider id, for example mistral'), inp(S.pnew, 'base_url', 'Base URL, for example https://api.mistral.ai/v1'), inp(S.pnew, 'api_key', 'API key', 'password')),
+      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Add provider', () => run(async () => { const id = S.pnew.id; await api('/api/providers', { method: 'POST', body: S.pnew }); S.info = `Provider ${id} added.`; S.pnew = { id: '', base_url: '', api_key: '' }; await reload(); }), 'btn primary')),
+      h('p', { class: 'muted use-small' }, 'Ids hf, openai and default are reserved. Use model ids as provider-id:model-name in an agent\'s model field.'));
+    const providers = h('div', {}, S.provs.length ? null : h('p', { class: 'muted' }, 'No custom providers yet.'), h('div', { class: 'use-prov-grid' }, S.provs.map(provCard), addProvider));
+    const fallbackCard = h('div', { class: 'card use-section' },
+      h('p', { class: 'muted', style: 'margin-top:0' }, 'Used only after a provider failure (credits, rate limit, outage). Every use is recorded in the fallback column above. Up to 3 models, comma separated.'),
+      h('div', { class: 'row2' }, (u.fallback_models || []).length ? u.fallback_models.map((m) => h('span', { class: 'chip' }, m)) : h('span', { class: 'muted' }, 'No fallback models configured.')),
+      h('div', { class: 'row2', style: 'margin-top:8px' }, inp(S, 'fb', (u.fallback_models || []).join(', ') || 'for example provider:model'), btn('Save', () => run(async () => { await api('/api/fallbacks', { method: 'PUT', body: { models: S.fb.split(',').map((x) => x.trim()).filter(Boolean) } }); await reload(); }), 'btn')));
+    const priceRows = S.prices.map((p) => h('tr', {}, h('td', {}, p.provider), h('td', { class: 'mono' }, p.model), h('td', {}, p.input_per_mtok), h('td', {}, p.output_per_mtok), h('td', {}, p.currency), h('td', { class: 'mono' }, when(p.effective_from)), h('td', {}, p.source)));
+    const priceCard = h('div', { class: 'card use-section' }, h('b', {}, 'Add price'),
       h('div', { class: 'rbox', style: 'margin-top:8px' }, inp(S.pr, 'provider', 'Provider id (default for the main key)'), inp(S.pr, 'model', 'Model name'), inp(S.pr, 'input_per_mtok', 'Input price per 1M tokens', 'number'), inp(S.pr, 'output_per_mtok', 'Output price per 1M tokens', 'number'), inp(S.pr, 'source', 'Source, for example the provider pricing page URL')),
-      h('div', { style: 'margin-top:8px' }, btn('Add price', () => run(async () => { await api('/api/prices', { method: 'PUT', body: { ...S.pr, input_per_mtok: Number(S.pr.input_per_mtok), output_per_mtok: Number(S.pr.output_per_mtok) } }); S.pr = { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }; await reload(); }), 'btn')),
-      h('h3', {}, 'Computer use'), h('p', { class: 'muted' }, S.cu.note), h('div', { class: 'row2', style: 'flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.cu.status === 'ready' ? 'ok' : 'warn') }, S.cu.status), S.cu.problems.map((x) => h('span', { class: 'muted' }, x)))));
+      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Add price', () => run(async () => { await api('/api/prices', { method: 'PUT', body: { ...S.pr, input_per_mtok: Number(S.pr.input_per_mtok), output_per_mtok: Number(S.pr.output_per_mtok) } }); S.pr = { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }; await reload(); }), 'btn primary')));
+    const cuCard = h('div', { class: 'card use-section' }, h('p', { class: 'muted', style: 'margin-top:0' }, S.cu.note), h('div', { class: 'row2' }, h('span', { class: 'chip ' + (S.cu.status === 'ready' ? 'ok' : 'warn') }, S.cu.status || 'unknown'), (S.cu.problems || []).map((x) => h('span', { class: 'muted use-small' }, x))));
+    return h('div', { class: 'body' }, h('div', { class: 'wide' },
+      h('h2', {}, 'Models & usage'),
+      h('p', { class: 'muted use-note' }, u.note + (u.cost_is_partial ? ' Some calls have no price record, so the cost total is partial.' : '')),
+      h('div', { class: 'use-hero' }, h('div', { class: 'use-hero-main' }, tiles, uChart), planCard),
+      h('h3', {}, 'Models'),
+      h('p', { class: 'muted' }, `Calls in the last ${windowDays} days, grouped by provider and model and sorted by calls. Token counts come from the provider usage data.`),
+      modelsTable,
+      h('p', { class: 'muted use-small' }, 'Known cost = input tokens times the price record input rate plus output tokens times its output rate, using the price effective at call time. Calls without a matching price record are unpriced and shown as unknown, never as zero.'),
+      h('h3', {}, 'Monthly budget'), budgetCard,
+      h('h3', {}, 'Providers'), h('p', { class: 'muted' }, 'Keys are stored encrypted and never returned; the API only reports whether a key is set. Use provider-id:model-name in an agent\'s model field.'),
+      providers,
+      h('h3', {}, 'Fallback models'), fallbackCard,
+      h('h3', {}, 'Prices'), h('p', { class: 'muted' }, 'Costs are calculated only from price records you add, each with a source. Prices are per million tokens and apply from their effective date.'),
+      S.prices.length ? h('div', { class: 'card use-table-card' }, h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Provider', 'Model', 'Input', 'Output', 'Currency', 'From', 'Source'].map((c) => h('th', {}, c)))), h('tbody', {}, priceRows)))) : h('p', { class: 'muted' }, 'No prices yet, so every cost shows as unknown.'),
+      priceCard,
+      h('h3', {}, 'Computer use'), cuCard));
   }
+  // ---------- inventory: derived trust ring, rights panel, bulk actions ----------
+  // The trust score is derived only from fields the API returns; the formula is shown verbatim in the view.
+  const INV_TRUST_RULE = 'Trust score (derived, not stored): start at 100, minus 35 if unverified, minus 6 x risk score, minus 8 x accountability gap; a suspended agent scores 0 (clamped to 0-100).';
+  const INV_GREEN = '#3D7A4F', INV_AMBER = '#B7791F';
+  const INV_GAP_TEXT = { no_owner: 'no owner', no_sponsor: 'no sponsor', no_purpose: 'no purpose' };
+  const invScore = (a) => {
+    if (a.status === 'suspended') return 0;
+    const raw = 100 - (a.trust === 'unverified' ? 35 : 0) - 6 * ((a.risk && a.risk.score) || 0) - 8 * ((a.accountability || []).length);
+    return Math.max(0, Math.min(100, raw));
+  };
+  const invRingColor = (a, score) => (a.status === 'suspended' ? 'var(--muted)' : score >= 80 ? INV_GREEN : score >= 60 ? INV_AMBER : 'var(--bad)');
+  const invTrust = (a) => {
+    const score = invScore(a), why = [];
+    if (a.status === 'suspended') why.push('Suspended: every capability is off');
+    else {
+      if (a.trust === 'unverified') why.push('Unverified source: -35');
+      const rs = (a.risk && a.risk.score) || 0;
+      if (rs) why.push(`Risk score ${rs}: -${6 * rs}`);
+      const g = (a.accountability || []).length;
+      if (g) why.push(`${g} accountability gap${g === 1 ? '' : 's'}: -${8 * g}`);
+    }
+    const title = `Trust score ${score} of 100. ` + (why.length ? `Deductions: ${why.join('; ')}.` : 'No deductions.');
+    const total = 2 * Math.PI * 20, el = document.createElementNS(NS, 'svg');
+    for (const [k, v] of Object.entries({ viewBox: '0 0 48 48', width: 48, height: 48, role: 'img', class: 'inv-ring', 'aria-label': `Trust score ${score} of 100` })) el.setAttribute(k, v);
+    sadd(el, 'circle', { cx: 24, cy: 24, r: 20, fill: 'none', stroke: 'var(--line)', 'stroke-width': 5 });
+    if (score > 0) sadd(el, 'circle', { cx: 24, cy: 24, r: 20, fill: 'none', stroke: invRingColor(a, score), 'stroke-width': 5, 'stroke-linecap': 'round', 'stroke-dasharray': `${(total * score / 100).toFixed(2)} ${total.toFixed(2)}`, transform: 'rotate(-90 24 24)' });
+    sadd(el, 'text', { x: 24, y: 28.5, 'text-anchor': 'middle', 'font-size': 13, 'font-weight': 600, fill: 'currentColor' }, String(score));
+    return h('span', { class: 'inv-trust', title }, el);
+  };
+  const invFact = (label, value, muted) => h('div', { class: 'inv-fact' }, h('span', { class: 'muted' }, label), h('span', { class: muted ? 'muted' : '' }, value));
+  const invFacts = (a) => h('div', { class: 'inv-facts' }, invFact('Owner', a.owner === 'system' ? 'unassigned' : a.owner, a.owner === 'system'), invFact('Sponsor', a.sponsor || 'unassigned', !a.sponsor), invFact('Purpose', a.purpose || 'not set', !a.purpose));
+  const invGapChips = (a) => ((a.accountability || []).length ? h('div', { class: 'row2 inv-gaps' }, a.accountability.map((g) => h('span', { class: 'chip warn', title: 'Accountability gap: the agent has ' + (INV_GAP_TEXT[g] || g) + '.' }, INV_GAP_TEXT[g] || g))) : null);
+  const invPrune = () => {
+    const ids = new Set((S.inv || []).map((a) => a.id));
+    if (S.invSel instanceof Set) for (const id of [...S.invSel]) if (!ids.has(id)) S.invSel.delete(id);
+    if (S.invPick && !ids.has(S.invPick)) { S.invPick = null; S.invRights = null; }
+    if (S.invEdit && !ids.has(S.invEdit.id)) S.invEdit = null;
+  };
+  const invRefresh = async () => {
+    [S.inv, S.invSum] = await Promise.all([api('/api/inventory'), api('/api/inventory/summary')]);
+    await loadBots();
+    invPrune();
+  };
+  const invAct = (a, path, body, method = 'POST') => run(async () => { await api(path, { method, body }); await invRefresh(); S.invRights = null; });
+  const invBulk = (kind) => {
+    const ids = [...(S.invSel || [])].filter((id) => (S.inv || []).some((a) => a.id === id));
+    if (!ids.length || S.invBulk) return;
+    const spec = {
+      suspend: { path: (id) => `/api/bots/${id}/status`, body: { status: 'suspended', reason: 'bulk inventory action' }, verb: 'suspended' },
+      resume: { path: (id) => `/api/bots/${id}/status`, body: { status: 'active', reason: 'bulk inventory action' }, verb: 'resumed' },
+      verify: { path: (id) => `/api/bots/${id}/trust`, body: { trust: 'verified' }, verb: 'marked verified' },
+    }[kind];
+    S.invBulk = true;
+    render();
+    run(async () => {
+      try {
+        const rs = await Promise.allSettled(ids.map((id) => api(spec.path(id), { method: 'POST', body: spec.body })));
+        const failed = rs.filter((r) => r.status === 'rejected');
+        await invRefresh();
+        S.invRights = null;
+        const first = failed[0] && failed[0].reason && failed[0].reason.message;
+        S.info = `${ids.length - failed.length} of ${ids.length} agent(s) ${spec.verb}.` + (failed.length ? ` ${failed.length} failed${first ? ': ' + first : '.'}` : '');
+      } finally { S.invBulk = false; }
+    });
+  };
   function accountabilityForm() {
     const e = S.invEdit, f = (k, ph, max) => { const i = h('input', { class: 'field', placeholder: ph, maxlength: max, value: e[k] || '', 'aria-label': ph }); i.addEventListener('input', () => { e[k] = i.value; }); return i; };
-    return h('div', { class: 'card', style: 'margin-bottom:12px' }, h('b', {}, `Who is accountable for ${e.name}?`), h('p', { class: 'muted', style: 'margin:4px 0 8px' }, 'Owner runs it day to day, sponsor approves that it should exist, purpose says what it is for. Admin only.'),
+    return h('div', { class: 'card inv-edit' }, h('b', {}, `Who is accountable for ${e.name}?`), h('p', { class: 'muted', style: 'margin:4px 0 8px' }, 'Owner runs it day to day, sponsor approves that it should exist, purpose says what it is for. Admin only.'),
       h('div', { class: 'rbox' }, f('owner', 'Owner (a person)', 80), f('sponsor', 'Sponsor (a person)', 80), f('purpose', 'Purpose, one sentence', 300)),
-      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Save', () => run(async () => { await api(`/api/bots/${e.id}/accountability`, { method: 'PATCH', body: { owner: e.owner || '', sponsor: e.sponsor || '', purpose: e.purpose || '' } }); S.invEdit = null; S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }), 'btn primary'), btn('Cancel', () => { S.invEdit = null; render(); }, 'btn')));
+      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Save', () => run(async () => { await api(`/api/bots/${e.id}/accountability`, { method: 'PATCH', body: { owner: e.owner || '', sponsor: e.sponsor || '', purpose: e.purpose || '' } }); S.invEdit = null; await invRefresh(); S.invRights = null; S.info = `Accountability saved for ${e.name}.`; }), 'btn primary'), btn('Cancel', () => { S.invEdit = null; render(); }, 'btn')));
   }
   function inventoryView() {
-    const q = h('input', { class: 'field', style: 'max-width:260px', placeholder: 'Search agents', value: S.invQ, 'aria-label': 'Search agents' }); q.addEventListener('input', () => { S.invQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
-    const rows = S.inv.filter((a) => (!S.invQ || (a.name + a.team + a.source).toLowerCase().includes(S.invQ.toLowerCase())) && (!S.invRisk || a.risk.level === S.invRisk));
-    const act = (a, path, body, method = 'POST') => run(async () => { await api(path, { method, body }); S.inv = await api('/api/inventory'); await loadBots(); });
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Agent inventory'), h('p', { class: 'muted' }, 'Every agent in this workspace with its source, owner, trust and risk. Suspending an agent switches off all of its capabilities at once.'),
-      S.invSum ? h('div', { class: 'row2', style: 'margin-bottom:10px;flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.invSum.ownerless ? 'warn' : 'ok') }, `${S.invSum.ownerless} without owner`), h('span', { class: 'chip ' + (S.invSum.no_sponsor ? 'warn' : 'ok') }, `${S.invSum.no_sponsor} without sponsor`), h('span', { class: 'chip ' + (S.invSum.no_purpose ? 'warn' : 'ok') }, `${S.invSum.no_purpose} without purpose`), h('span', { class: 'chip' }, `${S.invSum.high_risk} high risk`)) : null,
-      S.invEdit ? accountabilityForm() : null,
-      h('div', { class: 'row2', style: 'margin-bottom:10px' }, q, ['', 'high', 'medium', 'low', 'suspended'].map((r) => btn(r || 'All risks', () => { S.invRisk = r; render(); }, 'chip' + (S.invRisk === r ? ' ok' : ''), { 'aria-pressed': S.invRisk === r })), h('span', { class: 'muted' }, `${rows.length} of ${S.inv.length}`)),
-      h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Agent', 'Team', 'Source', 'Trust', 'Owner / sponsor', 'Last active', 'Criticality', 'Risk', 'Status', ''].map((c) => h('th', {}, c)))),
-        h('tbody', {}, rows.map((a) => h('tr', {}, h('td', {}, h('span', { class: 'row2' }, tile(a, 28), h('b', {}, a.name))), h('td', {}, a.team), h('td', {}, a.source + (a.source_ref ? ` (${a.source_ref})` : '')), h('td', {}, h('span', { class: 'chip ' + (a.trust === 'unverified' ? 'warn' : 'ok') }, a.trust)), h('td', {}, h('div', {}, a.owner === 'system' ? h('span', { class: 'muted' }, 'no owner') : a.owner), h('div', { class: 'muted', style: 'font-size:12px' }, a.sponsor ? 'Sponsor: ' + a.sponsor : 'no sponsor'), h('div', {}, btn(a.accountability.length ? 'Assign' : 'Edit', () => { S.invEdit = { id: a.id, name: a.name, owner: a.owner === 'system' ? '' : a.owner, sponsor: a.sponsor, purpose: a.purpose }; render(); }, 'link'))), h('td', { class: 'mono' }, a.last_activity ? when(a.last_activity) : 'never'),
-          h('td', {}, h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Criticality ' + a.name, onchange: (e) => act(a, `/api/bots/${a.id}/meta`, { criticality: e.target.value }, 'PUT') }, ['low', 'medium', 'high'].map((v) => h('option', { value: v, selected: a.criticality === v }, v)))),
-          h('td', {}, h('span', { class: 'chip risk-' + a.risk.level, title: a.risk.reasons.join('; ') }, a.risk.level)), h('td', {}, a.status),
-          h('td', {}, h('span', { class: 'row2' }, btn(a.status === 'suspended' ? 'Resume' : 'Suspend', () => act(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory' }), 'link'), a.trust === 'unverified' ? btn('Mark reviewed', () => act(a, `/api/bots/${a.id}/trust`, { trust: 'verified' }), 'link') : null)))))))));
+    if (S.invTrust === undefined) S.invTrust = '';
+    if (S.invStatus === undefined) S.invStatus = '';
+    if (S.invPick === undefined) S.invPick = null;
+    if (S.invRights === undefined) S.invRights = null;
+    if (!(S.invSel instanceof Set)) S.invSel = new Set();
+    if (S.invBulk === undefined) S.invBulk = false;
+    const known = new Set((S.inv || []).map((a) => a.id));
+    for (const id of [...S.invSel]) if (!known.has(id)) S.invSel.delete(id);
+    let picked = S.invPick ? S.inv.find((a) => a.id === S.invPick) : null;
+    if (S.invPick && !picked) { S.invPick = null; S.invRights = null; }
+    if (S.invPick && !S.invRights) {
+      S.invRights = { loading: true };
+      const id = S.invPick;
+      run(async () => {
+        try {
+          const [bots, apps, tmpl] = await Promise.all([api('/api/bots'), api('/api/apps'), api('/api/templates')]);
+          if (S.invPick !== id) return;
+          const bot = (bots || []).find((b) => b.id === id) || null;
+          const caps = (tmpl.find((t) => t.capabilities) || {}).capabilities || [];
+          const grants = [];
+          for (const ap of apps || []) {
+            const tools = (((ap.grants || {})[id]) || []).map((name) => ({ name, risk: (((ap.tools || []).find((t) => t.name === name)) || {}).risk || 'read' }));
+            if (tools.length) grants.push({ id: ap.id, name: ap.name, connected: !!ap.connected, tools });
+          }
+          S.invRights = { bot, caps, grants };
+        } catch (e) { S.invRights = { error: e.message || 'Could not load rights data.' }; throw e; }
+      });
+    }
+    const loading = !S.invSum && !S.inv.length;
+    if (loading) return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Agent inventory'), h('p', { class: 'muted' }, 'Loading agents…')));
+    const q = h('input', { class: 'field inv-search', placeholder: 'Search agents', value: S.invQ, 'aria-label': 'Search agents' }); q.addEventListener('input', () => { S.invQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
+    const needle = S.invQ.trim().toLowerCase();
+    const rows = S.inv.filter((a) => {
+      if (needle && ![a.name, a.team, a.source, a.owner, a.sponsor, a.purpose].join(' ').toLowerCase().includes(needle)) return false;
+      if (S.invRisk && a.risk.level !== S.invRisk) return false;
+      if (S.invTrust && a.trust !== S.invTrust) return false;
+      if (S.invStatus && a.status !== S.invStatus) return false;
+      return true;
+    });
+    const filtered = !!(needle || S.invRisk || S.invTrust || S.invStatus);
+    const clearFilters = () => { S.invQ = ''; S.invRisk = ''; S.invTrust = ''; S.invStatus = ''; render(); };
+    const chipRow = (label, key, values) => h('div', { class: 'inv-filter-row' }, h('span', { class: 'muted inv-filter-label' }, label),
+      h('div', { class: 'row2' }, [''].concat(values).map((v) => btn(v ? v : 'All', () => { S[key] = v; render(); }, 'chip' + (S[key] === v ? ' ok' : ''), { 'aria-pressed': S[key] === v ? 'true' : 'false' }))));
+    const filteredIds = rows.map((a) => a.id);
+    const allSelected = filteredIds.length > 0 && filteredIds.every((id) => S.invSel.has(id));
+    const master = h('input', { type: 'checkbox', class: 'inv-master-check', checked: allSelected, disabled: !filteredIds.length, 'aria-label': 'Select all filtered agents' });
+    master.addEventListener('click', (e) => { e.stopPropagation(); const on = e.target.checked; filteredIds.forEach((id) => (on ? S.invSel.add(id) : S.invSel.delete(id))); render(); });
+    const stats = S.invSum ? h('div', { class: 'inv-stats' }, [['Agents', S.invSum.total, ''], ['Without owner', S.invSum.ownerless, 'warn'], ['Without sponsor', S.invSum.no_sponsor, 'warn'], ['Without purpose', S.invSum.no_purpose, 'warn'], ['Suspended', S.invSum.suspended, 'warn'], ['High risk', S.invSum.high_risk, 'warn']].map(([label, value, cls]) => h('div', { class: 'inv-stat' + (cls && value ? ' ' + cls : '') }, h('span', { class: 'muted' }, label), h('b', {}, String(value == null ? 0 : value))))) : null;
+    const openRights = (a) => { if (S.invEdit && S.invEdit.id !== a.id) S.invEdit = null; S.invPick = S.invPick === a.id ? null : a.id; S.invRights = null; render(); };
+    const editFor = (a) => { S.invPick = a.id; S.invEdit = { id: a.id, name: a.name, owner: a.owner === 'system' ? '' : a.owner, sponsor: a.sponsor || '', purpose: a.purpose || '' }; render(); };
+    const closePanel = () => { S.invPick = null; S.invRights = null; S.invEdit = null; render(); };
+    const toggle = (e, id) => { e.stopPropagation(); if (e.target.checked) S.invSel.add(id); else S.invSel.delete(id); render(); };
+    const card = (a) => h('div', { class: 'card inv-card' + (S.invPick === a.id ? ' pick' : ''), onclick: () => openRights(a) },
+      h('div', { class: 'inv-head' }, h('input', { type: 'checkbox', class: 'inv-check', checked: S.invSel.has(a.id), 'aria-label': 'Select ' + a.name, onclick: (e) => toggle(e, a.id) }),
+        tile(a, 40), h('div', { class: 'inv-title' }, h('b', {}, a.name), h('div', { class: 'muted inv-sub' }, `${a.role || 'Agent'} · ${a.team}`)), invTrust(a)),
+      h('div', { class: 'row2 inv-chips' },
+        h('span', { class: 'chip', title: a.source_ref ? `Source reference: ${a.source_ref}` : 'No source reference recorded.' }, a.source),
+        h('span', { class: 'chip ' + (a.status === 'suspended' ? 'warn' : 'ok') }, a.status),
+        h('span', { class: 'chip' + (a.criticality === 'high' ? ' warn' : '') }, `criticality ${a.criticality}`),
+        h('span', { class: 'chip risk-' + a.risk.level, title: (a.risk.reasons || []).length ? a.risk.reasons.join('; ') : 'No risk reasons recorded.' }, `risk ${a.risk.level} · ${a.risk.score}`)),
+      invFacts(a), invGapChips(a),
+      h('div', { class: 'inv-foot' }, h('span', { class: 'muted mono', style: 'font-size:11px' }, 'last active ' + (a.last_activity ? when(a.last_activity) : 'never')),
+        h('span', { class: 'sp' }),
+        h('span', { class: 'row2' },
+          btn('Rights', (e) => { e.stopPropagation(); openRights(a); }, 'link'),
+          btn(a.status === 'suspended' ? 'Resume' : 'Suspend', (e) => { e.stopPropagation(); invAct(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory' }); }, 'link'),
+          btn('Edit accountability', (e) => { e.stopPropagation(); editFor(a); }, 'link'))));
+    const rightsPanel = (a) => {
+      const r = S.invRights || { loading: true };
+      const head = h('div', { class: 'inv-panel-head' }, tile(a, 40), h('div', { class: 'inv-title' }, h('b', {}, a.name), h('div', { class: 'muted inv-sub' }, a.role || 'Agent')),
+        btn(icon('x', 16), closePanel, 'link', { 'aria-label': 'Close rights panel' }));
+      let body;
+      if (r.loading) body = h('p', { class: 'muted inv-note' }, 'Loading rights…');
+      else if (r.error) body = h('p', { class: 'muted inv-note' }, 'Rights data could not be loaded. ' + r.error);
+      else {
+        const bot = r.bot, caps = r.caps || [], spaces = (bot && bot.spaces) || [], scopes = (bot && bot.scopes) || [];
+        const granted = caps.filter((c) => scopes.includes(c)).length;
+        body = [
+          h('h3', {}, 'Scopes'),
+          scopes.length ? h('div', { class: 'row2' }, scopes.map((s) => h('span', { class: 'chip' }, s))) : h('p', { class: 'muted inv-note' }, 'No scope is granted to this agent.'),
+          h('h3', {}, 'Capabilities'),
+          bot && caps.length ? [h('p', { class: 'muted inv-note' }, `${granted} of ${caps.length} capabilities granted. The server enforces every capability.`),
+            h('div', { class: 'inv-caps' }, caps.map((c) => { const on = scopes.includes(c); return h('div', { class: 'inv-cap' + (on ? '' : ' off') }, icon(on ? 'check' : 'x', 14), h('span', { class: on ? 'inv-ok' : 'muted' }, c), h('span', { class: 'muted', style: 'font-size:11px' }, on ? 'granted' : 'not granted')); }))] : h('p', { class: 'muted inv-note' }, 'No capability data for this agent.'),
+          h('h3', {}, 'Memory spaces'),
+          spaces.length ? h('div', { class: 'row2' }, spaces.map((s, i) => h('span', { class: 'chip', title: i === spaces.length - 1 ? 'The last space is where the agent writes.' : 'Memory space' }, s + (i === spaces.length - 1 ? ' · write' : '')))) : h('p', { class: 'muted inv-note' }, 'No memory spaces. The agent cannot read or write memory.'),
+          h('h3', {}, 'App and tool grants'),
+          (r.grants || []).length ? r.grants.map((g) => h('div', { class: 'inv-grant' }, h('div', { class: 'row2' }, h('b', {}, g.name), h('span', { class: 'chip' + (g.connected ? ' ok' : '') }, g.connected ? 'connected' : 'not connected')),
+            h('div', { class: 'row2' }, g.tools.map((t) => h('span', { class: 'chip risk-' + (t.risk === 'write' ? 'high' : t.risk === 'secret' ? 'medium' : 'low'), title: 'Tool risk: ' + t.risk }, `${t.name} · ${t.risk}`)))))
+            : h('p', { class: 'muted inv-note' }, 'No app or tool grants. The agent cannot call any connected app tool.'),
+          h('h3', {}, 'Accountability'), invFacts(a), invGapChips(a),
+          h('div', { style: 'margin-top:6px' }, btn('Edit accountability', () => editFor(a), 'link')),
+          h('h3', {}, 'Risk and trust'),
+          h('p', { class: 'muted inv-note' }, `Risk score ${a.risk.score} of 10, level ${a.risk.level}. Trust ${a.trust}, status ${a.status}, criticality ${a.criticality}.`),
+          (a.risk.reasons || []).length ? h('ul', { class: 'inv-reasons' }, a.risk.reasons.map((x) => h('li', {}, x))) : h('p', { class: 'muted inv-note' }, 'No risk reasons recorded.'),
+          h('h3', {}, 'Last activity'), h('p', { class: 'muted inv-note mono' }, a.last_activity ? when(a.last_activity) : 'Never active.'),
+          h('h3', {}, 'Actions'),
+          h('div', { class: 'row2' },
+            btn(a.status === 'suspended' ? 'Resume agent' : 'Suspend agent', () => invAct(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory panel' }), 'btn'),
+            btn(a.trust === 'unverified' ? 'Mark verified' : 'Mark unverified', () => invAct(a, `/api/bots/${a.id}/trust`, { trust: a.trust === 'unverified' ? 'verified' : 'unverified' }), 'btn')),
+          h('div', { class: 'row2', style: 'margin-top:8px' }, h('span', { class: 'muted' }, 'Criticality'),
+            h('select', { class: 'field inv-crit', 'aria-label': 'Criticality for ' + a.name, onchange: (e) => invAct(a, `/api/bots/${a.id}/meta`, { criticality: e.target.value }, 'PUT') }, ['low', 'medium', 'high'].map((v) => h('option', { value: v, selected: a.criticality === v }, v)))),
+          S.invEdit && S.invEdit.id === a.id ? accountabilityForm() : null,
+          h('div', { class: 'row2', style: 'margin-top:10px' }, btn('Close', closePanel, 'link')),
+        ];
+      }
+      return h('aside', { class: 'inv-aside', role: 'complementary', 'aria-label': `Rights panel for ${a.name}` }, head,
+        h('div', { class: 'row2 inv-panel-chips' }, h('span', { class: 'chip ' + (a.trust === 'unverified' ? 'warn' : 'ok') }, a.trust), h('span', { class: 'chip ' + (a.status === 'suspended' ? 'warn' : 'ok') }, a.status), h('span', { class: 'chip' }, `criticality ${a.criticality}`), h('span', { class: 'chip risk-' + a.risk.level, title: (a.risk.reasons || []).length ? a.risk.reasons.join('; ') : 'No risk reasons recorded.' }, `risk ${a.risk.level} · ${a.risk.score}`)),
+        body);
+    };
+    const nSel = S.invSel.size;
+    const bulk = nSel ? h('div', { class: 'inv-bulk', role: 'toolbar', 'aria-label': 'Bulk actions' }, h('b', {}, `${nSel} selected`),
+      btn('Suspend selected', () => invBulk('suspend'), 'btn', { disabled: !!S.invBulk }), btn('Resume selected', () => invBulk('resume'), 'btn', { disabled: !!S.invBulk }), btn('Mark verified', () => invBulk('verify'), 'btn', { disabled: !!S.invBulk }),
+      h('span', { class: 'sp' }), btn('Clear', () => { S.invSel.clear(); render(); }, 'link')) : null;
+    const legend = h('p', { class: 'inv-legend' }, INV_TRUST_RULE);
+    const grid = S.inv.length === 0
+      ? emptyState('table', 'No agents yet', 'This workspace has no agents. Create one to give it an owner, a sponsor and a purpose.', btn([icon('plus', 16), 'New agent'], openAgent, 'btn primary'))
+      : rows.length ? h('div', { class: 'inv-grid' }, rows.map(card))
+        : emptyState('lens', 'No agents match', 'No agent matches the current search and filters.', btn('Clear filters', clearFilters, 'btn'));
+    return h('div', { class: 'body' }, h('div', { class: 'wide inv-view' }, h('h2', {}, 'Agent inventory'),
+      h('p', { class: 'muted' }, 'Every agent in this workspace with its source, owner, trust and risk. Open a card for its real permissions. Suspending an agent switches off all of its capabilities at once.'),
+      stats,
+      h('div', { class: 'inv-layout' + (picked ? '' : ' inv-layout-full') }, h('div', { class: 'inv-main' },
+        S.invEdit && !(picked && S.invEdit.id === picked.id) ? accountabilityForm() : null,
+        h('div', { class: 'inv-filters' },
+          h('div', { class: 'row2 inv-search-row' }, q, h('span', { class: 'sp' }), h('span', { class: 'muted', 'aria-live': 'polite' }, `${rows.length} of ${S.inv.length}`), filtered ? btn('Clear filters', clearFilters, 'link') : null),
+          chipRow('Risk', 'invRisk', ['low', 'medium', 'high', 'suspended']), chipRow('Trust', 'invTrust', ['verified', 'unverified']), chipRow('Status', 'invStatus', ['active', 'suspended']),
+          h('div', { class: 'row2 inv-masterrow' }, h('label', { class: 'inv-master' }, master, h('span', { class: 'muted' }, 'Select all filtered')))),
+        bulk, legend, grid),
+        picked ? rightsPanel(picked) : null)));
   }
   const importAgent = (body, label) => run(async () => { const r = await api('/api/marketplace/import', { method: 'POST', body }); await loadBots(); S.info = `${label} added as "${r.name}".` + (r.note ? ' ' + r.note : ''); });
   function marketView() {
-    const tabs = h('div', { class: 'row2', style: 'margin:12px 0' }, [['curated', 'Curated'], ['hf', 'Hugging Face'], ['card', 'Import a card']].map(([k, l]) => btn(l, () => { S.mtab = k; render(); }, 'chip' + (S.mtab === k ? ' ok' : ''), { 'aria-pressed': S.mtab === k })));
-    let body;
-    if (S.mtab === 'curated') body = h('div', { class: 'cards' }, S.market.map((c) => { const nm = h('input', { class: 'field', value: S.mname[c.id] ?? c.name, maxlength: 40, 'aria-label': 'Name for ' + c.name }); nm.addEventListener('input', () => { S.mname[c.id] = nm.value; });
-      return h('div', { class: 'card appcard' }, h('div', { class: 'row2' }, tile(c, 38), h('b', { style: 'flex:1' }, c.name), h('span', { class: 'chip' }, c.category)), h('div', { class: 'muted' }, c.description), h('div', { class: 'row2' }, c.scopes.map((s) => h('span', { class: 'chip' }, s))),
-        h('span', { class: 'chip risk-' + c.risk }, 'risk: ' + c.risk), nm, btn('Add to workspace', () => importAgent({ source: 'curated', ref: c.id, name: nm.value }, c.name), 'btn primary')); }));
-    else if (S.mtab === 'hf') {
+    if (S.mktQ == null) S.mktQ = '';
+    if (S.mktCat == null) S.mktCat = '';
+    if (S.mktRisk == null) S.mktRisk = '';
+    if (S.mktHfDone == null) S.mktHfDone = false;
+    const cats = ['', ...new Set(S.market.map((c) => c.category))], risks = ['', 'low', 'medium', 'high'];
+    const query = S.mktQ.trim().toLowerCase();
+    const rows = S.market.filter((c) => (!query || [c.name, c.description, c.category, ...(c.scopes || [])].join(' ').toLowerCase().includes(query)) && (!S.mktCat || c.category === S.mktCat) && (!S.mktRisk || c.risk === S.mktRisk));
+    const filtered = !!(query || S.mktCat || S.mktRisk);
+    const clearFilters = () => { S.mktQ = ''; S.mktCat = ''; S.mktRisk = ''; render(); };
+    const tabs = h('div', { class: 'row2 mkt-tabs' }, [['curated', 'Curated'], ['hf', 'Hugging Face'], ['card', 'Import a card']].map(([k, l]) => btn(l, () => { S.mtab = k; render(); }, 'chip' + (S.mtab === k ? ' ok' : ''), { 'aria-pressed': S.mtab === k })));
+    const filterRow = (label, values, current, pick) => h('div', { class: 'mkt-filter-row' }, h('span', { class: 'muted mkt-filter-label' }, label), values.map((v) => btn(v || 'All', () => { pick(v); render(); }, 'chip' + (current === v ? ' ok' : ''), { 'aria-pressed': current === v })));
+    const scopeTags = (scopes) => (scopes || []).map((s) => h('span', { class: 'chip mkt-tag' }, s));
+    const scopeTagsFold = (c) => { const scopes = c.scopes || [], extra = scopes.slice(3); return h('div', { class: 'mkt-tags' }, h('span', { class: 'chip mkt-tag mono' }, 'template: ' + c.template), scopeTags(scopes.slice(0, 3)), extra.length ? h('details', { class: 'mkt-more' }, h('summary', {}, `+${extra.length} scopes`), h('div', { class: 'mkt-tags' }, scopeTags(extra))) : null); };
+    const curatedCard = (c) => {
+      const nm = h('input', { class: 'field', value: S.mname[c.id] ?? c.name, maxlength: 40, 'aria-label': 'Name for ' + c.name }); nm.addEventListener('input', () => { S.mname[c.id] = nm.value; });
+      return h('article', { class: 'card mkt-card' },
+        h('div', { class: 'mkt-head' }, h('span', { class: 'mkt-ic', style: 'background:' + (c.color || '#5B6B88') }, icon(c.icon || 'spark', 20)), h('div', { class: 'mkt-title' }, h('b', { class: 'mkt-name' }, c.name)), h('span', { class: 'chip mkt-cat' }, c.category)),
+        h('p', { class: 'mkt-desc' }, c.description),
+        h('div', { class: 'mkt-badges' }, h('span', { class: 'chip ok mkt-trust' }, icon('check', 12), 'Verified source'), h('span', { class: 'chip risk-' + c.risk }, 'risk: ' + c.risk)),
+        scopeTagsFold(c),
+        h('details', { class: 'mkt-prev' }, h('summary', {}, 'Preview'),
+          h('div', { class: 'mkt-prev-body' },
+            h('div', { class: 'mkt-kv' }, h('span', { class: 'mkt-k' }, 'Role'), h('span', {}, c.role || c.template)),
+            h('div', { class: 'mkt-kv' }, h('span', { class: 'mkt-k' }, 'Template scopes'), h('span', { class: 'mkt-tags' }, scopeTags(c.scopes))),
+            h('p', { class: 'mkt-note muted' }, "Curated agents are imported as verified and inherit the template's scopes."))),
+        h('div', { class: 'mkt-foot' }, nm, btn('Add to workspace', () => importAgent({ source: 'curated', ref: c.id, name: nm.value }, c.name), 'btn primary')));
+    };
+    const curatedPane = () => {
+      const qEl = h('input', { class: 'field mkt-search', placeholder: 'Search curated agents', value: S.mktQ, maxlength: 60, 'aria-label': 'Search curated agents' });
+      qEl.addEventListener('input', () => { S.mktQ = qEl.value; const p = qEl.selectionStart; render(); const e = document.querySelector('input[aria-label="Search curated agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
+      return [
+        h('div', { class: 'mkt-toolbar' }, qEl),
+        h('div', { class: 'mkt-filters' }, filterRow('Category', cats, S.mktCat, (v) => { S.mktCat = v; }), filterRow('Risk', risks, S.mktRisk, (v) => { S.mktRisk = v; })),
+        S.market.length ? h('div', { class: 'row2 mkt-count' }, h('span', { class: 'muted' }, `${rows.length} of ${S.market.length} entries`), filtered ? btn('Clear filters', clearFilters, 'link') : null) : null,
+        !S.market.length ? h('div', { class: 'mkt-grid' }, [0, 1, 2].map(() => h('div', { class: 'card mkt-card' }, h('span', { class: 'skel mkt-skel' }), h('span', { class: 'skel mkt-skel mkt-skel-sm' })))) :
+          rows.length ? h('div', { class: 'mkt-grid' }, rows.map(curatedCard)) : emptyState('search', 'No curated agents match', 'Nothing in the curated catalog matches this search and filter. Clear the filters to see all entries.', btn('Clear filters', clearFilters, 'btn')),
+        h('p', { class: 'muted mkt-note' }, 'Importing needs an admin account and is written to the audit log.')];
+    };
+    const hfPane = () => {
       const q = h('input', { class: 'field', placeholder: 'Search open models, for example llama or qwen', value: S.hfq, maxlength: 60, 'aria-label': 'Search Hugging Face' }); q.addEventListener('input', () => { S.hfq = q.value; });
-      body = h('div', {}, h('p', { class: 'muted' }, 'Finds open models on Hugging Face. An imported model becomes an agent that starts unverified with read-only rights. To run it, point CFA_MODEL_BASE_URL at an OpenAI-compatible endpoint that serves it.'),
-        h('div', { class: 'row2' }, q, btn([icon('search', 16), 'Search'], () => run(async () => { S.hf = await api('/api/marketplace/huggingface?q=' + encodeURIComponent(S.hfq)); }), 'btn primary')),
-        h('div', { class: 'cards', style: 'margin-top:12px' }, S.hf.map((m) => { const nm = h('input', { class: 'field', value: S.hfname[m.id] ?? m.id.split('/')[1], maxlength: 40, 'aria-label': 'Name for ' + m.id }); nm.addEventListener('input', () => { S.hfname[m.id] = nm.value; });
-          return h('div', { class: 'card appcard' }, h('b', {}, m.id), h('div', { class: 'row2' }, h('span', { class: 'chip' }, `${m.downloads.toLocaleString()} downloads`), h('span', { class: 'chip' }, `${m.likes} likes`), m.tags.map((t) => h('span', { class: 'chip' }, t))),
-            h('a', { class: 'link', href: m.url, target: '_blank', rel: 'noopener noreferrer' }, 'Model card on Hugging Face'), nm, btn('Import as agent', () => importAgent({ source: 'huggingface', ref: m.id, name: nm.value }, m.id), 'btn primary')); })));
-    } else {
-      const ta = h('textarea', { class: 'field', rows: 8, placeholder: 'Paste an agent card (JSON exported from another workspace)' }); ta.value = S.card; ta.addEventListener('input', () => { S.card = ta.value; });
+      const search = () => run(async () => { try { S.hf = await api('/api/marketplace/huggingface?q=' + encodeURIComponent(S.hfq)); S.mktHfDone = true; } catch (e) { S.hf = []; S.mktHfDone = false; throw e; } });
+      const hfCard = (m) => {
+        const nm = h('input', { class: 'field', value: S.hfname[m.id] ?? m.id.split('/')[1], maxlength: 40, 'aria-label': 'Name for ' + m.id }); nm.addEventListener('input', () => { S.hfname[m.id] = nm.value; });
+        return h('article', { class: 'card mkt-card' },
+          h('div', { class: 'mkt-head' }, h('span', { class: 'mkt-ic mkt-ic-neu' }, icon('store', 20)), h('div', { class: 'mkt-title' }, h('b', { class: 'mkt-name mono', title: m.id }, m.id))),
+          h('div', { class: 'mkt-badges' }, h('span', { class: 'chip warn mkt-trust' }, 'Unverified external')),
+          h('div', { class: 'mkt-tags' }, h('span', { class: 'chip mkt-tag' }, `${m.downloads.toLocaleString()} downloads`), h('span', { class: 'chip mkt-tag' }, `${m.likes} likes`), m.pipeline_tag ? h('span', { class: 'chip mkt-tag' }, m.pipeline_tag) : null, (m.tags || []).map((t) => h('span', { class: 'chip mkt-tag' }, t))),
+          h('a', { class: 'link mkt-link', href: m.url, target: '_blank', rel: 'noopener noreferrer' }, 'Model card on Hugging Face'),
+          h('div', { class: 'mkt-foot' }, nm, btn('Import as agent', () => importAgent({ source: 'huggingface', ref: m.id, name: nm.value }, m.id), 'btn primary')));
+      };
+      return [
+        h('p', { class: 'muted' }, 'Finds open models on Hugging Face. An imported model becomes an agent that starts unverified with read-only rights. To run it, point CFA_MODEL_BASE_URL at an OpenAI-compatible endpoint that serves it.'),
+        h('div', { class: 'row2 mkt-toolbar mkt-hf-search' }, q, btn([icon('search', 16), 'Search'], search, 'btn primary')),
+        S.hf.length ? [h('div', { class: 'row2 mkt-count' }, h('span', { class: 'muted' }, `${S.hf.length} model${S.hf.length === 1 ? '' : 's'} from Hugging Face`)), h('div', { class: 'mkt-grid' }, S.hf.map(hfCard))] :
+          S.mktHfDone ? emptyState('search', 'No open models found', 'Hugging Face returned no models for this search. Try another word.', null) :
+            h('div', { class: 'card mkt-hint' }, h('b', {}, 'Search Hugging Face'), h('p', { class: 'muted mkt-desc', style: 'margin-top:6px' }, 'Results show the model id, downloads, likes and tags from the Hugging Face API. Nothing is preloaded and nothing is installed without your click.'))];
+    };
+    const cardPane = () => {
+      const ta = h('textarea', { class: 'field', rows: 8, placeholder: 'Paste an agent card (JSON exported from another workspace)', 'aria-label': 'Agent card JSON' }); ta.value = S.card; ta.addEventListener('input', () => { S.card = ta.value; });
       const nm = h('input', { class: 'field', value: S.cardname, placeholder: 'Name for the agent', maxlength: 40, 'aria-label': 'Card agent name' }); nm.addEventListener('input', () => { S.cardname = nm.value; });
-      body = h('div', {}, h('p', { class: 'muted' }, 'Cards carry a role and a system prompt, never memory or keys. Imported cards start unverified with read-only rights. Review the prompt before granting more.'), ta, h('div', { style: 'height:8px' }), nm,
+      return h('div', { class: 'card mkt-card mkt-import-card' },
+        h('div', { class: 'mkt-head' }, h('span', { class: 'mkt-ic mkt-ic-neu' }, icon('doc', 20)), h('div', { class: 'mkt-title' }, h('b', { class: 'mkt-name' }, 'Paste an agent card'), h('span', { class: 'muted mkt-sub' }, 'JSON from another workspace'))),
+        h('div', { class: 'mkt-badges' }, h('span', { class: 'chip warn mkt-trust' }, 'Unverified external')),
+        h('p', { class: 'mkt-desc' }, 'Cards carry a role and a system prompt, never memory or keys. Imported cards start unverified with read-only rights. Review the prompt before granting more.'),
+        ta, nm,
         h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Import card', () => { let card; try { card = JSON.parse(S.card); } catch { S.err = 'That is not valid JSON.'; return render(); } importAgent({ source: 'card', name: S.cardname, card }, 'Card'); }, 'btn primary')));
-    }
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Marketplace'), h('p', { class: 'muted' }, 'Find agents, bring in open models and name them yourself. Everything from outside starts with the least rights.'), tabs, body));
+    };
+    const body = S.mtab === 'hf' ? h('div', { class: 'mkt-pane' }, hfPane()) : S.mtab === 'card' ? h('div', { class: 'mkt-pane' }, cardPane()) : h('div', { class: 'mkt-pane' }, curatedPane());
+    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Marketplace'), h('p', { class: 'muted' }, 'Curated agents come from the built-in catalog and are imported as verified. Hugging Face models and pasted cards are external: they start unverified with read-only rights. Name every import yourself.'), tabs, body));
   }
 
   // ---------- control ----------
-  const fA = (k, ph) => { const i = h('input', { class: 'field', placeholder: ph, value: (S.afilter || {})[k] || '', 'aria-label': ph }); i.addEventListener('input', () => { S.afilter = S.afilter || {}; S.afilter[k] = i.value; }); return i; };
+  const ctlLabel = (d) => (d === 'allow' ? 'Allow' : d === 'approval_required' ? 'Approval required' : 'Deny');
+  // Date-only "to" dates include that whole day; the backend compares created_at as text.
+  const ctlFilterQS = () => {
+    const f = S.afilter || {};
+    const until = f.until && /^\d{4}-\d{2}-\d{2}$/.test(f.until) ? f.until + 'T23:59:59.999999+00:00' : f.until;
+    return [['since', f.since], ['until', until], ['actor', f.actor], ['event_type', f.event_type]]
+      .map(([k, v]) => (v ? `${k}=${encodeURIComponent(v)}` : '')).filter(Boolean).join('&');
+  };
+  const ctlAuditPath = () => { const qs = ctlFilterQS(); return '/api/security/audit?limit=200' + (qs ? '&' + qs : ''); };
+  const ctlLoadPolicies = async () => { S.policies = (await api('/api/security/policies')).policies; };
+  const ctlLoadAudit = async () => {
+    const d = await api(ctlAuditPath());
+    S.audit = d.events || [];
+    S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered;
+    S.auditOpen = {};
+  };
+  const ctlRunSelfTest = () => {
+    S.covBusy = true; render();
+    run(async () => {
+      try {
+        await api('/api/selftest', { method: 'POST' });
+        const [latest, cov] = await Promise.all([api('/api/selftest/latest'), api('/api/coverage')]);
+        S.test = latest; S.cov = cov;
+        S.info = `Self-test finished: ${latest.passed} passed, ${latest.failed} failed. Coverage evidence was refreshed.`;
+      } finally { S.covBusy = false; }
+    });
+  };
+  const ctlSavePolicy = (p) => {
+    const decision = ((S.policyDraft || {})[p.action_type]) || p.decision;
+    if (decision === p.decision) return;
+    S.policyBusy = p.action_type; render();
+    run(async () => {
+      try {
+        await api('/api/security/policies', { method: 'PUT', body: { action_type: p.action_type, decision } });
+        await ctlLoadPolicies();
+        if (S.policyDraft) delete S.policyDraft[p.action_type];
+        S.info = `Policy for ${p.action_type} saved: ${ctlLabel(decision).toLowerCase()}.`;
+      } finally { S.policyBusy = null; }
+    });
+  };
+  const ctlResetPolicy = (p) => {
+    S.policyBusy = p.action_type; render();
+    run(async () => {
+      try {
+        await api(`/api/security/policies/${encodeURIComponent(p.action_type)}`, { method: 'DELETE' });
+        await ctlLoadPolicies();
+        if (S.policyDraft) delete S.policyDraft[p.action_type];
+        S.info = `Policy for ${p.action_type} reset to the default (${ctlLabel(p.default_decision || 'deny').toLowerCase()}).`;
+      } finally { S.policyBusy = null; }
+    });
+  };
+  const ctlApplyAudit = () => {
+    S.auditBusy = true; render();
+    run(async () => { try { await ctlLoadAudit(); S.verify = ''; } finally { S.auditBusy = false; } });
+  };
+  const ctlResetAudit = () => {
+    S.afilter = {};
+    S.auditBusy = true; render();
+    run(async () => { try { await ctlLoadAudit(); S.verify = ''; } finally { S.auditBusy = false; } });
+  };
+  const ctlToggleAudit = (id) => { S.auditOpen = S.auditOpen || {}; S.auditOpen[id] = !S.auditOpen[id]; render(); };
+  const ctlChevron = (open) => { const v = icon('up', 14); v.style.transform = open ? 'rotate(180deg)' : ''; return v; };
+
+  function ctlCoverage() {
+    const cov = S.cov || {}, items = cov.items || [];
+    const covered = items.filter((c) => c.status === 'covered').length;
+    const partial = items.filter((c) => c.status === 'partial').length;
+    const missing = items.length - covered - partial;
+    const evidence = (c) => (c.evidence && c.evidence.total
+      ? `${c.evidence.passed} of ${c.evidence.total} probes passed`
+      : 'No self-test run yet — evidence will appear after you run the self-test');
+    const card = (c) => {
+      const tone = c.status === 'covered' ? 'ok' : c.status === 'partial' ? 'warn' : 'bad';
+      const controls = c.controls || [], gaps = c.gaps || [];
+      return h('div', { class: 'card ctl-cov-card' },
+        h('div', { class: 'row2 ctl-cov-title' }, h('span', { class: 'ctl-dot ' + tone, 'aria-hidden': 'true' }),
+          h('b', { style: 'flex:1' }, (String(c.id).startsWith('ASI') ? c.id + ' · ' : '') + c.name),
+          h('span', { class: 'chip ctl-status ' + tone }, c.status)),
+        h('div', { class: 'muted ctl-cov-evidence' }, evidence(c)),
+        controls.length ? h('ul', { class: 'ctl-cov-list' }, controls.slice(0, 3).map((x) => h('li', {}, x))) : null,
+        controls.length > 3 ? h('details', { class: 'ctl-cov-more' }, h('summary', { class: 'muted' }, `Show ${controls.length - 3} more control${controls.length - 3 === 1 ? '' : 's'}`), h('ul', { class: 'ctl-cov-list' }, controls.slice(3).map((x) => h('li', {}, x)))) : null,
+        gaps.length ? h('div', { class: 'muted ctl-cov-gaps' }, 'Known gaps: ' + gaps.join('; ')) : null);
+    };
+    return h('section', { class: 'ctl-cov', 'aria-label': 'OWASP agentic coverage' },
+      h('div', { class: 'ctl-cov-head' }, h('h2', { class: 'ctl-h2' }, 'OWASP agentic coverage'), h('span', { class: 'sp' }),
+        btn(S.covBusy ? 'Running self-test…' : [icon('flask', 16), 'Run self-test'], ctlRunSelfTest, 'btn' + (S.covBusy ? '' : ' primary'), { disabled: !!S.covBusy, 'aria-busy': S.covBusy ? 'true' : null })),
+      h('p', { class: 'muted ctl-cov-framework' }, cov.framework || 'Coverage data is not available right now.'),
+      h('p', { class: 'muted ctl-cov-disclaimer' }, cov.disclaimer || ''),
+      h('p', { class: 'muted ctl-cov-summary' }, `${covered} covered · ${partial} partial · ${missing} not covered`),
+      items.length ? h('div', { class: 'ctl-cov-grid' }, items.map(card)) : emptyState('shield', 'No coverage data', 'The coverage endpoint returned no items. Nothing is shown rather than guessed.'));
+  }
+
+  function ctlPolicies() {
+    const list = S.policies || [], decisions = ['allow', 'approval_required', 'deny'];
+    const busy = (p) => S.policyBusy === p.action_type;
+    const row = (p) => {
+      const draft = (S.policyDraft || {})[p.action_type];
+      const current = draft == null ? p.decision : draft;
+      const changed = current !== p.decision;
+      const sel = h('select', { class: 'field ctl-policy-select', 'aria-label': 'Effect for the policy ' + p.action_type, disabled: busy(p), onchange: (e) => { S.policyDraft = S.policyDraft || {}; S.policyDraft[p.action_type] = e.target.value; render(); } },
+        decisions.map((d) => h('option', { value: d, selected: current === d }, ctlLabel(d))));
+      return h('tr', {},
+        h('td', {}, h('div', { class: 'mono' }, p.action_type), p.description ? h('div', { class: 'muted ctl-policy-desc' }, p.description) : null),
+        h('td', {}, sel),
+        h('td', {}, h('span', { class: 'chip' + (p.overridden ? ' ok' : '') }, p.overridden ? 'custom' : 'default')),
+        h('td', {}, h('span', { class: 'row2 ctl-policy-actions' },
+          changed ? btn('Save', () => ctlSavePolicy(p), 'btn primary', { disabled: busy(p) }) : null,
+          p.overridden ? btn('Reset', () => ctlResetPolicy(p), 'link', { disabled: busy(p) }) : null)));
+    };
+    return [h('h2', {}, 'Policies'),
+      h('p', { class: 'muted' }, 'The policy engine decides whether an action runs immediately, waits for a human approval, or is rejected. Changes apply to new approval requests in this organisation and are written to the audit log. Admin only.'),
+      h('div', { class: 'tbl-wrap ctl-policy-wrap' }, h('table', { class: 'ctl-policy-table' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'Action type'), h('th', {}, 'Effect'), h('th', {}, 'Source'), h('th', {}, 'Actions'))),
+        h('tbody', {}, list.map(row)))),
+      h('div', { class: 'ctl-effect-help' },
+        h('div', {}, h('span', { class: 'chip ok' }, 'Allow'), ' runs immediately when the risk level does not need a human decision.'),
+        h('div', {}, h('span', { class: 'chip warn' }, 'Approval required'), ' creates a pending request in the approval queue and never runs on its own.'),
+        h('div', {}, h('span', { class: 'chip risk-high' }, 'Deny'), ' is rejected automatically. Unknown action types always fall back to deny.')),
+      S.policyMeta && S.policyMeta.note ? h('p', { class: 'muted ctl-fine' }, S.policyMeta.note) : null];
+  }
+
+  function ctlAudit() {
+    const f = S.afilter || {};
+    const field = (key, label, extra) => {
+      const i = h('input', { class: 'field ctl-audit-filter', 'aria-label': label, value: f[key] || '', ...extra });
+      i.addEventListener('input', () => { S.afilter = S.afilter || {}; S.afilter[key] = i.value; });
+      return i;
+    };
+    const types = [...new Set((S.audit || []).map((e) => e.event_type))].sort();
+    const shown = (S.audit || []).length;
+    const total = S.auditTotal == null ? shown : S.auditTotal;
+    const count = total > shown ? `${shown} of ${total} events shown` : `${shown} event${shown === 1 ? '' : 's'}`;
+    const row = (e) => {
+      const open = !!(S.auditOpen || {})[e.id];
+      const toggle = () => ctlToggleAudit(e.id);
+      return [h('tr', { class: 'ctl-audit-row', tabindex: 0, 'aria-expanded': open ? 'true' : 'false', 'aria-label': `Event ${e.event_type} by ${e.actor || 'system'} — show details`, onclick: toggle,
+        onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } } },
+        h('td', { class: 'mono ctl-audit-time' }, when(e.created_at)),
+        h('td', {}, e.event_type),
+        h('td', {}, e.actor || 'system'),
+        h('td', { class: 'mono' }, String(e.event_hash || '').slice(0, 12)),
+        h('td', {}, h('span', { class: 'ctl-audit-chev' }, ctlChevron(open)))),
+        open ? h('tr', { class: 'ctl-audit-detail' }, h('td', { colspan: 5 },
+          h('div', { class: 'mono ctl-audit-meta' },
+            h('div', {}, 'id: ' + e.id),
+            h('div', {}, 'seq: ' + e.seq),
+            h('div', {}, 'created_at: ' + e.created_at),
+            h('div', {}, 'org_id: ' + e.org_id),
+            h('div', {}, 'previous_hash: ' + e.previous_hash),
+            h('div', {}, 'event_hash: ' + e.event_hash)),
+          h('div', { class: 'muted ctl-audit-payload-label' }, 'Payload'),
+          h('pre', { class: 'ctl-audit-json' }, JSON.stringify(e.payload, null, 2)))) : null];
+    };
+    return [h('h2', {}, 'Audit log'),
+      h('p', { class: 'muted' }, 'Hash-linked chain per organisation. Filters run on the server; the export sends the same filters as NDJSON for SIEM tools. Click a row to see the full payload.'),
+      h('div', { class: 'ctl-filters' },
+        field('event_type', 'Event type starts with', { list: 'ctl-audit-event-types', placeholder: 'Event type starts with…' }),
+        field('actor', 'Actor contains', { placeholder: 'Actor contains…' }),
+        field('since', 'From date', { type: 'date' }),
+        field('until', 'To date', { type: 'date' }),
+        h('datalist', { id: 'ctl-audit-event-types' }, types.map((t) => h('option', { value: t })))),
+      h('div', { class: 'row2 ctl-audit-actions' },
+        btn(S.auditBusy ? 'Applying…' : 'Apply filters', ctlApplyAudit, 'btn primary', { disabled: !!S.auditBusy }),
+        btn('Reset', ctlResetAudit, 'btn', { disabled: !!S.auditBusy }),
+        h('span', { class: 'muted ctl-audit-count' }, count),
+        h('span', { class: 'sp' }),
+        btn('Verify integrity', () => run(async () => { const v = await api('/api/security/audit/verify'); S.verify = v.valid ? `Chain intact (${v.checked} events). It detects edits; it is not an external signature.` : 'Chain broken: ' + JSON.stringify(v); })),
+        btn('Export for SIEM (NDJSON)', () => { const qs = ctlFilterQS(); run(async () => { await dl('/api/security/audit/export' + (qs ? '?' + qs : ''), 'audit-export.ndjson'); }); }, 'btn primary')),
+      S.verify ? h('p', { class: 'muted' }, S.verify) : null,
+      h('div', { class: 'tbl-wrap ctl-audit-wrap' }, h('table', { class: 'ctl-audit-table' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'Time'), h('th', {}, 'Event type'), h('th', {}, 'Actor'), h('th', {}, 'Hash'), h('th', { 'aria-label': 'Details' }, ''))),
+        h('tbody', {}, shown ? (S.audit || []).map(row) : h('tr', {}, h('td', { colspan: 5, class: 'muted' }, 'No audit events match these filters.')))))]
+  }
+
   function controlView() {
-    const pend = S.approvals.filter((a) => a.status === 'pending'), tcOf = (id) => S.toolCalls.find((t) => t.approval_id === id);
+    const pend = (S.approvals || []).filter((a) => a.status === 'pending');
     const sumCards = h('div', { class: 'cards', style: 'margin-bottom:16px' }, [['Agents', S.sum.agents], ['Suspended', S.sum.suspended], ['Pending approvals', S.sum.pending_approvals], ['Memory drafts', S.sum.drafts], ['Apps connected', S.sum.apps]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l), h('b', { style: 'font-size:22px' }, String(v ?? 0)))));
     const incident = h('div', { class: 'card', style: 'margin-bottom:16px' }, h('b', {}, 'Incident switch'), h('p', { class: 'muted' }, 'Suspends every agent at once: chat, calls and tool use stop. Resume restores them. Both are written to the audit log.'),
       h('div', { class: 'row2' }, btn(S.panicArm ? 'Click again to suspend all agents' : 'Suspend all agents', () => { if (!S.panicArm) { S.panicArm = true; return render(); } S.panicArm = false; run(async () => { const r = await api('/api/security/panic', { method: 'POST', body: { action: 'suspend_all', reason: 'incident switch' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = `${r.agents} agent(s) suspended.`; }); }, S.panicArm ? 'btn primary' : 'btn'),
         btn('Resume all', () => run(async () => { await api('/api/security/panic', { method: 'POST', body: { action: 'resume_all' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = 'All agents resumed.'; }))));
-    return h('div', { class: 'body' }, h('div', { class: 'col' }, sumCards, incident,
+    return h('div', { class: 'body' }, h('div', { class: 'col' }, sumCards, ctlCoverage(), incident,
       h('h2', {}, 'Approval queue'), h('p', { class: 'muted' }, 'Approving records a human decision. A tool call only runs when you execute it afterwards.'),
       pend.length ? pend.map((a) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, a.action_type), ` (${a.risk_level}): ${a.description}`, h('div', { class: 'row2', style: 'margin-top:8px' }, ['approved', 'rejected'].map((d) => btn(d === 'approved' ? 'Approve' : 'Reject', () => run(async () => { await api(`/api/security/approvals/${a.id}/decision`, { method: 'POST', body: { decision: d, decided_by: 'ui' } }); await go('control'); })))))) : h('p', { class: 'muted' }, 'Nothing pending.'),
       h('h2', {}, 'Tool calls'), S.toolCalls.length ? S.toolCalls.map((t) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, `${t.app}.${t.tool}`), ` as ${botBy(t.bot_id).name}`, h('span', { class: 'chip ' + (['invalidated', 'expired'].includes(t.status) ? 'warn' : ''), style: 'margin-left:8px' }, `${t.status} / approval ${t.approval_status}`), h('div', { class: 'pre' }, JSON.stringify(t.args)), t.payload_hash ? h('div', { class: 'muted mono', style: 'font-size:11px' }, `Approval covers exactly this payload (${t.payload_hash})` + (t.expires_at ? `, valid until ${when(t.expires_at)}` : '')) : null,
         t.status === 'pending' && t.approval_status === 'approved' ? h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Execute now', () => run(async () => { await api(`/api/tool-calls/${t.approval_id}/execute`, { method: 'POST' }); await go('control'); }), 'btn primary')) : null, t.result ? h('div', { class: 'pre' }, t.result) : null)) : h('p', { class: 'muted' }, 'No tool calls waiting.'),
       h('h2', {}, 'Authorization self-test'), h('p', { class: 'muted' }, "Synthetic probes against this app: capabilities, tool grants, suspended agents, memory spaces, unverified and instruction-like notes. It tests this app's enforcement, not model behavior."),
-      h('div', { class: 'row2' }, btn([icon('flask', 16), 'Run self-test'], () => run(async () => { S.test = await api('/api/selftest', { method: 'POST' }); })), btn('Run finance demo', () => run(async () => { S.demo = await api('/api/demo/finance', { method: 'POST' }); S.test = await api('/api/selftest/latest'); await go('control'); }))),
+      h('div', { class: 'row2' }, btn(S.covBusy ? 'Running self-test…' : [icon('flask', 16), 'Run self-test'], ctlRunSelfTest, 'btn', { disabled: !!S.covBusy }), btn('Run finance demo', () => run(async () => { S.demo = await api('/api/demo/finance', { method: 'POST' }); S.test = await api('/api/selftest/latest'); S.cov = await api('/api/coverage'); await go('control'); }))),
       S.demo ? h('div', {}, S.demo.steps.map((x) => h('p', {}, (x.ok ? 'OK: ' : 'FAIL: ') + x.step))) : null,
       S.test && S.test.id ? [h('p', {}, h('b', {}, `${S.test.passed} passed, ${S.test.failed} failed `), btn('Download report', () => run(async () => { await dl(`/api/selftest/${S.test.id}/report.md`, 'selftest-report.md'); }), 'link'), ' ', S.test.share_url ? [h('a', { class: 'link', href: S.test.share_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open public link'), ' ', btn('Copy', () => { navigator.clipboard && navigator.clipboard.writeText(location.origin + S.test.share_url); S.info = 'Link copied. Anyone with it can read this report.'; render(); }, 'link'), ' ', btn('Revoke', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'DELETE' }); S.test = await api('/api/selftest/latest'); }), 'link')] : btn('Create public link', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'POST' }); S.test = await api('/api/selftest/latest'); }), 'link')),
         h('table', {}, h('tbody', {}, S.test.probes.filter((x) => !x.ok).concat(S.test.probes.filter((x) => x.ok).slice(0, 6)).map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.expected), h('td', {}, x.actual), h('td', {}, x.ok ? 'pass' : 'FAIL')))))] : null,
-      S.cov ? [h('h2', {}, 'Coverage of the OWASP agentic risks'), h('p', { class: 'muted' }, `${S.cov.framework}. ${S.cov.disclaimer}`),
-        S.cov.items.map((c) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, (c.id.startsWith('ASI') ? c.id + ' · ' : '') + c.name), h('span', { class: 'chip ' + (c.status === 'covered' ? 'ok' : '') }, c.status),
-          h('span', { class: 'chip' }, c.evidence.total ? `${c.evidence.passed} of ${c.evidence.total} probes passed` : 'no probes yet')),
-          h('ul', { style: 'margin:8px 0;padding-left:18px' }, c.controls.map((x) => h('li', {}, x))), h('div', { class: 'muted', style: 'font-size:13px' }, 'Known gaps: ' + c.gaps.join('; '))))] : null,
-      h('h2', {}, 'Policies'), h('table', {}, h('tbody', {}, (S.policies || []).map((p) => h('tr', {}, h('td', { class: 'mono' }, p.action_type), h('td', {}, p.decision))))),
+      ctlPolicies(),
       S.funnel ? [h('h2', {}, 'Pipeline'), h('div', { class: 'cards' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l + ' (30 days)'), h('b', { style: 'font-size:22px' }, String(v || 0))))),
         S.leads.length ? h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60)))))) : h('p', { class: 'muted' }, 'No leads yet. The public page /welcome has the pilot form.')] : null,
-      h('h2', {}, 'Audit log'), h('p', { class: 'muted' }, 'Hash-linked chain per organisation. The export is NDJSON for SIEM (Splunk, Datadog, Elastic) and can be filtered by date range, actor and event type.'),
-      h('div', { class: 'rbox' }, fA('since', 'From date (2026-01-01)'), fA('until', 'To date (2026-12-31)'), fA('actor', 'Actor contains...'), fA('event_type', 'Event type starts with...')),
-      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Verify integrity', () => run(async () => { const v = await api('/api/security/audit/verify'); S.verify = v.valid ? `Chain intact (${v.checked} events). It detects edits; it is not an external signature.` : 'Chain broken: ' + JSON.stringify(v); })), btn('Export for SIEM (NDJSON)', () => {
-        const q = ['since', 'until', 'actor', 'event_type'].map((k) => (S.afilter || {})[k] ? `${k}=${encodeURIComponent(S.afilter[k])}` : '').filter(Boolean).join('&');
-        dl('/api/security/audit/export' + (q ? '?' + q : ''), 'audit-export.ndjson');
-      }, 'btn primary')),
-      S.verify ? h('p', { class: 'muted' }, S.verify) : null, h('table', {}, h('tbody', {}, (S.audit || []).map((e) => h('tr', {}, h('td', { class: 'mono' }, when(e.created_at)), h('td', {}, e.event_type), h('td', {}, e.actor)))))));
+      ctlAudit()));
   }
 
   // ---------- modals ----------
@@ -998,7 +1523,21 @@ const overlayRoot = (() => {
     return h('div', { class: 'monitor' }, h('div', { class: 'monhead' }, r.agent ? tile(r.agent, 38, { thinking: r.running, float: !r.running }) : icon('lens', 24), h('div', { style: 'flex:1' }, h('b', {}, r.agent ? r.agent.name : 'Research agent'), h('div', { style: 'font-size:12px;opacity:.7' }, r.running ? `working: step ${pr.done} of ${pr.total}` : rep ? 'finished' : 'idle')), h('span', { class: 'chip ' + (r.running ? 'ok' : '') }, r.running ? 'LIVE' : 'DONE')),
       h('div', { class: 'progress dark' }, h('i', { style: `width:${pct}%` })), readerView(r), h('div', { class: 'monbody' }, r.activity.length ? [...r.activity].reverse().map((a) => h('div', {}, a)) : h('div', { style: 'opacity:.7' }, 'Waiting to start…')));
   }
-  async function upgrade(plan) { track('upgrade_click'); await run(async () => { const r = await api('/api/billing/checkout', { method: 'POST', body: { plan } }); location.href = r.url; }); }
+  function upgrade(plan, seats) {
+    track('upgrade_click');
+    const b = S.bill || {}, wanted = Math.round(+seats), current = (b.usage && b.usage.seats) || 1;
+    const base = wanted || (S.qseats != null ? S.qseats : current);
+    const n = Math.max(1, Math.min(200, base || 1));
+    S.up = { plan, seats: n, quote: null, busy: false, err: '', timer: null };
+    S.modal = 'upgrade';
+    render();
+    if (!(b.plans || []).some((x) => x.id === plan)) { S.up.err = 'That plan is not available on this deployment.'; syncOverlays(true); return; }
+    api(`/api/billing/quote?plan=${encodeURIComponent(plan)}&seats=${n}`).then((q) => {
+      if (S.up && S.up.plan === plan && S.up.seats === n) { S.up.quote = q; syncOverlays(true); }
+    }).catch((e) => {
+      if (S.up && S.up.plan === plan && S.up.seats === n) { S.up.err = e.message; syncOverlays(true); }
+    });
+  }
   async function applyPreset(id) {
     track('preset_applied');
     await run(async () => { const r = await api(`/api/presets/${id}/apply`, { method: 'POST' }); await Promise.all([loadBots(), loadNotes(), loadTeams(), api('/api/billing').then((x) => { S.bill = x; })]); S.modal = null; S.onb = { done: true, suggest: false }; S.topic = r.topic; S.info = `Preset ready: ${r.created} agents, team "${r.team}" and ${r.notes} starter notes. Try the sample question in a council call.`; if (r.first_agent) await pick(r.first_agent); });
@@ -1028,18 +1567,180 @@ const overlayRoot = (() => {
   }
   function plansView() {
     const b = S.bill; if (!b) return h('div', { class: 'body' }, h('p', { class: 'muted' }, 'Loading…'));
-    const fmt = (n) => (n >= 100000 ? 'unlimited' : n.toLocaleString());
-    const cta = (p) => (p.id === b.plan ? h('span', { class: 'chip ok' }, 'Current plan') : p.id === 'free' ? null : p.id === 'pilot' ? btn('Request a pilot', () => { track('cta_pilot'); S.modal = 'lead'; render(); }, 'btn primary')
-      : b.checkout ? btn('Upgrade to ' + p.name, () => upgrade(p.id), 'btn primary') : btn('Ask for ' + p.name, () => { S.modal = 'lead'; render(); }, 'btn'));
+    const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+    const eur = (v) => (v == null ? 'Custom' : '€' + Number(v).toFixed(2));
+    const perBlockSeat = (p) => (p.price_eur == null ? 'Custom' : '€' + (p.price_eur / Math.max(1, (p.limits && p.limits.seats) || 1)).toFixed(2));
+    const plans = b.plans || [];
+    const cur = plans.find((p) => p.id === b.plan) || plans[0] || { id: b.plan, name: b.plan_name || b.plan, price_eur: null, tagline: '', limits: b.limits || {} };
+    if (S.qseats == null) S.qseats = Math.max(1, Math.min(200, (b.usage && b.usage.seats) || 1));
+    S.qseats = Math.max(1, Math.min(200, Math.round(S.qseats) || 1));
+    const mk = (p, seats) => { const inc = Math.max(1, (p.limits && p.limits.seats) || 1), blocks = Math.max(1, Math.ceil(seats / inc)); return { seats, inc, blocks, total: p.price_eur == null ? null : blocks * p.price_eur, custom: p.price_eur == null }; };
+    const local = mk(cur, S.qseats);
+    const q = S.quote && S.quote.plan === b.plan && S.quote.seats === S.qseats ? S.quote : null;
+    const v = q ? { seats: q.seats, inc: q.included_seats, blocks: q.blocks, total: q.monthly_total_eur, custom: !!q.custom } : local;
+    const qkey = b.plan + ':' + S.qseats;
+    // The server quote is the source of truth; the local block math above only bridges the gap while it loads.
+    if (!q && S.qkey !== qkey && S.qerrKey !== qkey) {
+      S.qkey = qkey;
+      api(`/api/billing/quote?plan=${encodeURIComponent(b.plan)}&seats=${S.qseats}`).then((r) => { if (S.qkey === qkey) { S.quote = r; S.qkey = null; S.qerr = ''; } render(); })
+        .catch((e) => { if (S.qkey === qkey) { S.qkey = null; S.qerrKey = qkey; S.qerr = e.message; } render(); });
+    }
+    const seatsIn = h('input', { class: 'field planx-seatinput', type: 'number', min: 1, max: 200, value: S.qseats, 'aria-label': 'Seats to quote' });
+    seatsIn.addEventListener('input', () => {
+      S.qseats = Math.max(1, Math.min(200, Math.round(+seatsIn.value || 1)));
+      S.quote = null; S.qerr = ''; S.qerrKey = null;
+      if (S.qtimer) clearTimeout(S.qtimer);
+      S.qtimer = setTimeout(() => {
+        if (S.view !== 'plans') return;
+        render();
+        const el = document.querySelector('input[aria-label="Seats to quote"]');
+        if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} }
+      }, 350);
+    });
+    const stat = (label, value, title) => h('div', { class: 'planx-stat', title: title || null }, h('div', { class: 'planx-stat-lab' }, label), h('div', { class: 'planx-stat-val' }, value));
+    const cta = (p) => {
+      if (p.id === b.plan) return h('span', { class: 'chip ok' }, 'Current plan');
+      if (p.id === 'enterprise') return btn('Request a pilot', () => { track('cta_pilot'); S.modal = 'lead'; render(); }, 'btn');
+      if (p.id === 'free') return h('span', { class: 'muted planx-note' }, 'Free tier');
+      return b.enabled && b.checkout ? btn('Upgrade', () => upgrade(p.id, S.qseats), 'btn primary') : btn('See invoice', () => upgrade(p.id, S.qseats), 'btn');
+    };
+    const cell = (x, cls) => h('td', { class: cls || null }, x);
+    const row = (p) => h('tr', { class: p.id === b.plan ? 'planx-current' : null },
+      h('th', { scope: 'row' }, h('b', {}, p.name), h('div', { class: 'muted planx-tag' }, p.tagline || '')),
+      cell(p.price_eur == null ? 'Custom' : eur(p.price_eur), 'planx-num'), cell(fmt(p.limits.seats), 'planx-num'),
+      cell(perBlockSeat(p), 'planx-num'), cell(fmt(p.limits.agents), 'planx-num'), cell(fmt(p.limits.messages), 'planx-num'),
+      cell(fmt(p.limits.calls), 'planx-num'), cell(fmt(p.limits.research), 'planx-num'), cell(fmt(p.limits.api_calls), 'planx-num'),
+      cell(fmt(p.limits.audit_days) + ' days', 'planx-num'), cell(fmt(p.limits.storage_mb) + ' MB', 'planx-num'), cell(cta(p)));
+    const usage = Object.keys(b.labels || {}).map((k) => {
+      const lim = (b.limits || {})[k], used = (b.usage || {})[k] || 0, pct = Math.min(100, Math.round((used / Math.max(lim || 0, 1)) * 100));
+      return h('div', { class: 'planx-usage' }, h('div', { class: 'row2' }, h('span', { style: 'flex:1' }, b.labels[k]), h('span', { class: 'muted mono' }, `${used} / ${fmt(lim)}`)),
+        h('div', { class: 'progress' + (pct >= 90 ? ' hot' : '') }, h('i', { style: `width:${pct}%` })));
+    });
+    if (b.enabled && b.portal && S.billInv === undefined) {
+      S.billInv = { loading: true };
+      api('/api/billing/invoices').then((r) => { S.billInv = r; render(); })
+        .catch((e) => { S.billInv = { invoices: [], note: 'Invoices could not be loaded: ' + e.message }; render(); });
+    }
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Plans and usage'),
-      !b.enabled ? h('div', { class: 'banner', style: 'border:1px solid var(--line);border-radius:12px;margin-bottom:14px' }, 'Billing is off on this deployment: self-hosted installs have no limits. Set CFA_BILLING=on to enforce plans.') : null,
-      b.status === 'past_due' ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad);margin-bottom:14px' }, 'Your last payment failed. Update your payment method to keep your plan.') : null,
-      h('div', { class: 'cards' }, b.plans.map((p) => h('div', { class: 'card plan' + (p.id === b.plan ? ' current' : '') }, h('b', { style: 'font-size:16px' }, p.name), h('div', { class: 'price' }, p.price_eur === null ? 'Custom' : p.price_eur === 0 ? '€0' : `€${p.price_eur}`, p.price_eur ? h('small', {}, ' / month') : null), h('div', { class: 'muted' }, p.tagline),
-        h('ul', {}, ['messages', 'calls', 'research', 'uploads', 'agents', 'mcp_servers'].map((k) => h('li', {}, `${fmt(p.limits[k])} ${b.labels[k]}${['agents', 'mcp_servers'].includes(k) ? '' : ' / month'}`))), cta(p)))),
-      b.portal ? h('p', {}, btn('Manage billing and invoices', () => run(async () => { const r = await api('/api/billing/portal', { method: 'POST' }); location.href = r.url; }))) : null,
-      h('h2', {}, 'Usage this month'), h('div', { class: 'card' }, Object.keys(b.labels).map((k) => { const lim = b.limits[k], pct = lim >= 100000 ? 4 : Math.min(100, Math.round((b.usage[k] / Math.max(lim, 1)) * 100));
-        return h('div', { style: 'margin:10px 0' }, h('div', { class: 'row2' }, h('span', { style: 'flex:1' }, b.labels[k]), h('span', { class: 'muted mono' }, `${b.usage[k]} / ${fmt(lim)}`)), h('div', { class: 'progress' + (pct >= 90 ? ' hot' : '') }, h('i', { style: `width:${pct}%` }))); })),
-      h('p', { class: 'muted', style: 'font-size:12px' }, 'Limits reset on the first of each month. Prices are launch prices and may change. Plans apply to this workspace.')));
+      !b.enabled ? h('div', { class: 'banner planx-banner' }, 'Billing is off on this deployment: self-hosted installs have no limits, no online checkout and no invoices. The prices below are this release\'s launch prices, for reference only.') : null,
+      b.status === 'past_due' ? h('div', { class: 'banner planx-banner', role: 'alert', style: 'color:var(--bad)' }, 'Your last payment failed. Update your payment method in Manage billing to keep your plan.') : null,
+      b.cancel_at_period_end ? h('div', { class: 'banner planx-banner' }, 'This plan is cancelled and stays active until ' + when(b.period_end) + '.') : null,
+      h('h2', {}, 'Plan and seat quote'),
+      h('div', { class: 'card planx-quote' },
+        h('div', { class: 'row2 planx-quote-head' },
+          h('div', { style: 'flex:1;min-width:0' }, h('div', { class: 'row2' }, h('b', { style: 'font-size:16px' }, (cur.name || b.plan_name) + ' plan'), h('span', { class: 'chip ' + (b.status === 'active' || b.status === 'trialing' ? 'ok' : 'warn') }, b.status || 'active')), h('div', { class: 'muted' }, cur.tagline || '')),
+          h('label', { class: 'planx-seatfield' }, h('span', { class: 'muted' }, 'Seats'), seatsIn)),
+        h('div', { class: 'planx-stats' },
+          stat('Price / month', v.custom ? 'Custom' : eur(v.total)),
+          stat('Included seats', fmt(v.inc), 'Seats covered by one plan block.'),
+          stat('Seat blocks', v.custom ? '—' : fmt(v.blocks), 'A partly filled block is billed as a whole block.'),
+          stat('€ / seat', v.custom || v.total == null ? 'Custom' : '€' + (v.total / Math.max(1, v.seats)).toFixed(2), 'Monthly total divided by the seats you quote.')),
+        h('p', { class: 'planx-line' }, v.custom ? `${fmt(v.seats)} seats and ${fmt(v.blocks)} seat block${v.blocks === 1 ? '' : 's'} of ${fmt(v.inc)}: enterprise is invoiced per contract, so request a pilot for a quote.`
+          : `${fmt(v.seats)} seat${v.seats === 1 ? '' : 's'} -> ${fmt(v.blocks)} block${v.blocks === 1 ? '' : 's'} of ${fmt(v.inc)} -> ${eur(v.total)} / month`),
+        h('p', { class: 'muted planx-fine' }, 'One block covers the plan\'s included seats and never splits. The euro-per-seat figure is derived from the block price; there is no separate per-seat rate.'),
+        b.enabled && cur.id === 'free' && v.seats > v.inc ? h('p', { class: 'muted planx-fine' }, `The Free plan includes ${fmt(v.inc)} seats and has no self-serve seat blocks; upgrade to add more people.`) : null,
+        S.qerr ? h('p', { class: 'muted planx-fine' }, 'The live server quote could not be loaded (' + S.qerr + '). The numbers above use the same plan prices.') : null),
+      h('h2', {}, 'Compare plans'),
+      h('div', { class: 'tbl-wrap planx-table' }, h('table', {},
+        h('caption', { class: 'muted planx-caption' }, 'Prices are in EUR per organisation and per month. Included seats are the size of one seat block.'),
+        h('thead', {}, h('tr', {}, ['Plan', 'Price / month', 'Included seats', '€ / seat at full block', 'Agents', 'Messages', 'Council calls', 'Research', 'API calls', 'Audit days', 'Storage', 'Choose'].map((t, i) => h('th', { scope: 'col', class: i > 0 && i < 11 ? 'planx-num' : null }, t)))),
+        h('tbody', {}, plans.map(row)))),
+      h('p', { class: 'muted planx-fine' }, 'Prices are launch prices in EUR, per organisation, billed monthly. Seat blocks do not split; a new block starts when the previous one is full. Cancel anytime.'),
+      b.enabled ? h('h2', {}, 'Invoices') : null,
+      b.enabled ? h('div', { class: 'card planx-invoices' },
+        h('div', { class: 'row2 planx-actions' },
+          b.portal ? btn('Manage billing and invoices', () => run(async () => { const r = await api('/api/billing/portal', { method: 'POST' }); location.href = r.url; })) : h('span', { class: 'muted' }, 'No paid subscription yet: online billing is not set up for this workspace.'),
+          b.contact ? h('a', { class: 'link', href: b.contact, target: '_blank', rel: 'noopener' }, 'Talk to us') : null),
+        !b.portal ? h('p', { class: 'muted planx-fine' }, 'No invoices yet.') :
+          !S.billInv || S.billInv.loading ? h('p', { class: 'muted planx-fine' }, 'Loading invoices…') :
+            (S.billInv.invoices || []).length ? h('div', { class: 'tbl-wrap' }, h('table', {},
+              h('thead', {}, h('tr', {}, ['Number', 'Status', 'Amount', 'Created', 'Invoice'].map((t) => h('th', { scope: 'col' }, t)))),
+              h('tbody', {}, S.billInv.invoices.map((i) => h('tr', {},
+                h('td', { class: 'mono' }, i.number || i.id || '—'),
+                h('td', { class: 'muted' }, i.status || '—'),
+                h('td', {}, i.amount_due == null ? '—' : (Number(i.amount_due) / 100).toFixed(2) + ' ' + String(i.currency || 'eur').toUpperCase()),
+                h('td', { class: 'muted' }, when(i.created)),
+                h('td', {}, i.invoice_pdf ? h('a', { href: i.invoice_pdf, target: '_blank', rel: 'noopener' }, 'PDF') : i.hosted_invoice_url ? h('a', { href: i.hosted_invoice_url, target: '_blank', rel: 'noopener' }, 'View') : h('span', { class: 'muted' }, '—')))))))
+              : h('p', { class: 'muted planx-fine' }, S.billInv.note || 'No invoices yet.')) : null,
+      h('h2', {}, 'Usage this month'), h('div', { class: 'card planx-usage-card' }, usage),
+      h('p', { class: 'muted planx-fine' }, 'Limits reset on the first of each month. Usage counts this workspace only.')));
+  }
+  function upgradeModal() {
+    const u = S.up || { plan: 'starter', seats: 1, quote: null, busy: false, err: '', timer: null };
+    const b = S.bill || {}, plans = b.plans || [];
+    const p = plans.find((x) => x.id === u.plan) || { id: u.plan, name: u.plan, price_eur: null, tagline: '', limits: {} };
+    const q = u.quote && u.quote.plan === u.plan && u.quote.seats === u.seats ? u.quote : null;
+    const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+    const eur = (x) => (x == null ? 'Custom' : '€' + Number(x).toFixed(2));
+    const inc = q ? q.included_seats : Math.max(1, (p.limits && p.limits.seats) || 1);
+    const blocks = q ? q.blocks : Math.max(1, Math.ceil(u.seats / inc));
+    const custom = q ? q.custom : p.price_eur == null;
+    const total = q ? q.monthly_total_eur : (p.price_eur == null ? null : blocks * p.price_eur);
+    const price = q ? q.unit_price_eur : p.price_eur;
+    const canPay = !!(b.enabled && q && q.checkout && !custom && !u.busy);
+    const closeUp = () => { if (u.timer) clearTimeout(u.timer); S.modal = null; S.up = null; syncOverlays(true); };
+    const pilot = () => { if (u.timer) clearTimeout(u.timer); S.modal = 'lead'; S.up = null; render(); };
+    const focusSeats = () => { try { const el = document.querySelector('input[aria-label="Seats for this invoice"]'); if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} } } catch {} };
+    const pull = (n) => {
+      if (u.timer) { clearTimeout(u.timer); u.timer = null; }
+      u.seats = Math.max(1, Math.min(200, Math.round(n) || 1)); u.quote = null; u.err = '';
+      syncOverlays(true); focusSeats();
+      const want = u.seats;
+      api(`/api/billing/quote?plan=${encodeURIComponent(u.plan)}&seats=${want}`).then((r) => {
+        if (S.up === u && S.up.seats === want) { S.up.quote = r; syncOverlays(true); focusSeats(); }
+      }).catch((e) => {
+        if (S.up === u && S.up.seats === want) { S.up.err = e.message; syncOverlays(true); focusSeats(); }
+      });
+    };
+    const si = h('input', { class: 'field planx-seatinput', type: 'number', min: 1, max: 200, value: u.seats, 'aria-label': 'Seats for this invoice' });
+    si.addEventListener('input', () => {
+      u.seats = Math.max(1, Math.min(200, Math.round(+si.value || 1))); u.quote = null; u.err = '';
+      if (u.timer) clearTimeout(u.timer);
+      u.timer = setTimeout(() => { if (S.modal === 'upgrade' && S.up === u) pull(u.seats); }, 320);
+    });
+    const pay = async () => {
+      const cur = S.up;
+      if (!cur || cur.busy || !cur.quote) return;
+      cur.busy = true; cur.err = '';
+      syncOverlays(true);
+      try {
+        const r = await api('/api/billing/checkout', { method: 'POST', body: { plan: cur.plan, seats: cur.seats } });
+        location.href = r.url;
+      } catch (e) {
+        if (S.up === cur) { cur.busy = false; cur.err = e.message; syncOverlays(true); }
+      }
+    };
+    const LBL = Object.assign({}, b.labels || {}, { audit_days: 'days of audit log', storage_mb: 'MB stored knowledge' });
+    const limits = q ? q.limits : (p.limits || {});
+    const lineLabel = q && q.line_items && q.line_items[0] ? q.line_items[0].label : `${p.name || u.plan} plan — seat block (${fmt(inc)} seats)`;
+    return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) closeUp(); } },
+      h('div', { class: 'modal planx-modal', role: 'dialog', 'aria-label': 'Upgrade plan', style: 'max-width:600px' },
+        h('div', { class: 'modal-h' }, h('h2', { style: 'margin:0;flex:1' }, 'Upgrade to ' + (p.name || u.plan)), btn([icon('x', 16)], closeUp, 'chip', { 'aria-label': 'Close' })),
+        h('p', { class: 'muted' }, `You are on the ${b.plan_name || 'current'} plan. Pick the seats you need; the invoice below uses this deployment's plan prices.`),
+        !b.enabled ? h('div', { class: 'banner planx-banner' }, 'Billing is off on this deployment: these prices are for reference only and checkout is disabled.') : null,
+        u.err ? h('div', { class: 'banner planx-banner', role: 'alert', style: 'color:var(--bad)' }, u.err) : null,
+        h('div', { class: 'planx-seatrow' }, h('span', { class: 'muted' }, 'Seats'),
+          h('div', { class: 'planx-stepper' }, btn('-', () => pull(u.seats - 1), 'chip', { 'aria-label': 'One seat less' }), si, btn('+', () => pull(u.seats + 1), 'chip', { 'aria-label': 'One seat more' })),
+          h('span', { class: 'muted planx-hint' }, `1 block = ${fmt(inc)} seats`)),
+        h('p', { class: 'muted planx-line' }, `${fmt(u.seats)} seat${u.seats === 1 ? '' : 's'} -> ${fmt(blocks)} block${blocks === 1 ? '' : 's'} of ${fmt(inc)}`),
+        h('div', { class: 'planx-invoice', 'aria-label': 'Monthly invoice' },
+          h('div', { class: 'planx-inv-head' }, h('b', {}, 'Monthly invoice'), h('span', { class: 'chip' }, 'EUR')),
+          h('div', { class: 'planx-inv-item' },
+            h('div', { class: 'planx-inv-label' }, h('b', {}, lineLabel), h('span', { class: 'muted' }, custom ? 'Invoiced per contract' : `${eur(price)} per block`)),
+            h('div', { class: 'planx-inv-qty' }, '× ' + fmt(blocks)),
+            h('div', { class: 'planx-inv-amount' }, custom ? 'Custom' : eur(total))),
+          h('div', { class: 'planx-inv-row' }, h('span', { class: 'muted' }, 'Subtotal'), h('span', {}, custom ? 'Custom' : eur(total))),
+          h('div', { class: 'planx-inv-row planx-total' }, h('b', {}, 'Total per month'), h('b', {}, custom ? 'Custom' : eur(total))),
+          h('p', { class: 'muted planx-fine' }, custom ? 'Enterprise is invoiced per contract. Request a pilot for a seat-based quote.' : 'Billed monthly, no hidden fees. Prices are in EUR; taxes may apply.'),
+          !q && b.enabled ? h('p', { class: 'muted planx-fine' }, 'Refreshing the server quote…') : null),
+        h('div', { class: 'planx-limits' }, h('div', { class: 'muted planx-limits-head' }, 'Included in the ' + (p.name || u.plan) + ' plan'),
+          h('div', { class: 'row2 planx-chips' }, Object.keys(limits).map((k) => h('span', { class: 'chip' }, fmt(limits[k]) + ' ' + (LBL[k] || k))))),
+        h('div', { class: 'row2 planx-actions' },
+          custom ? btn('Request a pilot', pilot, 'btn primary') : btn(u.busy ? 'Starting checkout…' : 'Continue to checkout', pay, 'btn primary', { disabled: !canPay }),
+          !custom && b.enabled && q && !q.checkout ? btn('Request a pilot', pilot, 'btn') : null,
+          !b.enabled ? btn('Request a pilot', pilot, 'btn') : null,
+          btn('Not now', closeUp)),
+        h('p', { class: 'muted planx-fine' }, 'Continue opens Stripe Checkout for this invoice. The subscription is billed monthly and you can cancel anytime.')));
   }
   function settingsView() {
     const m = S.models, k = S.keys, mt = S.mtest;
@@ -1194,7 +1895,7 @@ const overlayRoot = (() => {
   const refreshSum = async () => { try { S.sum = await api('/api/summary'); if (S.drawer) render(); } catch {} };
   // menu
   function drawer() {
-    const f = S.menuQ.trim().toLowerCase(), badge = (n) => (n ? h('span', { class: 'badge' }, String(n)) : null);
+    const f = S.menuQ.trim().toLowerCase();
     const it = (label, sub, ic, view, fn, count) => ((f && !(label + ' ' + sub).toLowerCase().includes(f)) ? null : h('button', { class: 'ditem', type: 'button', 'aria-current': S.view === view && !S.modal, onclick: fn || (() => go(view)) }, h('span', { class: 'dicon' }, icon(ic, 18)), h('span', { style: 'flex:1' }, label, h('small', {}, sub)), badge(count)));
     const group = (title, items) => { const real = items.filter(Boolean); return real.length ? [h('h3', {}, title), real] : null; };
     const quick = h('div', { class: 'quick' }, [['New agent', 'plus', openAgent], ['New note', 'doc', () => { S.newNote = true; S.graph = false; go('brain').then(() => { S.newNote = true; S.graph = false; render(); }); }], ['New call', 'council', () => { S.room = null; go('council'); }], ['Upload file', 'up', () => { pickFile(); go('brain'); }]].map(([l, ic, fn]) => h('button', { type: 'button', class: 'qbtn', onclick: fn }, icon(ic, 18), h('span', {}, l))));
@@ -1203,9 +1904,9 @@ const overlayRoot = (() => {
     return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; syncOverlays(true); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
       h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
-      group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
-      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
-      group('Govern', [it('Control', 'Approvals, tool calls, audit, incident switch', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage'), it('Self-test', 'Prove the boundaries, share the evidence', 'flask', 'control'), it('OWASP coverage', 'What is covered, what is not', 'check', 'control')]),
+      group('Organisation', [it('Organisation', 'Workspace, members, revenue, announcements', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
+      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Teams', 'Team memory and channels', 'teams', 'teams'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
+      group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
       group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
@@ -1244,12 +1945,12 @@ const overlayRoot = (() => {
       }), 'link') : null;
       return h('div', { class: 'card', style: 'padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
         h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
-        h('div', { style: 'flex:1;min-width:160px' }, h('b', {}, u.name || u.email), h('div', { class: 'muted', style: 'font-size:12px' }, u.email + (u.id === meId ? ' · das bist du' : ''))),
+        h('div', { style: 'flex:1;min-width:160px' }, h('b', {}, u.name || u.email), h('div', { class: 'muted', style: 'font-size:12px' }, u.email + (u.id === meId ? ' · that is you' : ''))),
         canAdmin ? sel : h('span', { class: 'chip' }, u.role), remove);
     };
-    const inviteInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'kollege@firma.de', style: 'flex:1' });
+    const inviteInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'colleague@company.example', style: 'flex:1' });
     const inviteBtn = canAdmin ? h('div', { style: 'display:flex;gap:8px;margin:10px 0;align-items:center' }, inviteInp,
-      btn('Einladen', () => run(async () => {
+      btn('Invite', () => run(async () => {
         const email = (document.getElementById('inv-email') || {}).value || '';
         const r = await api('/api/org/invitations', { method: 'POST', body: { email: email, role: 'developer' } });
         S.info = r && r.token ? 'Invitation created. Token (dev): ' + r.token : 'Invitation sent to ' + email + '.';
@@ -1258,7 +1959,7 @@ const overlayRoot = (() => {
     const rev = o.revenue;
     const money = rev ? h('div', { style: 'margin-bottom:14px' }, h('div', { class: 'cards' },
       ['plan', 'mrr_eur', 'arr_eur', 'seats'].map((k) => h('div', { class: 'card stat' },
-        h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / Monat', arr_eur: 'ARR / Jahr', seats: 'Seats' })[k]),
+        h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / month', arr_eur: 'ARR / year', seats: 'Seats' })[k]),
         h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))),
       h('div', { class: 'row2', style: 'margin-top:8px' },
         h('span', { class: 'chip ' + (rev.status === 'active' ? 'ok' : 'warn') }, rev.status === 'active' ? 'Active' : rev.status === 'demo' ? 'Demo' : String(rev.status || 'n/a')),
@@ -1315,7 +2016,8 @@ const overlayRoot = (() => {
   }
 
   function syncOverlays(force) {
-    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '');
+    const upSig = S.up && S.modal === 'upgrade' ? '|up:' + S.up.plan + ':' + S.up.seats + ':' + (S.up.quote ? 'q' : '') + ':' + (S.up.busy ? 'b' : '') + ':' + (S.up.err || '') : '';
+    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig;
     if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
     S._ovlSig = sig;
     const parts = [];
@@ -1327,6 +2029,7 @@ const overlayRoot = (() => {
     else if (m === 'upsell') parts.push(upsellModal());
     else if (m === 'lead') parts.push(leadModal());
     else if (m === 'notif') parts.push(notifModal());
+    else if (m === 'upgrade') parts.push(upgradeModal());
     if (S.ctx) parts.push(...agentCtx());
     if (S.tmodal) parts.push(teamModal());
     if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);
@@ -1369,31 +2072,77 @@ const overlayRoot = (() => {
         act('Open agent screen', () => { S.tab = 'screen'; S.panel = true; pick(bot.id); }),
         act(S.pinned[bot.id] ? 'Unpin' : 'Pin to top', () => { if (S.pinned[bot.id]) delete S.pinned[bot.id]; else S.pinned[bot.id] = true; render(); }),
         act('Mark as unread', () => { S.unreadA[bot.id] = true; render(); }),
-        act('Create team with this agent', () => { S.tmodal = true; S.tsel = new Set([bot.id]); S.tname = ''; S.tmission = ''; syncOverlays(true); }),
+        act('Create team with this agent', () => openTeamModal(null, new Set([bot.id]))),
         act('Delete agent', () => run(async () => {
           if (!window.confirm('Delete ' + bot.name + '? This cannot be undone.')) return;
           await api('/api/bots/' + bot.id, { method: 'DELETE' });
           if (S.bot && S.bot.id === bot.id) { S.bot = null; S.view = 'chat'; } await loadBots();
         }), true))];
   }
+  function openTeamModal(teamId, preselect) {
+    const t = teamId ? (S.teams || []).find((x) => x.id === teamId) : null;
+    if (teamId && !t) { S.err = 'That team could not be found. Reload the page and try again.'; render(); return; }
+    S.tmodal = true;
+    S.tedit = t ? t.id : null;
+    S.tname = t ? (t.name || '') : '';
+    S.tmission = t ? (t.mission || '') : '';
+    S.tsel = new Set(t ? (t.members || []).map((m) => m.id) : (preselect ? Array.from(preselect) : []));
+    S.ticon = t ? (t.icon || 'teams') : 'teams';
+    S.tcolor = t ? (t.color || '#2F5BD3') : '#2F5BD3';
+    syncOverlays(true);
+  }
   function teamModal() {
-    const close = () => { S.tmodal = false; syncOverlays(true); };
+    const edit = S.tedit ? (S.teams || []).find((x) => x.id === S.tedit) : null, isEdit = !!edit;
+    if (S.ticon === undefined) S.ticon = isEdit ? (edit.icon || 'teams') : 'teams';
+    if (S.tcolor === undefined) S.tcolor = isEdit ? (edit.color || '#2F5BD3') : '#2F5BD3';
+    const close = () => { S.tmodal = false; S.tedit = null; syncOverlays(true); };
+    const TEAM_ICONS = ['teams', 'compass', 'rocket', 'shield', 'coins', 'book', 'chat', 'wrench', 'chart', 'radar', 'spark', 'lens'];
+    const TEAM_COLORS = ['#2F5BD3', '#1B7F79', '#B5543C', '#7A4E9C', '#1F6F8B', '#B7791F', '#3D7A4F'];
     const boxes = S.bots.map((b) => { const cb = h('input', { type: 'checkbox', checked: S.tsel.has(b.id), 'aria-label': b.name });
       cb.addEventListener('change', () => { cb.checked ? S.tsel.add(b.id) : S.tsel.delete(b.id); });
       return h('label', { class: 'tsel' }, cb, tile(b, 22), b.name); });
-    const nm = h('input', { class: 'field', placeholder: 'Team name, e.g. Engineering', maxlength: 40, value: S.tname }); nm.addEventListener('input', () => { S.tname = nm.value; });
-    const ms = h('input', { class: 'field', placeholder: 'Mission (optional)', maxlength: 300, value: S.tmission }); ms.addEventListener('input', () => { S.tmission = ms.value; });
+    const nm = h('input', { class: 'field', placeholder: 'Team name, e.g. Engineering', maxlength: 40, value: S.tname || '', 'aria-label': 'Team name' }); nm.addEventListener('input', () => { S.tname = nm.value; });
+    const ms = h('input', { class: 'field', placeholder: 'Mission (optional)', maxlength: 300, value: S.tmission || '', 'aria-label': 'Mission' }); ms.addEventListener('input', () => { S.tmission = ms.value; });
+    const icons = h('div', { class: 'tm-picker', role: 'group', 'aria-label': 'Team icon' }, TEAM_ICONS.map((ic) =>
+      h('button', { type: 'button', class: 'tm-pick', 'aria-label': 'Icon ' + ic, 'aria-pressed': S.ticon === ic ? 'true' : 'false', onclick: () => { S.ticon = ic; syncOverlays(true); } },
+        h('span', { class: 'tile', style: 'width:22px;height:22px;background:' + S.tcolor + ';color:#fff' }, icon(ic, 13)))));
+    const colors = h('div', { class: 'tm-picker', role: 'group', 'aria-label': 'Team color' }, TEAM_COLORS.map((c) =>
+      h('button', { type: 'button', class: 'tm-colpick', 'aria-label': 'Color ' + c, 'aria-pressed': S.tcolor === c ? 'true' : 'false', onclick: () => { S.tcolor = c; syncOverlays(true); } },
+        h('span', { class: 'tm-dot', style: 'background:' + c }))));
+    const fail = (m) => { S.err = m; render(); };
+    const save = () => {
+      const name = (S.tname || '').trim(), members = Array.from(S.tsel), body = { name, mission: S.tmission || '', members, icon: S.ticon, color: S.tcolor };
+      if (name.length < 2) return fail('The team needs a name of at least 2 characters.');
+      if (name.length > 40) return fail('The team name must be 40 characters or fewer.');
+      run(async () => {
+        if (isEdit) await api('/api/teams/' + edit.id, { method: 'PUT', body });
+        else await api('/api/teams', { method: 'POST', body });
+        S.tmodal = false; S.tedit = null;
+        await Promise.all([loadTeams(), loadBots()]);
+        S.info = isEdit ? 'Team updated.' : 'Team created.';
+      });
+    };
+    const remove = () => {
+      if (!isEdit) return;
+      if (!window.confirm('Delete the team "' + edit.name + '"? Its members lose access to the team memory space. This cannot be undone.')) return;
+      run(async () => {
+        await api('/api/teams/' + edit.id, { method: 'DELETE' });
+        S.tmodal = false; S.tedit = null;
+        await Promise.all([loadTeams(), loadBots()]);
+        S.info = 'Team deleted.';
+      });
+    };
     return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
-      h('div', { class: 'modal', role: 'dialog', 'aria-label': 'Create team', style: 'max-width:520px' },
-        h('h2', {}, 'Create team'), h('p', { class: 'muted' }, 'Pick the agents that share this team memory. Team members can read the team space, other agents cannot.'),
-        nm, h('div', { style: 'height:8px' }), ms,
-        h('div', { class: 'tsel-list' }, boxes),
-        h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Create team', () => run(async () => {
-          if (S.tname.trim().length < 2) { S.err = 'The team needs a name.'; render(); return; }
-          await api('/api/teams', { method: 'POST', body: { name: S.tname.trim(), mission: S.tmission, members: [...S.tsel] } });
-          S.tmodal = false; S.tsel = new Set(); await Promise.all([loadBots(), loadTeams()]);
-          S.info = 'Team created.'; go('teams');
-        }), 'btn primary'), btn('Cancel', close))));
+      h('div', { class: 'modal tm-modal', role: 'dialog', 'aria-label': isEdit ? 'Edit team' : 'Create team' },
+        h('div', { class: 'row2', style: 'align-items:flex-start' }, h('h2', { style: 'margin:0;flex:1' }, isEdit ? 'Edit team' : 'Create team'), btn([icon('x', 16)], close, 'chip', { 'aria-label': 'Close team dialog' })),
+        h('p', { class: 'muted' }, isEdit ? 'Change the name, mission, logo or members. Members share this team memory space; other agents cannot read it.' : 'Pick the agents that share this team memory. Team members can read the team space, other agents cannot.'),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Name'), nm),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Mission'), ms),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Icon'), icons),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Color'), colors),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Members (' + S.tsel.size + ')'), h('div', { class: 'tsel-list' }, boxes)),
+        isEdit ? h('div', { class: 'tm-danger' }, btn('Delete team', remove, 'link tm-del')) : null,
+        h('div', { class: 'row2', style: 'margin-top:14px' }, btn(isEdit ? 'Save changes' : 'Create team', save, 'btn primary'), btn('Cancel', close))));
   }
   function render() {
     stopSim(); hideHover();
@@ -1410,7 +2159,7 @@ const overlayRoot = (() => {
           tile(b, 38), h('span', {}, h('b', {}, (S.pinned[b.id] ? '• ' : '') + b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role), S.unreadA[b.id] ? h('span', { class: 'udot' }) : null)))])),
       meterBlock(),
       h('button', { class: 'appsbtn', type: 'button', onclick: openApps }, icon('grid', 20), h('span', { style: 'flex:1' }, 'Connect apps', h('small', {}, `${S.sum.apps || 0} connected · MCP`)), h('span', { class: 'chip ok' }, 'MCP')),
-      h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => go('settings'), 'menuitem'), btn([icon('flask', 16), 'Authorization self-test'], () => go('control'), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
+      h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => go('settings'), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct', type: 'button', 'aria-expanded': S.menu, onclick: () => { S.menu = !S.menu; render(); } }, h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
           h('span', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner'), h('small', {}, S.me && S.me.user ? S.me.user.email + ' · ' + S.me.role : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')), h('small', {}, hd.model_configured ? 'Model connected' : 'No model, demo replies'), h('small', {}, `v${hd.version || '?'}${hd.build ? ' · ' + hd.build : ''}`)))));

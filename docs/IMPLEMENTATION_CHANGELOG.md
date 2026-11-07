@@ -1,3 +1,63 @@
+# Implementation changelog (v19 — six UI batches)
+
+Tests: `python -m pytest -q` -> **298 passed** (249 + 49 new across six batch test files), 0 failed.
+Every screen was verified in headless Edge at 1440 px and 390 px: headings present, zero console/page
+errors, screenshots inspected; the plans invoice dialog was checked against `app/billing.py` values
+(Starter 17 seats -> 2 blocks x 29.00 = 58.00 EUR, Professional 26 seats -> 198.00 EUR).
+
+## Batch 1 — Agent inventory
+- Card grid instead of a table: derived SVG trust ring (the formula is printed in the view), risk badge
+  with the API's reasons, owner/sponsor/purpose plus accountability gap chips, last activity.
+- Filters (risk/trust/status), search with caret preservation, "N of M" counter and clear-filters.
+- Clicking a card opens an in-view rights panel with real data: scopes, memory spaces, per-app tool
+  grants with risk, the capability checklist, accountability and the existing admin actions (status,
+  trust, criticality, accountability editing). Bulk suspend / resume / mark verified via the existing
+  audited endpoints, with stale-selection pruning.
+- Fixed `GET /api/inventory/summary` `high_risk` being always 0 (it compared the risk dict to strings).
+
+## Batch 2 — Control
+- OWASP agentic coverage as traffic-light cards inside the tab: status, evidence from the last
+  self-test, controls, known gaps, "run self-test"; honest "no probes yet" state, no fake results.
+- Removed the redundant self-test entries from the account menu and the drawer; the Control tab keeps
+  the full self-test section.
+- Editable policies: org-scoped overrides stored in `org_settings`, `PUT/DELETE
+  /api/security/policies` with validation and audit; approval enforcement reads the effective policy.
+- Audit table with server-side filters (actor, event type, date range), expandable row detail with
+  payload and hash-chain fields, integrity badge and export wiring.
+- The German "Organisation" sub-label in the drawer is English now.
+
+## Batch 3 — Teams
+- Team creation only as a pop-in (no page switch, no navigation after create); team cards show the
+  chosen icon/colour logo, overlapping member avatars, member/note counts and channel badges; editing
+  (name, mission, members, logo) happens in the same pop-in. The agent context-menu "Create team with
+  this agent" reuses it. Added a Teams entry to the drawer so the screen is reachable.
+- Fixed two real `PUT /api/teams/{id}` bugs: the name was ignored and the icon/colour were reset to
+  defaults when omitted (the old UI omitted them, silently rebranding every team).
+- Fixed the `badge()` ReferenceError in team cards by moving the helper to module scope.
+
+## Batch 4 — Models & usage
+- Usage hero: totals (calls, errors, input/output tokens, known vs unknown cost, latency, fallbacks), a
+  larger calls-per-day chart and a distribution donut with legend; silent days render as real zeros.
+- Providers as cards (status, base URL, key indicator from the API, test, remove) plus an add-provider
+  card that explains `CFA_SECRET_KEY`; models table with explicit input/output token columns, currency
+  and "unknown" costs for unpriced calls.
+- Plan limits card beside usage, loaded from `GET /api/billing`, with an honest billing-off state.
+
+## Batch 5 — Marketplace
+- Curated catalog as cards with preview, derived tags (real template/scopes), category and risk
+  filters, search, and trust status ("Verified source" for curated, "Unverified external" for Hugging
+  Face and pasted cards); HF and import-a-card tabs keep their flows.
+- `GET /api/marketplace` now also exposes the real template role and colour (additive, `system` stays
+  hidden).
+
+## Batch 6 — Plans
+- Plan-and-seat quote: `blocks = ceil(seats / included_seats)`, monthly total = blocks x plan price,
+  computed only from the existing `PLANS` values (no invented prices). New `GET /api/billing/quote`.
+- Comparison table of all plans (price, included seats, euro per seat, limits) and an upgrade dialog
+  with a real monthly invoice (line item, quantity, subtotal, total in EUR); Stripe checkout now uses
+  quantity = blocks, so the charged amount matches the quote.
+- `POST /api/billing/checkout` accepts optional `seats`; without it the old one-block behaviour is kept.
+
 # Implementation changelog (v18)
 
 Tests: `python -m pytest -q` -> **198 passed** (194 + 4 in `tests/test_mfa.py`).

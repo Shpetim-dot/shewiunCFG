@@ -984,7 +984,7 @@ const overlayRoot = (() => {
     return h('span', { class: 'inv-trust', title }, el);
   };
   const invFact = (label, value, muted) => h('div', { class: 'inv-fact' }, h('span', { class: 'muted' }, label), h('span', { class: muted ? 'muted' : '' }, value));
-  const invFacts = (a) => h('div', { class: 'inv-facts' }, invFact('Owner', a.owner === 'system' ? 'no owner' : a.owner, a.owner === 'system'), invFact('Sponsor', a.sponsor || 'no sponsor', !a.sponsor), invFact('Purpose', a.purpose || 'no purpose', !a.purpose));
+  const invFacts = (a) => h('div', { class: 'inv-facts' }, invFact('Owner', a.owner === 'system' ? 'unassigned' : a.owner, a.owner === 'system'), invFact('Sponsor', a.sponsor || 'unassigned', !a.sponsor), invFact('Purpose', a.purpose || 'not set', !a.purpose));
   const invGapChips = (a) => ((a.accountability || []).length ? h('div', { class: 'row2 inv-gaps' }, a.accountability.map((g) => h('span', { class: 'chip warn', title: 'Accountability gap: the agent has ' + (INV_GAP_TEXT[g] || g) + '.' }, INV_GAP_TEXT[g] || g))) : null);
   const invPrune = () => {
     const ids = new Set((S.inv || []).map((a) => a.id));
@@ -1906,7 +1906,8 @@ const overlayRoot = (() => {
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
       group('Organisation', [it('Organisation', 'Workspace, members, revenue, announcements', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
       group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Teams', 'Team memory and channels', 'teams', 'teams'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
-      group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),      group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
+      group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),
+      group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
       group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
       h('p', { class: 'muted', style: 'font-size:12px;margin:18px 10px' }, `Shewiun v${S.health.version || '?'}${S.health.build ? ' · build ' + S.health.build : ''}`))];
@@ -1944,12 +1945,12 @@ const overlayRoot = (() => {
       }), 'link') : null;
       return h('div', { class: 'card', style: 'padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
         h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
-        h('div', { style: 'flex:1;min-width:160px' }, h('b', {}, u.name || u.email), h('div', { class: 'muted', style: 'font-size:12px' }, u.email + (u.id === meId ? ' · das bist du' : ''))),
+        h('div', { style: 'flex:1;min-width:160px' }, h('b', {}, u.name || u.email), h('div', { class: 'muted', style: 'font-size:12px' }, u.email + (u.id === meId ? ' · that is you' : ''))),
         canAdmin ? sel : h('span', { class: 'chip' }, u.role), remove);
     };
-    const inviteInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'kollege@firma.de', style: 'flex:1' });
+    const inviteInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'colleague@company.example', style: 'flex:1' });
     const inviteBtn = canAdmin ? h('div', { style: 'display:flex;gap:8px;margin:10px 0;align-items:center' }, inviteInp,
-      btn('Einladen', () => run(async () => {
+      btn('Invite', () => run(async () => {
         const email = (document.getElementById('inv-email') || {}).value || '';
         const r = await api('/api/org/invitations', { method: 'POST', body: { email: email, role: 'developer' } });
         S.info = r && r.token ? 'Invitation created. Token (dev): ' + r.token : 'Invitation sent to ' + email + '.';
@@ -1958,7 +1959,7 @@ const overlayRoot = (() => {
     const rev = o.revenue;
     const money = rev ? h('div', { style: 'margin-bottom:14px' }, h('div', { class: 'cards' },
       ['plan', 'mrr_eur', 'arr_eur', 'seats'].map((k) => h('div', { class: 'card stat' },
-        h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / Monat', arr_eur: 'ARR / Jahr', seats: 'Seats' })[k]),
+        h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / month', arr_eur: 'ARR / year', seats: 'Seats' })[k]),
         h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))),
       h('div', { class: 'row2', style: 'margin-top:8px' },
         h('span', { class: 'chip ' + (rev.status === 'active' ? 'ok' : 'warn') }, rev.status === 'active' ? 'Active' : rev.status === 'demo' ? 'Demo' : String(rev.status || 'n/a')),
