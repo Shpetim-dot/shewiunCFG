@@ -50,6 +50,48 @@ def _log(agent: dict[str, Any] | None, text: str) -> None:
             pf.log_act(con, agent["id"], "research", text)
 
 
+def domain_of(url: str) -> str:
+    """Registrable host of a url, used to keep web sources diverse."""
+    host = re.sub(r"^https?://", "", (url or "").strip().lower())
+    host = host.split("/")[0].split("?")[0]
+    host = re.sub(r"^(www|m|amp)\.", "", host)
+    return host
+
+
+def dedupe_url(url: str) -> str:
+    """Same page without tracking parameters, so one article counts once."""
+    base = (url or "").split("#")[0]
+    if "?" not in base:
+        return base
+    head, _, query = base.partition("?")
+    keep = [p for p in query.split("&") if p and not re.match(r"^(utm_|ref|source|fbclid|gclid|mc_)", p)]
+    return head + ("?" + "&".join(keep) if keep else "")
+
+
+def diversify(found: list[dict[str, Any]], already: list[dict[str, Any]], per_domain: int) -> list[dict[str, Any]]:
+    """Keep the web part of a result set diverse: at most `per_domain` pages per host."""
+    counts: dict[str, int] = {}
+    for s in already:
+        if s.get("kind") == "web":
+            counts[domain_of(s["ref"])] = counts.get(domain_of(s["ref"]), 0) + 1
+    seen_urls = {dedupe_url(s["ref"]) for s in already if s.get("kind") == "web"}
+    out: list[dict[str, Any]] = []
+    for f in found:
+        if f.get("kind") == "web":
+            url = dedupe_url(f["ref"])
+            if url in seen_urls:
+                continue
+            dom = domain_of(url)
+            if counts.get(dom, 0) >= per_domain:
+                continue
+            counts[dom] = counts.get(dom, 0) + 1
+            seen_urls.add(url)
+            out.append({**f, "ref": url})
+        else:
+            out.append(f)
+    return out
+
+
 def research_subject(q: str) -> str:
     """Short subject of a research question, so demo sub-questions do not repeat the whole prompt."""
     text = re.sub(r"^(research|research the latest news about|analyse|analyze|prepare|identify|describe|screen|compare)\s+", "",
@@ -375,7 +417,10 @@ async def run_research(item: ResearchIn, pace: float):
             goal = f"Collect evidence for the sub-question '{sq}' of the research task '{item.question[:160]}'"
             if item.context:
                 goal += f". Context: {item.context[:200]}"
-            found += await web_search(sq, k, goal)
+            found += await web_search(sq, min(k * 3, 15), goal)  # probe wider, then keep it diverse
+        found = diversify(found, sources, int(os.getenv("CFA_RESEARCH_PER_DOMAIN", "2")))
+        web_part = [f for f in found if f.get("kind") == "web"][:k]
+        found = web_part + [f for f in found if f.get("kind") != "web"]
         new = 0
         for f in found:
             key = f["kind"] + ":" + f["ref"]
