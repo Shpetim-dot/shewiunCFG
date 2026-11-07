@@ -152,7 +152,7 @@ def search_provider() -> str:
     return _guess_provider(search_key())
 
 
-async def _search_raw(q: str, k: int) -> tuple[int, list[dict[str, Any]], str]:
+async def _search_raw(q: str, k: int, objective: str = "") -> tuple[int, list[dict[str, Any]], str]:
     """One search request. Returns (http_status, results, detail) so callers can diagnose errors."""
     key = search_key()
     if not key:
@@ -170,17 +170,23 @@ async def _search_raw(q: str, k: int) -> tuple[int, list[dict[str, Any]], str]:
                         "snippet": _clean(x.get("content"), 240)} for x in rows]
         elif provider == "exa":
             async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=20) as c:
+                payload: dict[str, Any] = {"query": q, "type": "auto", "numResults": k,
+                                           "contents": {"highlights": True}}
+                if objective:
+                    payload["objective"] = objective  # every research search serves a bigger goal
                 r = await c.post("https://api.exa.ai/search",
-                                 headers={"x-api-key": key, "Content-Type": "application/json"},
-                                 json={"query": q, "numResults": k, "contents": {"text": {"maxCharacters": 400}}})
+                                 headers={"x-api-key": key, "Content-Type": "application/json"}, json=payload)
                 if r.status_code != 200:
                     return r.status_code, [], r.text[:200]
                 out = []
                 for x in (r.json().get("results") or []):
                     url = str(x.get("url") or "")
                     if url.startswith(("https://", "http://")):
+                        snippet = x.get("text") or ""
+                        if not snippet and isinstance(x.get("highlights"), list):
+                            snippet = " ".join(str(h) for h in x["highlights"])
                         out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
-                                    "snippet": _clean(x.get("text") or "", 240)})
+                                    "snippet": _clean(snippet, 320)})
         elif provider == "google":
             async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=15) as c:
                 r = await c.get("https://www.googleapis.com/customsearch/v1",
@@ -204,9 +210,9 @@ async def _search_raw(q: str, k: int) -> tuple[int, list[dict[str, Any]], str]:
     return 200, [x for x in out if x["ref"].startswith(("https://", "http://"))][:k], ""
 
 
-async def web_search(q: str, k: int) -> list[dict[str, Any]]:
+async def web_search(q: str, k: int, objective: str = "") -> list[dict[str, Any]]:
     """Web search for a research run. A provider failure just means fewer sources, never a crash."""
-    status, results, _detail = await _search_raw(q, k)
+    status, results, _detail = await _search_raw(q, k, objective)
     return results if status == 200 else []
 
 
@@ -292,7 +298,7 @@ async def search_test(request: Request) -> dict[str, Any]:
     """Live probe of the configured search key with a human readable diagnosis."""
     pf.need_admin(request)
     started = time.time()
-    status, results, detail = await _search_raw("shewiun cfa agent governance", 3)
+    status, results, detail = await _search_raw("shewiun cfa agent governance", 3, "Check that web search works")
     ms = int((time.time() - started) * 1000)
     if status == 200 and results:
         return {"ok": True, "provider": search_provider(), "status": status, "results": len(results), "ms": ms,
@@ -366,7 +372,10 @@ async def run_research(item: ResearchIn, pace: float):
         with pf.db() as con:
             found = brain_search(con, sq, k)
         if web_on:
-            found += await web_search(sq, k)
+            goal = f"Collect evidence for the sub-question '{sq}' of the research task '{item.question[:160]}'"
+            if item.context:
+                goal += f". Context: {item.context[:200]}"
+            found += await web_search(sq, k, goal)
         new = 0
         for f in found:
             key = f["kind"] + ":" + f["ref"]

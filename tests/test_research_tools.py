@@ -1,5 +1,6 @@
 """Exa provider, Trafilatura extraction (with fallback) and the Ragas harness."""
 import asyncio
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -39,13 +40,18 @@ def test_exa_provider_normalises_results(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
         seen["key"] = request.headers.get("x-api-key")
+        seen["body"] = json.loads(request.content.decode())
         return httpx.Response(200, json={"results": [
-            {"url": "https://ex.example/a", "title": "A", "text": "Long readable text about agents."}]})
+            {"url": "https://ex.example/a", "title": "A", "highlights": ["Long readable text about agents."]}]})
 
     monkeypatch.setattr(research, "SEARCH_TRANSPORT", httpx.MockTransport(handler))
-    out = asyncio.run(research.web_search("agent governance", 3))
+    out = asyncio.run(research.web_search("agent governance", 3, "Find governance vendors"))
     assert "api.exa.ai/search" in seen["url"] and seen["key"] == "exa-key"
+    body = seen["body"]
+    assert body["type"] == "auto" and body["contents"] == {"highlights": True}
+    assert body["objective"] == "Find governance vendors" and body["numResults"] == 3
     assert out[0]["ref"] == "https://ex.example/a" and out[0]["kind"] == "web"
+    assert "Long readable" in out[0]["snippet"]
 
 
 def test_exa_is_an_accepted_provider_name():
