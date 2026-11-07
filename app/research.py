@@ -358,6 +358,7 @@ async def run_research(item: ResearchIn, pace: float):
     yield {"type": "progress", "done": done, "total": total}
     sources: list[dict[str, Any]] = []
     per_q: list[int] = []
+    fulltext_budget = int(os.getenv("CFA_RESEARCH_FULLTEXT", "2"))  # web pages read in full per run
     seen: set[str] = set()
     for i, sq in enumerate(subs):
         if pace:
@@ -372,9 +373,17 @@ async def run_research(item: ResearchIn, pace: float):
             if key in seen:
                 continue
             seen.add(key)
+            if web_on and f.get("kind") == "web" and fulltext_budget > 0:
+                body = await read_page(f["ref"], 900)  # Trafilatura when installed, built-in strip otherwise
+                if len(body) > len(f.get("snippet") or "") + 120:
+                    f["snippet"] = body
+                    f["full_text"] = True
+                fulltext_budget -= 1
             new += 1
             sources.append({**f, "n": len(sources) + 1, "q": i})
             _log(agent, f"read source [{sources[-1]['n']}] {f['title'][:70]}")
+            if sources[-1].get("full_text"):
+                yield {"type": "activity", "text": f"Read the full page [{sources[-1]['n']}] {f['title'][:60]}"}
             yield {"type": "source", **sources[-1]}
         per_q.append(new)
         done += 1
