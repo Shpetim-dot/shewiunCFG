@@ -268,6 +268,18 @@ const overlayRoot = (() => {
     else if (ev.type === 'done') { r.done = true; r.id = ev.id; r.draft = ev.draft_note_ids; }
     else if (ev.type === 'error') S.err = ev.detail;
   }
+  function typeTurn(el, text) {
+    if (S.typer) { clearInterval(S.typer); S.typer = null; }
+    if (!el || !text) return;
+    let i = 0;
+    el.textContent = '';
+    const step = Math.max(1, Math.round(text.length / 70));
+    S.typer = setInterval(() => {
+      i += step;
+      el.textContent = text.slice(0, i);
+      if (i >= text.length) { clearInterval(S.typer); S.typer = null; }
+    }, 26);
+  }
   async function startCall() {
     const ids = [...S.picked]; if (ids.length < 2) { S.err = 'Pick at least two agents.'; return render(); }
     S.room = { live: true, agents: [], events: [], activity: ['Connecting the agents…'], thinking: [], done: false }; S.planDone = {}; S.err = ''; render();
@@ -295,26 +307,67 @@ const overlayRoot = (() => {
         S.calls.length ? [h('h2', {}, 'Previous calls'), S.calls.map((x) => h('div', {}, btn(x.topic, () => openCall(x.id), 'link'), h('span', { class: 'muted mono' }, ` ${when(x.created_at)} ${x.mode}`)))] : null));
     }
     const ev = r.events, cur = ev[ev.length - 1];
-    const tiles = r.agents.map((a) => { const last = [...ev].reverse().find((e) => e.bot_id === a.id), thinking = r.thinking.includes(a.id) && !r.done;
-      return h('div', { class: 'ptile' + (thinking ? ' speaking' : '') }, tile(botBy(a.id), 56, { thinking }), h('b', {}, a.name), h('span', { class: 'chip' }, thinking ? 'Thinking…' : last ? STANCE[last.stance] : 'Joining')); });
-    const stanceChip = (s) => h('span', { class: 'chip ' + (s === 'support' ? 'ok' : s === 'unsure' ? 'warn' : ''), style: s === 'oppose' ? 'background:#B5543C;color:#fff' : '' }, STANCE[s] || s);
-    const rows = h('div', { class: 'cmsgs', role: 'log', 'aria-live': 'polite' }, ev.length ? ev.map((e) => h('div', { class: 'cmsg agent' }, tile(botBy(e.bot_id), 30),
-      h('div', { style: 'min-width:0' }, h('div', { class: 'row2' }, h('b', {}, e.name), stanceChip(e.stance), h('span', { class: 'muted mono', style: 'font-size:11px' }, e.round === 0 ? 'Opening' : `Round ${e.round}`), e.revised ? h('span', { class: 'chip' }, 'geandert') : null),
-        h('div', { class: 'ctext' }, e.text),
-        e.used && e.used.length ? h('div', { class: 'muted', style: 'font-size:11px;margin-top:4px' }, 'Gelesen: ' + e.used.join(', ')) : null))) : h('p', { class: 'muted' }, 'Waiting for the first agent to speak…'));
-    const act = h('div', { class: 'muted', style: 'font-size:12px;margin:8px 0' }, (r.activity || []).slice(-6).map((x) => h('div', {}, '· ' + x)));
-    const stepper = h('div', { class: 'row2', style: 'margin:8px 0' }, Array.from({ length: r.rounds || 1 }, (_, i) => h('span', { class: 'chip' + (cur && cur.round === i ? ' ok' : '') }, `Round ${i + 1}`)));
-    const left = h('div', {}, r.mode === 'demo' ? h('p', { class: 'chip warn' }, 'Demo mode: scripted text. No model is configured.') : null, h('div', { class: 'tiles' }, tiles),
-      stepper, rows, act,
-      h('div', { class: 'row2', style: 'margin:12px 0' }, btn('New call', () => { S.room = null; render(); })),
-      h('p', { class: 'muted', style: 'font-size:12px' }, r.live ? 'Live: turns appear as the agents finish them.' : 'Recorded call.'),
-      r.decision ? [h('h2', {}, 'Decision'), h('div', { class: 'notebody' }, r.decision),
-        h('h2', {}, 'Positionen'), h('div', { class: 'card', style: 'padding:10px' }, Object.entries(r.map || {}).map(([name, stances]) => h('div', { class: 'row2', style: 'flex-wrap:wrap' }, h('b', { style: 'min-width:140px' }, name), (stances || []).map((s) => stanceChip(s))))),
-        h('h2', {}, 'Plan'), r.plan && r.plan.length ? h('ul', { class: 'plan', style: 'padding:0' }, r.plan.map((p, k) => h('li', {}, h('input', { type: 'checkbox', checked: !!S.planDone[k], 'aria-label': p.step, onchange: (e) => { S.planDone[k] = e.target.checked; } }), h('span', {}, p.step, ' ', h('span', { class: 'chip' }, p.owner))))) : h('p', { class: 'muted' }, 'No plan lines were returned.'),
-        h('h2', {}, 'Disagreement map'), h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Agent'), ...(Object.values(r.map)[0] || []).map((_, k) => h('th', {}, k === 0 ? 'Opening' : `Round ${k}`)))), h('tbody', {}, Object.entries(r.map).map(([n, st]) => h('tr', {}, h('td', {}, n), ...st.map((s) => h('td', {}, STANCE[s])))))),
-        r.draft ? h('p', { class: 'muted' }, 'Memory from this call is stored as drafts. ', btn('Review in Brain', () => openNote(r.draft[0]), 'link')) : null] : null);
-    const right = h('div', {}, h('h2', {}, 'Agent activity'), h('div', { class: 'feed' }, [...r.activity].reverse().map((a) => h('div', {}, a))), h('h2', {}, 'Council chat'), h('div', { class: 'rchat' }, ev.map((e) => h('div', { class: 'bub' }, h('b', {}, e.name), h('div', {}, e.text)))));
-    return h('div', { class: 'body' }, h('div', { class: 'wide room' }, left, right));
+    const stanceChip = (s) => h('span', { class: 'chip ' + (s === 'support' ? 'ok' : s === 'unsure' ? 'warn' : ''), style: s === 'oppose' ? 'background:#B5543C;color:#fff' : '' }, STANCE[s] || s || '–');
+    const lastOf = (id) => [...ev].reverse().find((e) => e.bot_id === id);
+    const tiles = r.agents.map((a) => {
+      const last = lastOf(a.id), thinking = r.thinking.includes(a.id) && !r.done, b = botBy(a.id);
+      return h('button', { type: 'button', class: 'board-tile' + (thinking ? ' speaking' : '') + (cur && cur.bot_id === a.id ? ' current' : ''), 'aria-label': 'Jump to the latest statement of ' + a.name,
+          onclick: () => { if (last) { const tl = document.getElementById('turn-' + last.id); if (tl) tl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } },
+        h('span', { class: 'board-avatar', style: '--c:' + ((b && b.color) || '#2F5BD3') }, tile(b, 44, { thinking })),
+        h('span', { class: 'board-meta' }, h('b', {}, a.name), h('span', { class: 'muted' }, thinking ? 'is speaking…' : last ? (last.round === 0 ? 'Opening statement' : 'Round ' + last.round) : 'joining')),
+        thinking ? h('span', { class: 'chip warn' }, 'thinking') : last ? stanceChip(last.stance) : h('span', { class: 'chip' }, 'joining'));
+    });
+    const bubble = (e) => h('div', { class: 'turn' + (cur && cur.id === e.id ? ' latest' : ''), id: 'turn-' + e.id }, tile(botBy(e.bot_id), 34),
+      h('div', { class: 'turn-body' },
+        h('div', { class: 'row2' }, h('b', {}, e.name), stanceChip(e.stance), h('span', { class: 'muted mono', style: 'font-size:11px' }, e.round === 0 ? 'opening' : 'round ' + e.round), e.revised ? h('span', { class: 'chip' }, 'changed position') : null),
+        h('div', { class: 'turn-text', id: cur && cur.id === e.id ? 'cur-turn' : '' }, e.text),
+        (e.used || []).length ? h('div', { class: 'muted mono', style: 'font-size:11px;margin-top:6px' }, 'read: ' + e.used.join(', ')) : null));
+    const transcript = h('div', { class: 'transcript', role: 'log', 'aria-live': 'polite', id: 'transcript' },
+      (!ev.length) ? h('div', { class: 'waiting' }, h('div', { class: 'dots' }, h('i'), h('i'), h('i')), h('span', { class: 'muted' }, 'Agents are taking their seats…')) : null,
+      ev.map(bubble));
+    const stepper = h('div', { class: 'row2', style: 'flex-wrap:wrap' }, Array.from({ length: r.rounds || 1 }, (_, i) => h('span', { class: 'chip' + (cur && cur.round === i ? ' ok' : '') }, 'Round ' + (i + 1))),
+      h('span', { class: 'chip' + (r.done ? ' ok' : ' warn') }, r.done ? 'concluded' : 'in session'));
+    const stanceSummary = () => {
+      const last = {};
+      Object.entries(r.map || {}).forEach(([n, st]) => { last[n] = (st || [])[(st || []).length - 1]; });
+      const names = Object.keys(last), counts = { support: 0, unsure: 0, oppose: 0 };
+      Object.values(last).forEach((s) => { if (counts[s] !== undefined) counts[s] += 1; });
+      const bar = (k, label, color) => h('div', { class: 'stance-row' }, h('span', { class: 'muted', style: 'min-width:96px' }, label),
+        h('div', { class: 'stance-bar' }, h('i', { style: 'width:' + (names.length ? (counts[k] / names.length) * 100 : 0) + '%;background:' + color })),
+        h('b', {}, String(counts[k])));
+      return h('div', {}, bar('support', 'support', '#1B7F79'), bar('unsure', 'unsure', '#B7791F'), bar('oppose', 'oppose', '#B5543C'));
+    };
+    const minutes = () => ['# Council minutes', '', 'Topic: ' + S.topic, '', '## Agents', r.agents.map((a) => '- ' + a.name).join('\n'), '',
+      '## Transcript', ...ev.map((e) => `**${e.name}** (${e.round === 0 ? 'opening' : 'round ' + e.round}, ${e.stance}): ${e.text}`),
+      '', '## Decision', r.decision || '', '', '## Plan', ...(r.plan || []).map((p) => '- [ ] ' + p.step + ' — ' + p.owner)].join('\n');
+    const copyMinutes = () => { if (navigator.clipboard) navigator.clipboard.writeText(minutes()).then(() => { S.info = 'Minutes copied to the clipboard.'; render(); }); };
+    const downloadMinutes = () => { const b = new Blob([minutes()], { type: 'text/markdown' }); const a = h('a', { href: URL.createObjectURL(b), download: 'council-minutes.md' }); document.body.append(a); a.click(); a.remove(); };
+    const board = h('aside', { class: 'council-board' }, h('h3', {}, 'The board'), h('div', { class: 'board-list' }, tiles),
+      h('h3', { style: 'margin-top:14px' }, 'Activity'),
+      h('div', { class: 'feed' }, [...(r.activity || [])].reverse().slice(0, 8).map((a) => h('div', {}, a))),
+      r.mode === 'demo' ? h('p', { class: 'chip warn' }, 'Demo mode: scripted statements') : null);
+    const resolution = r.decision ? h('div', { class: 'card resolution' },
+      h('div', { class: 'row2' }, h('span', { class: 'chip ok' }, 'Resolution'), h('span', { class: 'sp' }), btn('Copy minutes', copyMinutes, 'chip'), btn('Export .md', downloadMinutes, 'chip')),
+      h('h2', {}, 'Decision'), md(r.decision || ''),
+      h('h2', {}, 'Where the board stands'), stanceSummary(),
+      h('h2', {}, 'Plan'), (r.plan || []).length ? h('ul', { class: 'plan', style: 'padding:0' }, r.plan.map((p, k) => h('li', {}, h('input', { type: 'checkbox', checked: !!S.planDone[k], 'aria-label': p.step, onchange: (e) => { S.planDone[k] = e.target.checked; } }), h('span', {}, p.step, ' ', h('span', { class: 'chip' }, p.owner))))) : h('p', { class: 'muted' }, 'No plan lines were returned.'),
+      h('details', { style: 'margin-top:12px' }, h('summary', { class: 'muted' }, 'Disagreement map'),
+        h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Agent'), ...(Object.values(r.map || {})[0] || []).map((_, k) => h('th', {}, k === 0 ? 'Opening' : 'Round ' + k)))), h('tbody', {}, Object.entries(r.map || {}).map(([n, st]) => h('tr', {}, h('td', {}, n), ...st.map((s) => h('td', {}, stanceChip(s))))))))),
+      r.draft ? h('p', { class: 'muted', style: 'margin-top:10px' }, 'Memory from this call is stored as drafts. ', btn('Review in Brain', () => openNote(r.draft[0]), 'link')) : null) : null;
+    requestAnimationFrame(() => {
+      const tr = document.getElementById('transcript'); if (tr) tr.scrollTop = tr.scrollHeight;
+      const el = document.getElementById('cur-turn');
+      if (el && cur && S.typedId !== cur.id) { S.typedId = cur.id; typeTurn(el, cur.text); }
+    });
+    return h('div', { class: 'body' }, h('div', { class: 'wide council-room' },
+      h('div', { class: 'card council-head' },
+        h('div', { class: 'row2', style: 'align-items:flex-start' }, h('h2', { style: 'margin:0;flex:1' }, S.topic), stepper),
+        h('div', { class: 'row2', style: 'margin-top:10px' }, btn([icon('council', 16), 'New call'], () => { S.room = null; S.typedId = ''; render(); }), h('span', { class: 'muted' }, r.live ? 'Live — statements stream in as the agents finish them.' : 'Recorded call.'))),
+      h('div', { class: 'council-stage' },
+        board,
+        h('div', { class: 'council-main' },
+          h('div', { class: 'card transcript-card' }, h('div', { class: 'row2' }, h('b', {}, 'Live transcript'), h('span', { class: 'sp' }), h('span', { class: 'muted mono', style: 'font-size:11px' }, ev.length + ' statements')), transcript),
+          resolution))));
   }
 
   // ---------- brain ----------
