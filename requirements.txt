@@ -5,5 +5,5 @@ python-dotenv>=1.0,<2.0
 cryptography>=42
 pypdf>=4
 argon2-cffi>=23.1,<26
-# Optional: full-text article extraction for research (falls back to a built-in strip when absent)
-# trafilatura>=1.9
+# Full-text article extraction for research (built-in HTML stripper is used if this fails to install)
+trafilatura>=1.9,<2
