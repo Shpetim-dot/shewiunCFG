@@ -170,7 +170,7 @@ const overlayRoot = (() => {
       if (view === 'inventory') { S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }
       if (view === 'usage') { [S.usage, S.provs, S.prices, S.cu] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices'), api('/api/computer-use/status')]); }
       if (view === 'market') S.market = (await api('/api/marketplace')).curated;
-      if (view === 'control') [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=15').then((d) => d.events || []), api('/api/security/policies').then((d) => d.policies), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary')]);
+      if (view === 'control') { S.afilter = {}; S.policyDraft = {}; S.auditOpen = {}; [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=200').then((d) => { S.audit = d.events || []; S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered; return S.audit; }), api('/api/security/policies').then((d) => { S.policyMeta = d; return d.policies; }), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary')]); }
     });
   }
   async function pick(id) {
@@ -1050,37 +1050,200 @@ const overlayRoot = (() => {
   }
 
   // ---------- control ----------
-  const fA = (k, ph) => { const i = h('input', { class: 'field', placeholder: ph, value: (S.afilter || {})[k] || '', 'aria-label': ph }); i.addEventListener('input', () => { S.afilter = S.afilter || {}; S.afilter[k] = i.value; }); return i; };
+  const ctlLabel = (d) => (d === 'allow' ? 'Allow' : d === 'approval_required' ? 'Approval required' : 'Deny');
+  // Date-only "to" dates include that whole day; the backend compares created_at as text.
+  const ctlFilterQS = () => {
+    const f = S.afilter || {};
+    const until = f.until && /^\d{4}-\d{2}-\d{2}$/.test(f.until) ? f.until + 'T23:59:59.999999+00:00' : f.until;
+    return [['since', f.since], ['until', until], ['actor', f.actor], ['event_type', f.event_type]]
+      .map(([k, v]) => (v ? `${k}=${encodeURIComponent(v)}` : '')).filter(Boolean).join('&');
+  };
+  const ctlAuditPath = () => { const qs = ctlFilterQS(); return '/api/security/audit?limit=200' + (qs ? '&' + qs : ''); };
+  const ctlLoadPolicies = async () => { S.policies = (await api('/api/security/policies')).policies; };
+  const ctlLoadAudit = async () => {
+    const d = await api(ctlAuditPath());
+    S.audit = d.events || [];
+    S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered;
+    S.auditOpen = {};
+  };
+  const ctlRunSelfTest = () => {
+    S.covBusy = true; render();
+    run(async () => {
+      try {
+        await api('/api/selftest', { method: 'POST' });
+        const [latest, cov] = await Promise.all([api('/api/selftest/latest'), api('/api/coverage')]);
+        S.test = latest; S.cov = cov;
+        S.info = `Self-test finished: ${latest.passed} passed, ${latest.failed} failed. Coverage evidence was refreshed.`;
+      } finally { S.covBusy = false; }
+    });
+  };
+  const ctlSavePolicy = (p) => {
+    const decision = ((S.policyDraft || {})[p.action_type]) || p.decision;
+    if (decision === p.decision) return;
+    S.policyBusy = p.action_type; render();
+    run(async () => {
+      try {
+        await api('/api/security/policies', { method: 'PUT', body: { action_type: p.action_type, decision } });
+        await ctlLoadPolicies();
+        if (S.policyDraft) delete S.policyDraft[p.action_type];
+        S.info = `Policy for ${p.action_type} saved: ${ctlLabel(decision).toLowerCase()}.`;
+      } finally { S.policyBusy = null; }
+    });
+  };
+  const ctlResetPolicy = (p) => {
+    S.policyBusy = p.action_type; render();
+    run(async () => {
+      try {
+        await api(`/api/security/policies/${encodeURIComponent(p.action_type)}`, { method: 'DELETE' });
+        await ctlLoadPolicies();
+        if (S.policyDraft) delete S.policyDraft[p.action_type];
+        S.info = `Policy for ${p.action_type} reset to the default (${ctlLabel(p.default_decision || 'deny').toLowerCase()}).`;
+      } finally { S.policyBusy = null; }
+    });
+  };
+  const ctlApplyAudit = () => {
+    S.auditBusy = true; render();
+    run(async () => { try { await ctlLoadAudit(); S.verify = ''; } finally { S.auditBusy = false; } });
+  };
+  const ctlResetAudit = () => {
+    S.afilter = {};
+    S.auditBusy = true; render();
+    run(async () => { try { await ctlLoadAudit(); S.verify = ''; } finally { S.auditBusy = false; } });
+  };
+  const ctlToggleAudit = (id) => { S.auditOpen = S.auditOpen || {}; S.auditOpen[id] = !S.auditOpen[id]; render(); };
+  const ctlChevron = (open) => { const v = icon('up', 14); v.style.transform = open ? 'rotate(180deg)' : ''; return v; };
+
+  function ctlCoverage() {
+    const cov = S.cov || {}, items = cov.items || [];
+    const covered = items.filter((c) => c.status === 'covered').length;
+    const partial = items.filter((c) => c.status === 'partial').length;
+    const missing = items.length - covered - partial;
+    const evidence = (c) => (c.evidence && c.evidence.total
+      ? `${c.evidence.passed} of ${c.evidence.total} probes passed`
+      : 'No self-test run yet — evidence will appear after you run the self-test');
+    const card = (c) => {
+      const tone = c.status === 'covered' ? 'ok' : c.status === 'partial' ? 'warn' : 'bad';
+      const controls = c.controls || [], gaps = c.gaps || [];
+      return h('div', { class: 'card ctl-cov-card' },
+        h('div', { class: 'row2 ctl-cov-title' }, h('span', { class: 'ctl-dot ' + tone, 'aria-hidden': 'true' }),
+          h('b', { style: 'flex:1' }, (String(c.id).startsWith('ASI') ? c.id + ' · ' : '') + c.name),
+          h('span', { class: 'chip ctl-status ' + tone }, c.status)),
+        h('div', { class: 'muted ctl-cov-evidence' }, evidence(c)),
+        controls.length ? h('ul', { class: 'ctl-cov-list' }, controls.slice(0, 3).map((x) => h('li', {}, x))) : null,
+        controls.length > 3 ? h('details', { class: 'ctl-cov-more' }, h('summary', { class: 'muted' }, `Show ${controls.length - 3} more control${controls.length - 3 === 1 ? '' : 's'}`), h('ul', { class: 'ctl-cov-list' }, controls.slice(3).map((x) => h('li', {}, x)))) : null,
+        gaps.length ? h('div', { class: 'muted ctl-cov-gaps' }, 'Known gaps: ' + gaps.join('; ')) : null);
+    };
+    return h('section', { class: 'ctl-cov', 'aria-label': 'OWASP agentic coverage' },
+      h('div', { class: 'ctl-cov-head' }, h('h2', { class: 'ctl-h2' }, 'OWASP agentic coverage'), h('span', { class: 'sp' }),
+        btn(S.covBusy ? 'Running self-test…' : [icon('flask', 16), 'Run self-test'], ctlRunSelfTest, 'btn' + (S.covBusy ? '' : ' primary'), { disabled: !!S.covBusy, 'aria-busy': S.covBusy ? 'true' : null })),
+      h('p', { class: 'muted ctl-cov-framework' }, cov.framework || 'Coverage data is not available right now.'),
+      h('p', { class: 'muted ctl-cov-disclaimer' }, cov.disclaimer || ''),
+      h('p', { class: 'muted ctl-cov-summary' }, `${covered} covered · ${partial} partial · ${missing} not covered`),
+      items.length ? h('div', { class: 'ctl-cov-grid' }, items.map(card)) : emptyState('shield', 'No coverage data', 'The coverage endpoint returned no items. Nothing is shown rather than guessed.'));
+  }
+
+  function ctlPolicies() {
+    const list = S.policies || [], decisions = ['allow', 'approval_required', 'deny'];
+    const busy = (p) => S.policyBusy === p.action_type;
+    const row = (p) => {
+      const draft = (S.policyDraft || {})[p.action_type];
+      const current = draft == null ? p.decision : draft;
+      const changed = current !== p.decision;
+      const sel = h('select', { class: 'field ctl-policy-select', 'aria-label': 'Effect for the policy ' + p.action_type, disabled: busy(p), onchange: (e) => { S.policyDraft = S.policyDraft || {}; S.policyDraft[p.action_type] = e.target.value; render(); } },
+        decisions.map((d) => h('option', { value: d, selected: current === d }, ctlLabel(d))));
+      return h('tr', {},
+        h('td', {}, h('div', { class: 'mono' }, p.action_type), p.description ? h('div', { class: 'muted ctl-policy-desc' }, p.description) : null),
+        h('td', {}, sel),
+        h('td', {}, h('span', { class: 'chip' + (p.overridden ? ' ok' : '') }, p.overridden ? 'custom' : 'default')),
+        h('td', {}, h('span', { class: 'row2 ctl-policy-actions' },
+          changed ? btn('Save', () => ctlSavePolicy(p), 'btn primary', { disabled: busy(p) }) : null,
+          p.overridden ? btn('Reset', () => ctlResetPolicy(p), 'link', { disabled: busy(p) }) : null)));
+    };
+    return [h('h2', {}, 'Policies'),
+      h('p', { class: 'muted' }, 'The policy engine decides whether an action runs immediately, waits for a human approval, or is rejected. Changes apply to new approval requests in this organisation and are written to the audit log. Admin only.'),
+      h('div', { class: 'tbl-wrap ctl-policy-wrap' }, h('table', { class: 'ctl-policy-table' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'Action type'), h('th', {}, 'Effect'), h('th', {}, 'Source'), h('th', {}, 'Actions'))),
+        h('tbody', {}, list.map(row)))),
+      h('div', { class: 'ctl-effect-help' },
+        h('div', {}, h('span', { class: 'chip ok' }, 'Allow'), ' runs immediately when the risk level does not need a human decision.'),
+        h('div', {}, h('span', { class: 'chip warn' }, 'Approval required'), ' creates a pending request in the approval queue and never runs on its own.'),
+        h('div', {}, h('span', { class: 'chip risk-high' }, 'Deny'), ' is rejected automatically. Unknown action types always fall back to deny.')),
+      S.policyMeta && S.policyMeta.note ? h('p', { class: 'muted ctl-fine' }, S.policyMeta.note) : null];
+  }
+
+  function ctlAudit() {
+    const f = S.afilter || {};
+    const field = (key, label, extra) => {
+      const i = h('input', { class: 'field ctl-audit-filter', 'aria-label': label, value: f[key] || '', ...extra });
+      i.addEventListener('input', () => { S.afilter = S.afilter || {}; S.afilter[key] = i.value; });
+      return i;
+    };
+    const types = [...new Set((S.audit || []).map((e) => e.event_type))].sort();
+    const shown = (S.audit || []).length;
+    const total = S.auditTotal == null ? shown : S.auditTotal;
+    const count = total > shown ? `${shown} of ${total} events shown` : `${shown} event${shown === 1 ? '' : 's'}`;
+    const row = (e) => {
+      const open = !!(S.auditOpen || {})[e.id];
+      const toggle = () => ctlToggleAudit(e.id);
+      return [h('tr', { class: 'ctl-audit-row', tabindex: 0, 'aria-expanded': open ? 'true' : 'false', 'aria-label': `Event ${e.event_type} by ${e.actor || 'system'} — show details`, onclick: toggle,
+        onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } } },
+        h('td', { class: 'mono ctl-audit-time' }, when(e.created_at)),
+        h('td', {}, e.event_type),
+        h('td', {}, e.actor || 'system'),
+        h('td', { class: 'mono' }, String(e.event_hash || '').slice(0, 12)),
+        h('td', {}, h('span', { class: 'ctl-audit-chev' }, ctlChevron(open)))),
+        open ? h('tr', { class: 'ctl-audit-detail' }, h('td', { colspan: 5 },
+          h('div', { class: 'mono ctl-audit-meta' },
+            h('div', {}, 'id: ' + e.id),
+            h('div', {}, 'seq: ' + e.seq),
+            h('div', {}, 'created_at: ' + e.created_at),
+            h('div', {}, 'org_id: ' + e.org_id),
+            h('div', {}, 'previous_hash: ' + e.previous_hash),
+            h('div', {}, 'event_hash: ' + e.event_hash)),
+          h('div', { class: 'muted ctl-audit-payload-label' }, 'Payload'),
+          h('pre', { class: 'ctl-audit-json' }, JSON.stringify(e.payload, null, 2)))) : null];
+    };
+    return [h('h2', {}, 'Audit log'),
+      h('p', { class: 'muted' }, 'Hash-linked chain per organisation. Filters run on the server; the export sends the same filters as NDJSON for SIEM tools. Click a row to see the full payload.'),
+      h('div', { class: 'ctl-filters' },
+        field('event_type', 'Event type starts with', { list: 'ctl-audit-event-types', placeholder: 'Event type starts with…' }),
+        field('actor', 'Actor contains', { placeholder: 'Actor contains…' }),
+        field('since', 'From date', { type: 'date' }),
+        field('until', 'To date', { type: 'date' }),
+        h('datalist', { id: 'ctl-audit-event-types' }, types.map((t) => h('option', { value: t })))),
+      h('div', { class: 'row2 ctl-audit-actions' },
+        btn(S.auditBusy ? 'Applying…' : 'Apply filters', ctlApplyAudit, 'btn primary', { disabled: !!S.auditBusy }),
+        btn('Reset', ctlResetAudit, 'btn', { disabled: !!S.auditBusy }),
+        h('span', { class: 'muted ctl-audit-count' }, count),
+        h('span', { class: 'sp' }),
+        btn('Verify integrity', () => run(async () => { const v = await api('/api/security/audit/verify'); S.verify = v.valid ? `Chain intact (${v.checked} events). It detects edits; it is not an external signature.` : 'Chain broken: ' + JSON.stringify(v); })),
+        btn('Export for SIEM (NDJSON)', () => { const qs = ctlFilterQS(); run(async () => { await dl('/api/security/audit/export' + (qs ? '?' + qs : ''), 'audit-export.ndjson'); }); }, 'btn primary')),
+      S.verify ? h('p', { class: 'muted' }, S.verify) : null,
+      h('div', { class: 'tbl-wrap ctl-audit-wrap' }, h('table', { class: 'ctl-audit-table' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'Time'), h('th', {}, 'Event type'), h('th', {}, 'Actor'), h('th', {}, 'Hash'), h('th', { 'aria-label': 'Details' }, ''))),
+        h('tbody', {}, shown ? (S.audit || []).map(row) : h('tr', {}, h('td', { colspan: 5, class: 'muted' }, 'No audit events match these filters.')))))]
+  }
+
   function controlView() {
-    const pend = S.approvals.filter((a) => a.status === 'pending'), tcOf = (id) => S.toolCalls.find((t) => t.approval_id === id);
+    const pend = (S.approvals || []).filter((a) => a.status === 'pending');
     const sumCards = h('div', { class: 'cards', style: 'margin-bottom:16px' }, [['Agents', S.sum.agents], ['Suspended', S.sum.suspended], ['Pending approvals', S.sum.pending_approvals], ['Memory drafts', S.sum.drafts], ['Apps connected', S.sum.apps]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l), h('b', { style: 'font-size:22px' }, String(v ?? 0)))));
     const incident = h('div', { class: 'card', style: 'margin-bottom:16px' }, h('b', {}, 'Incident switch'), h('p', { class: 'muted' }, 'Suspends every agent at once: chat, calls and tool use stop. Resume restores them. Both are written to the audit log.'),
       h('div', { class: 'row2' }, btn(S.panicArm ? 'Click again to suspend all agents' : 'Suspend all agents', () => { if (!S.panicArm) { S.panicArm = true; return render(); } S.panicArm = false; run(async () => { const r = await api('/api/security/panic', { method: 'POST', body: { action: 'suspend_all', reason: 'incident switch' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = `${r.agents} agent(s) suspended.`; }); }, S.panicArm ? 'btn primary' : 'btn'),
         btn('Resume all', () => run(async () => { await api('/api/security/panic', { method: 'POST', body: { action: 'resume_all' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = 'All agents resumed.'; }))));
-    return h('div', { class: 'body' }, h('div', { class: 'col' }, sumCards, incident,
+    return h('div', { class: 'body' }, h('div', { class: 'col' }, sumCards, ctlCoverage(), incident,
       h('h2', {}, 'Approval queue'), h('p', { class: 'muted' }, 'Approving records a human decision. A tool call only runs when you execute it afterwards.'),
       pend.length ? pend.map((a) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, a.action_type), ` (${a.risk_level}): ${a.description}`, h('div', { class: 'row2', style: 'margin-top:8px' }, ['approved', 'rejected'].map((d) => btn(d === 'approved' ? 'Approve' : 'Reject', () => run(async () => { await api(`/api/security/approvals/${a.id}/decision`, { method: 'POST', body: { decision: d, decided_by: 'ui' } }); await go('control'); })))))) : h('p', { class: 'muted' }, 'Nothing pending.'),
       h('h2', {}, 'Tool calls'), S.toolCalls.length ? S.toolCalls.map((t) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, `${t.app}.${t.tool}`), ` as ${botBy(t.bot_id).name}`, h('span', { class: 'chip ' + (['invalidated', 'expired'].includes(t.status) ? 'warn' : ''), style: 'margin-left:8px' }, `${t.status} / approval ${t.approval_status}`), h('div', { class: 'pre' }, JSON.stringify(t.args)), t.payload_hash ? h('div', { class: 'muted mono', style: 'font-size:11px' }, `Approval covers exactly this payload (${t.payload_hash})` + (t.expires_at ? `, valid until ${when(t.expires_at)}` : '')) : null,
         t.status === 'pending' && t.approval_status === 'approved' ? h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Execute now', () => run(async () => { await api(`/api/tool-calls/${t.approval_id}/execute`, { method: 'POST' }); await go('control'); }), 'btn primary')) : null, t.result ? h('div', { class: 'pre' }, t.result) : null)) : h('p', { class: 'muted' }, 'No tool calls waiting.'),
       h('h2', {}, 'Authorization self-test'), h('p', { class: 'muted' }, "Synthetic probes against this app: capabilities, tool grants, suspended agents, memory spaces, unverified and instruction-like notes. It tests this app's enforcement, not model behavior."),
-      h('div', { class: 'row2' }, btn([icon('flask', 16), 'Run self-test'], () => run(async () => { S.test = await api('/api/selftest', { method: 'POST' }); })), btn('Run finance demo', () => run(async () => { S.demo = await api('/api/demo/finance', { method: 'POST' }); S.test = await api('/api/selftest/latest'); await go('control'); }))),
+      h('div', { class: 'row2' }, btn(S.covBusy ? 'Running self-test…' : [icon('flask', 16), 'Run self-test'], ctlRunSelfTest, 'btn', { disabled: !!S.covBusy }), btn('Run finance demo', () => run(async () => { S.demo = await api('/api/demo/finance', { method: 'POST' }); S.test = await api('/api/selftest/latest'); S.cov = await api('/api/coverage'); await go('control'); }))),
       S.demo ? h('div', {}, S.demo.steps.map((x) => h('p', {}, (x.ok ? 'OK: ' : 'FAIL: ') + x.step))) : null,
       S.test && S.test.id ? [h('p', {}, h('b', {}, `${S.test.passed} passed, ${S.test.failed} failed `), btn('Download report', () => run(async () => { await dl(`/api/selftest/${S.test.id}/report.md`, 'selftest-report.md'); }), 'link'), ' ', S.test.share_url ? [h('a', { class: 'link', href: S.test.share_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open public link'), ' ', btn('Copy', () => { navigator.clipboard && navigator.clipboard.writeText(location.origin + S.test.share_url); S.info = 'Link copied. Anyone with it can read this report.'; render(); }, 'link'), ' ', btn('Revoke', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'DELETE' }); S.test = await api('/api/selftest/latest'); }), 'link')] : btn('Create public link', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'POST' }); S.test = await api('/api/selftest/latest'); }), 'link')),
         h('table', {}, h('tbody', {}, S.test.probes.filter((x) => !x.ok).concat(S.test.probes.filter((x) => x.ok).slice(0, 6)).map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.expected), h('td', {}, x.actual), h('td', {}, x.ok ? 'pass' : 'FAIL')))))] : null,
-      S.cov ? [h('h2', {}, 'Coverage of the OWASP agentic risks'), h('p', { class: 'muted' }, `${S.cov.framework}. ${S.cov.disclaimer}`),
-        S.cov.items.map((c) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, (c.id.startsWith('ASI') ? c.id + ' · ' : '') + c.name), h('span', { class: 'chip ' + (c.status === 'covered' ? 'ok' : '') }, c.status),
-          h('span', { class: 'chip' }, c.evidence.total ? `${c.evidence.passed} of ${c.evidence.total} probes passed` : 'no probes yet')),
-          h('ul', { style: 'margin:8px 0;padding-left:18px' }, c.controls.map((x) => h('li', {}, x))), h('div', { class: 'muted', style: 'font-size:13px' }, 'Known gaps: ' + c.gaps.join('; '))))] : null,
-      h('h2', {}, 'Policies'), h('table', {}, h('tbody', {}, (S.policies || []).map((p) => h('tr', {}, h('td', { class: 'mono' }, p.action_type), h('td', {}, p.decision))))),
+      ctlPolicies(),
       S.funnel ? [h('h2', {}, 'Pipeline'), h('div', { class: 'cards' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l + ' (30 days)'), h('b', { style: 'font-size:22px' }, String(v || 0))))),
         S.leads.length ? h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60)))))) : h('p', { class: 'muted' }, 'No leads yet. The public page /welcome has the pilot form.')] : null,
-      h('h2', {}, 'Audit log'), h('p', { class: 'muted' }, 'Hash-linked chain per organisation. The export is NDJSON for SIEM (Splunk, Datadog, Elastic) and can be filtered by date range, actor and event type.'),
-      h('div', { class: 'rbox' }, fA('since', 'From date (2026-01-01)'), fA('until', 'To date (2026-12-31)'), fA('actor', 'Actor contains...'), fA('event_type', 'Event type starts with...')),
-      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Verify integrity', () => run(async () => { const v = await api('/api/security/audit/verify'); S.verify = v.valid ? `Chain intact (${v.checked} events). It detects edits; it is not an external signature.` : 'Chain broken: ' + JSON.stringify(v); })), btn('Export for SIEM (NDJSON)', () => {
-        const q = ['since', 'until', 'actor', 'event_type'].map((k) => (S.afilter || {})[k] ? `${k}=${encodeURIComponent(S.afilter[k])}` : '').filter(Boolean).join('&');
-        dl('/api/security/audit/export' + (q ? '?' + q : ''), 'audit-export.ndjson');
-      }, 'btn primary')),
-      S.verify ? h('p', { class: 'muted' }, S.verify) : null, h('table', {}, h('tbody', {}, (S.audit || []).map((e) => h('tr', {}, h('td', { class: 'mono' }, when(e.created_at)), h('td', {}, e.event_type), h('td', {}, e.actor)))))));
+      ctlAudit()));
   }
 
   // ---------- modals ----------
@@ -1385,9 +1548,9 @@ const overlayRoot = (() => {
     return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; syncOverlays(true); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
       h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
-      group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
+      group('Organisation', [it('Organisation', 'Workspace, members, revenue, announcements', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
       group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
-      group('Govern', [it('Control', 'Approvals, tool calls, audit, incident switch', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage'), it('Self-test', 'Prove the boundaries, share the evidence', 'flask', 'control'), it('OWASP coverage', 'What is covered, what is not', 'check', 'control')]),
+      group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),
       group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
       group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
@@ -1592,7 +1755,7 @@ const overlayRoot = (() => {
           tile(b, 38), h('span', {}, h('b', {}, (S.pinned[b.id] ? '• ' : '') + b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role), S.unreadA[b.id] ? h('span', { class: 'udot' }) : null)))])),
       meterBlock(),
       h('button', { class: 'appsbtn', type: 'button', onclick: openApps }, icon('grid', 20), h('span', { style: 'flex:1' }, 'Connect apps', h('small', {}, `${S.sum.apps || 0} connected · MCP`)), h('span', { class: 'chip ok' }, 'MCP')),
-      h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => go('settings'), 'menuitem'), btn([icon('flask', 16), 'Authorization self-test'], () => go('control'), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
+      h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => go('settings'), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct', type: 'button', 'aria-expanded': S.menu, onclick: () => { S.menu = !S.menu; render(); } }, h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
           h('span', {}, (S.me && S.me.org ? S.me.org.name : 'Workspace owner'), h('small', {}, S.me && S.me.user ? S.me.user.email + ' · ' + S.me.role : (hd.auth === 'enabled' ? 'Signed in' : 'Open dev mode, no login')), h('small', {}, hd.model_configured ? 'Model connected' : 'No model, demo replies'), h('small', {}, `v${hd.version || '?'}${hd.build ? ' · ' + hd.build : ''}`)))));

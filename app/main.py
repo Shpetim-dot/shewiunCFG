@@ -401,6 +401,52 @@ POLICY_DEFAULTS = {
     "secrets.read": "deny",
     "shell.execute": "deny",
 }
+POLICY_DECISIONS = ("allow", "approval_required", "deny")
+POLICY_SETTINGS_KEY = "policy_overrides"
+POLICY_DESCRIPTIONS = {
+    "project.create": "Create a project record in this workspace.",
+    "brain.write": "Write a note into the shared knowledge base.",
+    "council.run": "Run an agent council call.",
+    "external.write": "Write data through a connected external tool.",
+    "external.delete": "Delete data through a connected external tool.",
+    "secrets.read": "Read a stored secret or credential.",
+    "shell.execute": "Run a shell command on the host.",
+}
+
+
+def _policy_overrides() -> dict[str, str]:
+    """Org-scoped policy overrides kept in org_settings, the same store the model gateway uses.
+
+    Only known action types and valid decisions survive, so a corrupted setting cannot add a
+    policy that the rest of the app does not understand.
+    """
+    with cfa_platform.db() as con:
+        row = con.execute("SELECT value FROM org_settings WHERE org_id=? AND key=?",
+                          (cfa_platform.org(), POLICY_SETTINGS_KEY)).fetchone()
+    try:
+        raw = json.loads(row["value"]) if row and row["value"] else {}
+    except (TypeError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k in POLICY_DEFAULTS and v in POLICY_DECISIONS}
+
+
+def _policy_item(action_type: str, decision: str, overrides: dict[str, str]) -> dict[str, Any]:
+    return {
+        "action_type": action_type,
+        "decision": decision,
+        "default_decision": POLICY_DEFAULTS[action_type],
+        "overridden": action_type in overrides,
+        "description": POLICY_DESCRIPTIONS.get(action_type, ""),
+    }
+
+
+def effective_policy(action_type: str) -> str:
+    """The decision enforcement uses: org override, then the built-in default, then deny."""
+    if action_type not in POLICY_DEFAULTS:
+        return "deny"
+    return _policy_overrides().get(action_type, POLICY_DEFAULTS[action_type])
 
 
 class ApprovalIn(BaseModel):
@@ -414,6 +460,11 @@ class ApprovalDecisionIn(BaseModel):
     decision: str = Field(pattern="^(approved|rejected)$")
     decided_by: str = Field(min_length=1, max_length=100)
     note: str = Field(default="", max_length=1000)
+
+
+class PolicyIn(BaseModel):
+    action_type: str = Field(min_length=1, max_length=100)
+    decision: str = Field(pattern="^(allow|approval_required|deny)$")
 
 
 def verify_audit_chain() -> dict[str, Any]:
@@ -438,20 +489,74 @@ def verify_audit_chain() -> dict[str, Any]:
 
 @app.get("/api/security/policies")
 def security_policies() -> dict[str, Any]:
+    overrides = _policy_overrides()
+    effective = {k: overrides.get(k, v) for k, v in POLICY_DEFAULTS.items()}
     return {
         "default_effect": "deny for unknown action types",
-        "policies": [{"action_type": k, "decision": v} for k, v in POLICY_DEFAULTS.items()],
+        "decisions": list(POLICY_DECISIONS),
+        "policies": [_policy_item(k, effective[k], overrides) for k in POLICY_DEFAULTS],
         "note": "Policy reference layer for the MVP; no external tools are executed."
     }
 
 
+@app.put("/api/security/policies")
+def update_policy(item: PolicyIn, request: Request) -> dict[str, Any]:
+    """Store an org-scoped override for one action type. Enforcement reads it immediately."""
+    p = cfa_platform.need_admin(request)
+    if item.action_type not in POLICY_DEFAULTS:
+        raise HTTPException(status_code=422, detail="unknown action type")
+    old = effective_policy(item.action_type)
+    overrides = _policy_overrides()
+    overrides[item.action_type] = item.decision
+    with cfa_platform.db() as con:
+        con.execute("INSERT OR REPLACE INTO org_settings (org_id, key, value) VALUES (?,?,?)",
+                    (cfa_platform.org(), POLICY_SETTINGS_KEY, json.dumps(overrides)))
+    append_audit("policy.changed", p["name"],
+                 {"action_type": item.action_type, "old": old, "new": item.decision})
+    return _policy_item(item.action_type, item.decision, overrides)
+
+
+@app.delete("/api/security/policies/{action_type}")
+def reset_policy(action_type: str, request: Request) -> dict[str, Any]:
+    """Drop the org override so the built-in default applies again."""
+    p = cfa_platform.need_admin(request)
+    if action_type not in POLICY_DEFAULTS:
+        raise HTTPException(status_code=404, detail="unknown action type")
+    overrides = _policy_overrides()
+    previous = overrides.pop(action_type, None)
+    if previous is not None:
+        with cfa_platform.db() as con:
+            con.execute("INSERT OR REPLACE INTO org_settings (org_id, key, value) VALUES (?,?,?)",
+                        (cfa_platform.org(), POLICY_SETTINGS_KEY, json.dumps(overrides)))
+        append_audit("policy.reset", p["name"],
+                     {"action_type": action_type, "old": previous, "new": POLICY_DEFAULTS[action_type]})
+    return _policy_item(action_type, POLICY_DEFAULTS[action_type], overrides)
+
+
 @app.get("/api/security/audit")
-def security_audit(limit: int = 50) -> dict[str, Any]:
+def security_audit(actor: str = "", event_type: str = "", since: str = "", until: str = "", limit: int = 50) -> dict[str, Any]:
+    """Newest-first audit events with the same filters as the NDJSON export."""
     limit = max(1, min(limit, 200))
+    where = ["org_id=?"]
+    args: list[Any] = [cfa_platform.org()]
+    if since:
+        where.append("created_at >= ?")
+        args.append(since)
+    if until:
+        where.append("created_at <= ?")
+        args.append(until)
+    if actor:
+        where.append("actor LIKE ?")
+        args.append(f"%{actor}%")
+    if event_type:
+        where.append("event_type LIKE ?")
+        args.append(f"{event_type}%")
+    clause = " AND ".join(where)
     with connect() as db:
-        rows = db.execute("SELECT * FROM audit_events WHERE org_id=? ORDER BY seq DESC LIMIT ?",
-                          (cfa_platform.org(), limit)).fetchall()
-    return {"integrity": verify_audit_chain(), "events": [
+        rows = db.execute(f"SELECT * FROM audit_events WHERE {clause} ORDER BY seq DESC LIMIT ?",
+                          (*args, limit)).fetchall()
+        total = db.execute(f"SELECT COUNT(*) FROM audit_events WHERE {clause}", args).fetchone()[0]
+    return {"integrity": verify_audit_chain(), "total_filtered": total, "events": [
         {**dict(r), "payload": json.loads(r["payload"])} for r in rows
     ]}
 
@@ -461,7 +566,7 @@ def request_approval(item: ApprovalIn) -> dict[str, Any]:
     risk = item.risk_level.lower()
     if risk not in RISK_LEVELS:
         raise HTTPException(status_code=422, detail="risk_level must be low, medium, high, or critical")
-    policy = POLICY_DEFAULTS.get(item.action_type, "deny")
+    policy = effective_policy(item.action_type)
     if policy == "deny":
         status = "rejected"
     elif policy == "approval_required" or RISK_LEVELS[risk] >= 3:

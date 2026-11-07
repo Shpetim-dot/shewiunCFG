@@ -387,3 +387,83 @@ html { scroll-behavior: smooth; }
   .inv-bulk { position: static; }
   .inv-foot { align-items: flex-start; }
 }
+
+
+/* ===== Batch 2 — Control ===== */
+/* OWASP agentic coverage traffic lights */
+.ctl-cov { margin: 0 0 18px; }
+.ctl-cov-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 8px; }
+.ctl-cov-head .ctl-h2 { margin: 0; flex: none; }
+.ctl-cov-head .sp { min-width: 8px; }
+.ctl-cov-framework { margin: 0 0 2px; }
+.ctl-cov-disclaimer { margin: 0 0 8px; font-size: 12px; }
+.ctl-cov-summary { margin: 0 0 10px; }
+.ctl-cov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.ctl-cov-card { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.ctl-cov-title { align-items: center; }
+.ctl-cov-title b { font-size: 14px; line-height: 1.3; }
+.ctl-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: #64748B; box-shadow: 0 0 0 3px rgba(100,116,139,.16); }
+.ctl-dot.ok { background: #1B7F79; box-shadow: 0 0 0 3px rgba(27,127,121,.20); }
+.ctl-dot.warn { background: #B7791F; box-shadow: 0 0 0 3px rgba(183,121,31,.20); }
+.ctl-dot.bad { background: var(--bad); box-shadow: 0 0 0 3px rgba(180,35,24,.20); }
+.ctl-status.warn { color: #B7791F; border-color: #B7791F; }
+.ctl-status.bad { color: var(--bad); border-color: var(--bad); }
+.ctl-cov-evidence { font-size: 13px; }
+.ctl-cov-list { margin: 2px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.ctl-cov-list li { margin: 2px 0; }
+.ctl-cov-more { margin-top: 2px; }
+.ctl-cov-more summary { cursor: pointer; font-size: 12px; }
+.ctl-cov-gaps { font-size: 12px; margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--line); }
+
+/* policies editor */
+.ctl-policy-wrap { margin-top: 6px; }
+.ctl-policy-table select, .ctl-policy-select { width: auto; min-width: 170px; padding: 6px 10px; }
+.ctl-policy-desc { font-size: 12px; }
+.ctl-policy-actions { flex-wrap: nowrap; }
+.ctl-effect-help { display: grid; gap: 5px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.ctl-effect-help .chip { margin-right: 3px; }
+.ctl-fine { font-size: 12px; margin-top: 6px; }
+
+/* audit filters + expandable row detail */
+.ctl-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 8px; }
+.ctl-audit-actions { margin: 6px 0 10px; }
+.ctl-audit-count { font-size: 12px; }
+.ctl-audit-wrap { margin-top: 4px; max-height: 540px; }
+.ctl-audit-row { cursor: pointer; }
+.ctl-audit-row:hover td, .ctl-audit-row[aria-expanded="true"] td { background: var(--side); }
+.ctl-audit-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ctl-audit-time { white-space: nowrap; font-size: 12px; }
+.ctl-audit-chev { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; color: var(--muted); }
+.ctl-audit-chev svg { transition: transform .15s ease; }
+.ctl-audit-detail td { background: var(--side); padding-top: 4px; }
+.ctl-audit-meta { font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; color: var(--muted); }
+.ctl-audit-payload-label { font-size: 12px; margin: 8px 0 4px; }
+.ctl-audit-json { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+
+@media (prefers-color-scheme: dark) {
+  .ctl-dot { background: #94A3B8; }
+  .ctl-dot.ok { background: #4FD1A5; }
+  .ctl-dot.warn { background: #E8B44A; }
+  .ctl-dot.bad { background: var(--bad); }
+  .ctl-status.warn { color: #E8B44A; border-color: #E8B44A; }
+  .ctl-audit-chev { color: #94A3B8; }
+}
+
+@media (max-width: 760px) {
+  .ctl-cov-grid { grid-template-columns: 1fr; }
+  .ctl-filters { grid-template-columns: 1fr; }
+  .ctl-cov-head { align-items: flex-start; }
+  .ctl-audit-wrap { max-height: 420px; }
+  .ctl-policy-table select, .ctl-policy-select { min-width: 130px; }
+  .ctl-audit-actions .btn { flex: 1 1 auto; }
+  /* Stack the policy editor rows so Effect, Source and actions stay reachable on a phone. */
+  .ctl-policy-table thead { display: none; }
+  .ctl-policy-table, .ctl-policy-table tbody, .ctl-policy-table tr, .ctl-policy-table td { display: block; width: 100%; }
+  .ctl-policy-table tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .ctl-policy-table tr:last-child { border-bottom: 0; }
+  .ctl-policy-table td { padding: 4px 0; border-bottom: 0; }
+  .ctl-policy-table td:nth-child(2) { display: flex; align-items: center; gap: 8px; }
+  .ctl-policy-table td:nth-child(3)::before { content: 'Source: '; color: var(--muted); font-size: 12px; }
+  .ctl-policy-table td:nth-child(4) { display: flex; justify-content: flex-end; }
+  .ctl-policy-select { width: 100%; }
+}
