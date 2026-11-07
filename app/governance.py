@@ -385,6 +385,17 @@ class TeamIn(BaseModel):
     color: str = Field(default="#2F5BD3", max_length=20)
 
 
+class TeamUpdate(BaseModel):
+    """PUT body. `name` is optional (keep the stored name when omitted); `icon`/`color` are
+    optional too and only overwrite the stored branding when the client explicitly sends them,
+    so an older client that omits them no longer resets the team back to the defaults."""
+    name: str | None = Field(default=None, min_length=2, max_length=40)
+    mission: str = Field(default="", max_length=300)
+    members: list[str] = Field(default_factory=list, max_length=12)
+    icon: str | None = Field(default=None, max_length=30)
+    color: str | None = Field(default=None, max_length=20)
+
+
 @router.get("/api/teams")
 def list_teams() -> list[dict[str, Any]]:
     with pf.db() as con:
@@ -408,7 +419,7 @@ def create_team(item: TeamIn, request: Request) -> dict[str, Any]:
 
 
 @router.put("/api/teams/{team_id}")
-def update_team(team_id: str, item: TeamIn, request: Request) -> dict[str, Any]:
+def update_team(team_id: str, item: TeamUpdate, request: Request) -> dict[str, Any]:
     p = pf.need_admin(request)
     with pf.db() as con:
         t = con.execute("SELECT * FROM teams WHERE id=? AND org_id=?", (team_id, pf.org())).fetchone()
@@ -417,20 +428,33 @@ def update_team(team_id: str, item: TeamIn, request: Request) -> dict[str, Any]:
         ids = {r["id"] for r in con.execute("SELECT id FROM bots WHERE org_id=?", (pf.org(),))}
         if any(m not in ids for m in item.members):
             raise HTTPException(422, "unknown agent")
+        old_name = t["name"]
+        new_name = item.name.strip() if item.name is not None else old_name
+        if len(new_name) < 2:
+            raise HTTPException(422, "team name must be at least 2 characters")
+        if new_name != old_name and con.execute(
+                "SELECT 1 FROM teams WHERE name=? AND org_id=? AND id<>?", (new_name, pf.org(), team_id)).fetchone():
+            raise HTTPException(409, "a team with this name exists")
+        icon = item.icon if item.icon is not None else (t["icon"] if "icon" in t.keys() else "teams")
+        color = item.color if item.color is not None else (t["color"] if "color" in t.keys() else "#2F5BD3")
         before = [m["id"] for m in _team_out(con, t)["members"]]
         for b in set(before) - set(item.members):
             _set_spaces(con, b, [x for x in _spaces(con, b) if x != t["space"]])
-            con.execute("UPDATE bots SET team='General' WHERE id=? AND team=? AND org_id=?", (b, t["name"], pf.org()))
+            con.execute("UPDATE bots SET team='General' WHERE id=? AND team=? AND org_id=?", (b, old_name, pf.org()))
         for b in item.members:
             sp = _spaces(con, b)
             if t["space"] not in sp:
                 sp.insert(1, t["space"])
                 _set_spaces(con, b, sp)
-            con.execute("UPDATE bots SET team=? WHERE id=? AND org_id=?", (t["name"], b, pf.org()))
-        con.execute("UPDATE teams SET mission=?, icon=?, color=? WHERE id=? AND org_id=?", (item.mission, item.icon, item.color, team_id, pf.org()))
+            con.execute("UPDATE bots SET team=? WHERE id=? AND org_id=?", (new_name, b, pf.org()))
+        if new_name != old_name:
+            # bots.team stores the display name, so a rename must move every agent of the team.
+            con.execute("UPDATE bots SET team=? WHERE team=? AND org_id=?", (new_name, old_name, pf.org()))
+        con.execute("UPDATE teams SET name=?, mission=?, icon=?, color=? WHERE id=? AND org_id=?",
+                    (new_name, item.mission, icon, color, team_id, pf.org()))
         con.commit()
         out = _team_out(con, con.execute("SELECT * FROM teams WHERE id=? AND org_id=?", (team_id, pf.org())).fetchone())
-    pf._m().append_audit("team.updated", p["name"], {"team": team_id, "before": before, "after": item.members})
+    pf._m().append_audit("team.updated", p["name"], {"team": team_id, "name": new_name, "before": before, "after": item.members})
     return out
 
 

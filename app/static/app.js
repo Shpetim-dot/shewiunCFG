@@ -107,6 +107,7 @@ const overlayRoot = (() => {
   const when = (t) => (t || '').slice(0, 16).replace('T', ' ');
   const botBy = (id) => S.bots.find((b) => b.id === id) || { color: '#5B6B88', icon: 'spark', name: id };
   const admin = (t) => h('p', { class: 'muted', style: 'font-size:12px' }, t);
+  const badge = (n) => (n ? h('span', { class: 'badge' }, String(n)) : null);
   const dl = async (path, name) => { const r = await fetch(path, { headers: token ? { Authorization: 'Bearer ' + token } : {}, credentials: 'same-origin' }); if (!r.ok) throw new Error(`Download failed (${r.status})`); h('a', { href: URL.createObjectURL(await r.blob()), download: name }).click(); };
 
   // Session cookie auth needs a CSRF header; bearer tokens do not. Both are supported.
@@ -698,7 +699,6 @@ const overlayRoot = (() => {
   }
 
   // ---------- teams, inventory, marketplace ----------
-  function memberBoxes(sel) { return S.bots.filter((b) => b.id !== 'chair' || true).map((b) => h('label', { class: 'row' }, h('input', { type: 'checkbox', value: b.id, checked: sel.includes(b.id) }), tile(b, 20), b.name)); }
   const picked = (boxes) => boxes.map((l) => l.firstChild).filter((i) => i.checked).map((i) => i.value);
   async function openChannels(t, cid) {
     if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; }
@@ -751,22 +751,34 @@ const overlayRoot = (() => {
       h('div', { class: 'row2', style: 'margin-top:8px' }, inp, btn('Send', send, 'btn primary', { disabled: !!S.cbusy })));
   }
   function teamsView() {
-    const nm = h('input', { class: 'field', placeholder: 'Team name, for example Finance desk', maxlength: 40, value: S.tnew.name, 'aria-label': 'Team name' }); nm.addEventListener('input', () => { S.tnew.name = nm.value; });
-    const ms = h('input', { class: 'field', placeholder: 'Mission (optional)', maxlength: 300, value: S.tnew.mission, 'aria-label': 'Mission' }); ms.addEventListener('input', () => { S.tnew.mission = ms.value; });
-    const boxes = memberBoxes(S.tnew.members);
-    const TEAM_ICONS = ['teams', 'compass', 'rocket', 'shield', 'coins', 'book', 'chat', 'wrench', 'chart', 'radar', 'spark', 'lens'];
-    const TEAM_COLORS = ['#2F5BD3', '#1B7F79', '#B5543C', '#7A4E9C', '#1F6F8B', '#B7791F', '#3D7A4F'];
-    const pickers = h('div', { class: 'row2', style: 'flex-wrap:wrap;margin:8px 0' }, TEAM_ICONS.map((ic) => h('button', { type: 'button', class: 'btn', 'aria-label': 'Icon ' + ic, style: S.tnew.icon === ic ? 'border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)' : '', onclick: () => { S.tnew.icon = ic; render(); } }, h('span', { class: 'tile', style: 'width:26px;height:26px;background:' + (S.tnew.color || TEAM_COLORS[0]) + ';color:#fff' }, icon(ic, 14)))), TEAM_COLORS.map((c) => h('button', { type: 'button', class: 'btn', 'aria-label': 'Color ' + c, style: S.tnew.color === c ? 'border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)' : '', onclick: () => { S.tnew.color = c; render(); } }, h('span', { style: 'display:inline-block;width:16px;height:16px;border-radius:50%;background:' + c }))));
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Teams'), h('p', { class: 'muted' }, 'A team is a unit with its own shared memory space. Members can read it, other agents cannot. Start a council call with a whole team.'),
+    const avatarStack = (t) => {
+      const ms = t.members || [], extra = ms.length - 5;
+      return h('div', { class: 'tm-stack', title: ms.length ? ms.map((m) => m.name).join(', ') : 'No members yet' },
+        ms.slice(0, 5).map((m) => tile(m, 24)),
+        extra > 0 ? h('span', { class: 'tm-more', title: `${extra} more member${extra === 1 ? '' : 's'}` }, '+' + extra) : null);
+    };
+    const teamCard = (t) => {
+      const members = t.members || [], chanCount = S.chanCounts && S.chanCounts[t.id];
+      return h('div', { class: 'card appcard tm-card' },
+        h('div', { class: 'tm-card-top' },
+          h('span', { class: 'tile', style: 'width:38px;height:38px;background:' + (t.color || '#2F5BD3') + ';color:#fff' }, icon(t.icon || 'teams', 20)),
+          h('b', { class: 'tm-name', title: t.name }, t.name),
+          h('span', { class: 'chip' }, t.space)),
+        h('p', { class: 'tm-mission', title: t.mission || 'No mission set' }, t.mission || 'No mission set'),
+        h('div', { class: 'tm-meta' }, avatarStack(t), h('span', {}, `${members.length} member${members.length === 1 ? '' : 's'}`), h('span', {}, '·'), h('span', {}, `${t.notes} note${t.notes === 1 ? '' : 's'}`),
+          chanCount ? h('span', { class: 'badge', title: 'Unread channel messages' }, String(chanCount)) : null),
+        h('div', { class: 'tm-actions' },
+          btn('Channels', () => run(() => openChannels(t)), 'btn'),
+          btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'),
+          btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); }),
+          btn([icon('pen', 16), 'Edit'], () => openTeamModal(t.id), 'btn', { 'aria-label': 'Edit team ' + t.name })));
+    };
+    return h('div', { class: 'body' }, h('div', { class: 'wide' },
+      h('div', { class: 'tm-head' },
+        h('div', { class: 'tm-headtext' }, h('h2', {}, 'Teams'), h('p', { class: 'muted' }, 'A team is a unit with its own shared memory space. Members can read it, other agents cannot. Start a council call with a whole team.')),
+        btn([icon('plus', 16), 'New team'], () => openTeamModal(null), 'btn primary', { 'aria-label': 'New team' })),
       S.chan ? channelPanel() : null,
-      h('div', { class: 'cards' }, S.teams.map((t) => { const eb = memberBoxes(t.members.map((m) => m.id));
-        return h('div', { class: 'card appcard' }, h('div', { class: 'row2' }, h('span', { class: 'tile', style: 'width:30px;height:30px;background:' + (t.color || '#2F5BD3') + ';color:#fff' }, icon(t.icon || 'teams', 16)), h('b', { style: 'flex:1' }, t.name), h('span', { class: 'chip' }, t.space)), h('div', { class: 'muted' }, t.mission || 'No mission set'),
-          h('div', { class: 'row2' }, t.members.map((m) => h('span', { class: 'row2' }, tile(m, 24), m.name))), h('div', { class: 'muted' }, `${t.notes} team note(s)`),
-          h('div', { class: 'row2' }, h('span', { class: 'row2' }, btn('Channels', () => run(() => openChannels(t)), 'btn'), S.chanCounts && S.chanCounts[t.id] ? badge(S.chanCounts[t.id]) : null), btn([icon('council', 16), 'Start council'], () => { S.picked = new Set(t.members.map((m) => m.id).filter((id) => id !== 'chair')); S.topic = ''; go('council'); }, 'btn primary'), btn('Open team brain', () => { S.space = t.space; S.note = null; go('brain'); })),
-          h('details', {}, h('summary', { class: 'muted' }, 'Edit members'), h('div', { style: 'margin-top:8px' }, eb), h('div', { class: 'row2' }, btn('Save', () => run(async () => { await api('/api/teams/' + t.id, { method: 'PUT', body: { name: t.name, mission: t.mission, members: picked(eb) } }); await Promise.all([loadTeams(), loadBots()]); }), 'btn'), btn('Delete team', () => run(async () => { await api('/api/teams/' + t.id, { method: 'DELETE' }); await Promise.all([loadTeams(), loadBots()]); }), 'link'))));
-      })), S.teams.length ? null : emptyState('teams', 'No teams yet', 'A team is a unit with its own memory. Create one or load the demo workspace.', btn('Load demo workspace', loadDemo, 'btn')),
-      h('h2', {}, 'New team'), nm, h('div', { style: 'height:8px' }), ms, h('div', { style: 'margin:10px 0' }, boxes),
-      pickers, btn([icon('plus', 16), 'Create team'], () => run(async () => { await api('/api/teams', { method: 'POST', body: { name: S.tnew.name, mission: S.tnew.mission, members: picked(boxes), icon: S.tnew.icon, color: S.tnew.color } }); S.tnew = { name: '', icon: 'teams', color: '#2F5BD3', mission: '', members: [] }; await Promise.all([loadTeams(), loadBots()]); }), 'btn primary')));
+      S.teams.length ? h('div', { class: 'cards tm-cards' }, S.teams.map(teamCard)) : emptyState('teams', 'No teams yet', 'A team is a unit with its own memory. Create one or load the demo workspace.', h('div', { class: 'row2', style: 'justify-content:center' }, btn([icon('plus', 16), 'New team'], () => openTeamModal(null), 'btn primary'), btn('Load demo workspace', loadDemo, 'btn')))));
   }
   function usageView() {
     const u = S.usage, money = (v, c) => (v == null ? 'unknown' : `${v.toFixed(4)} ${c || ''}`), inp = (o, k, ph, type = 'text') => { const i = h('input', { class: 'field', type, placeholder: ph, 'aria-label': ph, value: o[k] || '', autocomplete: 'off' }); i.addEventListener('input', () => { o[k] = i.value; }); return i; };
@@ -1539,7 +1551,7 @@ const overlayRoot = (() => {
   const refreshSum = async () => { try { S.sum = await api('/api/summary'); if (S.drawer) render(); } catch {} };
   // menu
   function drawer() {
-    const f = S.menuQ.trim().toLowerCase(), badge = (n) => (n ? h('span', { class: 'badge' }, String(n)) : null);
+    const f = S.menuQ.trim().toLowerCase();
     const it = (label, sub, ic, view, fn, count) => ((f && !(label + ' ' + sub).toLowerCase().includes(f)) ? null : h('button', { class: 'ditem', type: 'button', 'aria-current': S.view === view && !S.modal, onclick: fn || (() => go(view)) }, h('span', { class: 'dicon' }, icon(ic, 18)), h('span', { style: 'flex:1' }, label, h('small', {}, sub)), badge(count)));
     const group = (title, items) => { const real = items.filter(Boolean); return real.length ? [h('h3', {}, title), real] : null; };
     const quick = h('div', { class: 'quick' }, [['New agent', 'plus', openAgent], ['New note', 'doc', () => { S.newNote = true; S.graph = false; go('brain').then(() => { S.newNote = true; S.graph = false; render(); }); }], ['New call', 'council', () => { S.room = null; go('council'); }], ['Upload file', 'up', () => { pickFile(); go('brain'); }]].map(([l, ic, fn]) => h('button', { type: 'button', class: 'qbtn', onclick: fn }, icon(ic, 18), h('span', {}, l))));
@@ -1549,9 +1561,8 @@ const overlayRoot = (() => {
       h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; syncOverlays(true); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
       group('Organisation', [it('Organisation', 'Workspace, members, revenue, announcements', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
-      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
-      group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),
-      group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
+      group('Workspace', [it('Agents', 'Chat with your team', 'chat', 'chat', () => (S.bot ? pick(S.bot.id) : go('chat')), S.sum.agents), it('Council', 'Live call, decision and plan', 'council', 'council'), it('Teams', 'Team memory and channels', 'teams', 'teams'), it('Brain', 'Neurons, notes and files', 'graph', 'brain', null, S.sum.drafts), it('Research', 'Deep search with citations and charts', 'lens', 'research')]),
+      group('Govern', [it('Control', 'Coverage, approvals, audit, policies, self-test', 'shield', 'control', null, S.sum.pending_approvals), it('Inventory', 'Every agent, its owner, sponsor and risk', 'table', 'inventory', null, S.sum.agents), it('Models & usage', 'Providers, tokens, costs, budget', 'chart', 'usage')]),      group('Connect', [it('Apps', 'Live MCP servers and a demo catalog', 'grid', 'apps', openApps, S.sum.apps), it('Marketplace', 'Curated agents and Hugging Face', 'store', 'market')]),
       group('Playbooks', [(f && !'agent launch review go or no-go'.includes(f)) ? null : h('a', { class: 'ditem', href: '/review/agent-launch' }, h('span', { class: 'dicon' }, icon('doc', 18)), h('span', {}, 'Agent launch review', h('small', {}, 'Go or no-go for an AI agent')))]),
       group('Account', [it('Plans & usage', 'Limits, upgrade, billing', 'chart', 'plans', null, S.bill && S.bill.enabled ? S.bill.plan_name : null), it('Settings', 'Models, access keys, backups', 'wrench', 'settings'), it('Load demo workspace', 'Sample agents, notes, teams and apps', 'spark', 'x', loadDemo)]),
       h('p', { class: 'muted', style: 'font-size:12px;margin:18px 10px' }, `Shewiun v${S.health.version || '?'}${S.health.build ? ' · build ' + S.health.build : ''}`))];
@@ -1714,31 +1725,77 @@ const overlayRoot = (() => {
         act('Open agent screen', () => { S.tab = 'screen'; S.panel = true; pick(bot.id); }),
         act(S.pinned[bot.id] ? 'Unpin' : 'Pin to top', () => { if (S.pinned[bot.id]) delete S.pinned[bot.id]; else S.pinned[bot.id] = true; render(); }),
         act('Mark as unread', () => { S.unreadA[bot.id] = true; render(); }),
-        act('Create team with this agent', () => { S.tmodal = true; S.tsel = new Set([bot.id]); S.tname = ''; S.tmission = ''; syncOverlays(true); }),
+        act('Create team with this agent', () => openTeamModal(null, new Set([bot.id]))),
         act('Delete agent', () => run(async () => {
           if (!window.confirm('Delete ' + bot.name + '? This cannot be undone.')) return;
           await api('/api/bots/' + bot.id, { method: 'DELETE' });
           if (S.bot && S.bot.id === bot.id) { S.bot = null; S.view = 'chat'; } await loadBots();
         }), true))];
   }
+  function openTeamModal(teamId, preselect) {
+    const t = teamId ? (S.teams || []).find((x) => x.id === teamId) : null;
+    if (teamId && !t) { S.err = 'That team could not be found. Reload the page and try again.'; render(); return; }
+    S.tmodal = true;
+    S.tedit = t ? t.id : null;
+    S.tname = t ? (t.name || '') : '';
+    S.tmission = t ? (t.mission || '') : '';
+    S.tsel = new Set(t ? (t.members || []).map((m) => m.id) : (preselect ? Array.from(preselect) : []));
+    S.ticon = t ? (t.icon || 'teams') : 'teams';
+    S.tcolor = t ? (t.color || '#2F5BD3') : '#2F5BD3';
+    syncOverlays(true);
+  }
   function teamModal() {
-    const close = () => { S.tmodal = false; syncOverlays(true); };
+    const edit = S.tedit ? (S.teams || []).find((x) => x.id === S.tedit) : null, isEdit = !!edit;
+    if (S.ticon === undefined) S.ticon = isEdit ? (edit.icon || 'teams') : 'teams';
+    if (S.tcolor === undefined) S.tcolor = isEdit ? (edit.color || '#2F5BD3') : '#2F5BD3';
+    const close = () => { S.tmodal = false; S.tedit = null; syncOverlays(true); };
+    const TEAM_ICONS = ['teams', 'compass', 'rocket', 'shield', 'coins', 'book', 'chat', 'wrench', 'chart', 'radar', 'spark', 'lens'];
+    const TEAM_COLORS = ['#2F5BD3', '#1B7F79', '#B5543C', '#7A4E9C', '#1F6F8B', '#B7791F', '#3D7A4F'];
     const boxes = S.bots.map((b) => { const cb = h('input', { type: 'checkbox', checked: S.tsel.has(b.id), 'aria-label': b.name });
       cb.addEventListener('change', () => { cb.checked ? S.tsel.add(b.id) : S.tsel.delete(b.id); });
       return h('label', { class: 'tsel' }, cb, tile(b, 22), b.name); });
-    const nm = h('input', { class: 'field', placeholder: 'Team name, e.g. Engineering', maxlength: 40, value: S.tname }); nm.addEventListener('input', () => { S.tname = nm.value; });
-    const ms = h('input', { class: 'field', placeholder: 'Mission (optional)', maxlength: 300, value: S.tmission }); ms.addEventListener('input', () => { S.tmission = ms.value; });
+    const nm = h('input', { class: 'field', placeholder: 'Team name, e.g. Engineering', maxlength: 40, value: S.tname || '', 'aria-label': 'Team name' }); nm.addEventListener('input', () => { S.tname = nm.value; });
+    const ms = h('input', { class: 'field', placeholder: 'Mission (optional)', maxlength: 300, value: S.tmission || '', 'aria-label': 'Mission' }); ms.addEventListener('input', () => { S.tmission = ms.value; });
+    const icons = h('div', { class: 'tm-picker', role: 'group', 'aria-label': 'Team icon' }, TEAM_ICONS.map((ic) =>
+      h('button', { type: 'button', class: 'tm-pick', 'aria-label': 'Icon ' + ic, 'aria-pressed': S.ticon === ic ? 'true' : 'false', onclick: () => { S.ticon = ic; syncOverlays(true); } },
+        h('span', { class: 'tile', style: 'width:22px;height:22px;background:' + S.tcolor + ';color:#fff' }, icon(ic, 13)))));
+    const colors = h('div', { class: 'tm-picker', role: 'group', 'aria-label': 'Team color' }, TEAM_COLORS.map((c) =>
+      h('button', { type: 'button', class: 'tm-colpick', 'aria-label': 'Color ' + c, 'aria-pressed': S.tcolor === c ? 'true' : 'false', onclick: () => { S.tcolor = c; syncOverlays(true); } },
+        h('span', { class: 'tm-dot', style: 'background:' + c }))));
+    const fail = (m) => { S.err = m; render(); };
+    const save = () => {
+      const name = (S.tname || '').trim(), members = Array.from(S.tsel), body = { name, mission: S.tmission || '', members, icon: S.ticon, color: S.tcolor };
+      if (name.length < 2) return fail('The team needs a name of at least 2 characters.');
+      if (name.length > 40) return fail('The team name must be 40 characters or fewer.');
+      run(async () => {
+        if (isEdit) await api('/api/teams/' + edit.id, { method: 'PUT', body });
+        else await api('/api/teams', { method: 'POST', body });
+        S.tmodal = false; S.tedit = null;
+        await Promise.all([loadTeams(), loadBots()]);
+        S.info = isEdit ? 'Team updated.' : 'Team created.';
+      });
+    };
+    const remove = () => {
+      if (!isEdit) return;
+      if (!window.confirm('Delete the team "' + edit.name + '"? Its members lose access to the team memory space. This cannot be undone.')) return;
+      run(async () => {
+        await api('/api/teams/' + edit.id, { method: 'DELETE' });
+        S.tmodal = false; S.tedit = null;
+        await Promise.all([loadTeams(), loadBots()]);
+        S.info = 'Team deleted.';
+      });
+    };
     return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
-      h('div', { class: 'modal', role: 'dialog', 'aria-label': 'Create team', style: 'max-width:520px' },
-        h('h2', {}, 'Create team'), h('p', { class: 'muted' }, 'Pick the agents that share this team memory. Team members can read the team space, other agents cannot.'),
-        nm, h('div', { style: 'height:8px' }), ms,
-        h('div', { class: 'tsel-list' }, boxes),
-        h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Create team', () => run(async () => {
-          if (S.tname.trim().length < 2) { S.err = 'The team needs a name.'; render(); return; }
-          await api('/api/teams', { method: 'POST', body: { name: S.tname.trim(), mission: S.tmission, members: [...S.tsel] } });
-          S.tmodal = false; S.tsel = new Set(); await Promise.all([loadBots(), loadTeams()]);
-          S.info = 'Team created.'; go('teams');
-        }), 'btn primary'), btn('Cancel', close))));
+      h('div', { class: 'modal tm-modal', role: 'dialog', 'aria-label': isEdit ? 'Edit team' : 'Create team' },
+        h('div', { class: 'row2', style: 'align-items:flex-start' }, h('h2', { style: 'margin:0;flex:1' }, isEdit ? 'Edit team' : 'Create team'), btn([icon('x', 16)], close, 'chip', { 'aria-label': 'Close team dialog' })),
+        h('p', { class: 'muted' }, isEdit ? 'Change the name, mission, logo or members. Members share this team memory space; other agents cannot read it.' : 'Pick the agents that share this team memory. Team members can read the team space, other agents cannot.'),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Name'), nm),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Mission'), ms),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Icon'), icons),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Color'), colors),
+        h('div', { class: 'tm-field' }, h('span', {}, 'Members (' + S.tsel.size + ')'), h('div', { class: 'tsel-list' }, boxes)),
+        isEdit ? h('div', { class: 'tm-danger' }, btn('Delete team', remove, 'link tm-del')) : null,
+        h('div', { class: 'row2', style: 'margin-top:14px' }, btn(isEdit ? 'Save changes' : 'Create team', save, 'btn primary'), btn('Cancel', close))));
   }
   function render() {
     stopSim(); hideHover();
