@@ -1925,8 +1925,9 @@ const overlayRoot = (() => {
     if (S.mcpNote === undefined) S.mcpNote = '';
     const apps = S.apps || [], bots = S.bots || [], tab = S.appTab || 'catalog';
     const connected = apps.filter((a) => a.connected), live = apps.filter((a) => a.live);
-    const busy = !!S.mcpBusy, q = S.appQ || '', cat = S.appCat || 'All';
-    // Rebuild the overlay while keeping the modal's scroll position (0 = jump to top for a new view).
+    const q = S.appQ || '', cat = S.appCat || 'All';
+    // Structural refresh only (tab/detail switches and actions that change the connector set).
+    // Everything else patches the existing DOM, so the tree does not flicker or lose scroll.
     const refresh = (top = null) => {
       const old = document.querySelector('.mcp-modal'), keep = old ? old.scrollTop : 0;
       syncOverlays(true);
@@ -1934,15 +1935,9 @@ const overlayRoot = (() => {
       if (next) next.scrollTop = top == null ? keep : top;
     };
     const closeApps = () => { S.modal = null; S.appOpen = null; S.appTab = 'catalog'; S.appQ = ''; S.appCat = 'All'; S.mcpNote = ''; S.mcpBusy = null; S.err = ''; render(); };
-    const setTab = (id) => { S.appTab = id; S.appOpen = null; S.mcpNote = ''; S.err = ''; refresh(0); };
-    const openDetail = (id) => { S.appOpen = id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' }; S.mcpNote = ''; S.err = ''; refresh(0); };
-    const back = () => { S.appOpen = null; S.mcpNote = ''; refresh(0); };
-    // Run an API mutation inside the overlay: busy label, error + success feedback, refresh, keep scroll.
-    const act = (key, fn) => {
-      S.mcpBusy = key; S.err = ''; S.mcpNote = '';
-      refresh();
-      run(fn).then(() => { S.mcpBusy = null; if (S.err) S.mcpNote = ''; refresh(); });
-    };
+    const setTab = (id) => { if (S.mcpBusy) return; S.appTab = id; S.appOpen = null; S.mcpNote = ''; S.err = ''; refresh(0); };
+    const openDetail = (id) => { if (S.mcpBusy) return; S.appOpen = id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' }; S.mcpNote = ''; S.err = ''; refresh(0); };
+    const back = () => { if (S.mcpBusy) return; S.appOpen = null; S.mcpNote = ''; refresh(0); };
     const riskWord = (r) => (r === 'read' ? 'read' : r === 'write' ? 'needs approval' : 'blocked');
     const fmtTool = (n) => `${n} tool${n === 1 ? '' : 's'}`;
     const toolSummary = (a) => {
@@ -1950,111 +1945,171 @@ const overlayRoot = (() => {
       return `${r} read · ${w} ${w === 1 ? 'needs' : 'need'} approval · ${s} blocked`;
     };
     const agentsOf = (a) => bots.filter((b) => (a.grants[b.id] || []).length);
-    const matches = (a) => (tab !== 'catalog' || cat === 'All' || a.category === cat) && `${a.name} ${a.category} ${a.description}`.toLowerCase().includes(q.trim().toLowerCase());
-    const filtered = apps.filter(matches);
+    const visible = (a) => (tab !== 'catalog' || (S.appCat || 'All') === 'All' || a.category === S.appCat) && `${a.name} ${a.category} ${a.description}`.toLowerCase().includes((S.appQ || '').trim().toLowerCase());
+    const filtered = apps.filter(visible);
     const cats = ['All', ...new Set(apps.map((a) => a.category))].sort((x, y) => (x === 'All' ? -1 : y === 'All' ? 1 : x.localeCompare(y)));
     const openApp = S.appOpen ? apps.find((a) => a.id === S.appOpen) : null;
     if (S.appOpen && !openApp) S.appOpen = null;
     const loading = !!S.appsLoading && !apps.length;
+    // Feedback is painted into one persistent notice node instead of rebuilding the overlay.
+    const paintNotice = () => {
+      const el = document.getElementById('mcp-notice');
+      if (!el) return;
+      el.replaceChildren(...(S.err ? [h('div', { class: 'mcp-alert mcp3-alert', role: 'alert' }, S.err)]
+        : S.mcpNote ? [h('div', { class: 'mcp-success mcp3-success' }, S.mcpNote)] : []));
+    };
+    // A button whose label can change while its request runs; the tree around it stays untouched.
+    const actionBtn = (label, cls, handler) => {
+      const t = h('span', {}, label);
+      let b;
+      b = btn([t], () => handler({ b, t }), cls || 'btn');
+      return { b, t };
+    };
+    // One request at a time. Disables only the clicked button, then either patches the notice
+    // (in-place actions) or forces one structural rebuild (opts.reload).
+    const runAction = (key, ref, busyText, fn, opts = {}) => {
+      if (S.mcpBusy) return;
+      S.mcpBusy = key; S.err = ''; S.mcpNote = '';
+      paintNotice();
+      const modal = document.querySelector('.mcp-modal');
+      if (modal) modal.setAttribute('aria-busy', 'true');
+      const idle = ref ? ref.t.textContent : '';
+      if (ref) { ref.b.disabled = true; if (busyText) ref.t.textContent = busyText; }
+      run(fn).then(() => {
+        S.mcpBusy = null;
+        const m = document.querySelector('.mcp-modal');
+        if (m) m.removeAttribute('aria-busy');
+        if (ref) { ref.b.disabled = false; ref.t.textContent = idle; }
+        if (S.err) S.mcpNote = '';
+        if (opts.reload) refresh(); else paintNotice();
+      });
+    };
+    // In-place search/category filtering: no overlay rebuild, so the caret never jumps.
+    const applyFilter = () => {
+      const body = document.getElementById('mcp-body');
+      if (!body) return;
+      const needle = (S.appQ || '').trim().toLowerCase(), mode = body.dataset.mode;
+      let shown = 0, connShown = 0;
+      body.querySelectorAll('.mcp-card').forEach((card) => {
+        const okCat = (S.appCat || 'All') === 'All' || card.dataset.cat === S.appCat;
+        const ok = okCat && (!needle || (card.dataset.search || '').includes(needle));
+        card.hidden = !ok;
+        if (ok) shown++;
+      });
+      body.querySelectorAll('.mcp-conn').forEach((row) => {
+        const ok = !needle || (row.dataset.search || '').includes(needle);
+        row.hidden = !ok;
+        if (ok) connShown++;
+      });
+      const count = document.querySelector('[data-mcp-count]');
+      if (count) count.textContent = mode === 'catalog' ? `${shown} of ${apps.length} apps` : `${connShown} of ${connected.length} connected`;
+      const empty = body.querySelector('[data-mcp-empty]');
+      if (empty) empty.hidden = mode === 'catalog' ? shown > 0 : connShown > 0;
+      const chips = document.querySelectorAll('[data-mcp-cat]');
+      chips.forEach((chip) => chip.setAttribute('aria-pressed', chip.dataset.mcpCat === (S.appCat || 'All') ? 'true' : 'false'));
+    };
+    const resetFilters = () => {
+      S.appQ = ''; S.appCat = 'All';
+      const input = document.querySelector('input[aria-label="Search connectors"]');
+      if (input) input.value = '';
+      applyFilter();
+    };
 
-    const head = h('div', { class: 'mcp-head' },
-      h('div', { class: 'mcp-headtext' }, h('h2', { class: 'mcp-title' }, 'Connect apps'), h('p', { class: 'muted' }, 'Browse the demo catalog, manage per-agent tool grants, or connect a live MCP server over Streamable HTTP.')),
+    const tag = (label, on) => h('span', { class: 'chip mcp3-tag' + (on ? ' on' : '') }, on ? h('i', { class: 'mcp3-tag-dot', 'aria-hidden': 'true' }) : null, label);
+    const head = h('div', { class: 'mcp-head mcp3-head' },
+      h('div', { class: 'mcp-headtext' }, h('h2', { class: 'mcp-title mcp3-title' }, 'Connect apps'), h('p', { class: 'muted mcp3-sub' }, 'Browse the demo catalog, manage per-agent tool grants, or connect a live MCP server over Streamable HTTP.')),
       h('div', { class: 'mcp-headright' },
-        h('span', { class: 'chip' + (connected.length ? ' ok' : '') }, connected.length + ' connected'),
-        h('span', { class: 'chip' + (live.length ? ' ok' : '') }, live.length + ' live MCP'),
+        h('span', { class: 'chip mcp3-count-chip' }, connected.length + ' connected'),
+        h('span', { class: 'chip mcp3-count-chip' }, live.length + ' live MCP'),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close apps dialog', onclick: closeApps }, icon('x'))));
     const TABS = [['catalog', 'Catalog'], ['mine', 'My connectors'], ['add', 'Add MCP server']];
-    const tabs = h('div', { class: 'tabs mcp-tabs', role: 'tablist' }, TABS.map(([id, label]) =>
+    const tabs = h('div', { class: 'tabs mcp-tabs mcp3-tabs', role: 'tablist' }, TABS.map(([id, label]) =>
       btn(label, () => setTab(id), 'mcp-tab', { role: 'tab', 'aria-selected': tab === id ? 'true' : 'false', 'aria-controls': 'mcp-body' })));
-    const banners = [
-      tab !== 'add' && !openApp ? h('div', { class: 'mcp-banner' }, icon('grid', 16), h('span', {}, 'The catalog apps are a demo and contact no external service. Live MCP servers you add are real and run on your own endpoint.')) : null,
-      S.err ? h('div', { class: 'mcp-alert', role: 'alert' }, S.err) : null,
-      !S.err && S.mcpNote ? h('div', { class: 'mcp-success' }, S.mcpNote) : null];
+    const banner = tab !== 'add' && !openApp ? h('div', { class: 'mcp-banner mcp3-banner' }, icon('grid', 15), h('span', {}, 'The catalog apps are a demo and contact no external service. Live MCP servers you add are real and run on your own endpoint.')) : null;
     const searchEl = h('input', { class: 'mcp-searchinput', placeholder: tab === 'catalog' ? 'Search apps and MCP servers' : 'Search connected apps and servers', value: q, 'aria-label': 'Search connectors' });
-    searchEl.addEventListener('input', () => {
-      S.appQ = searchEl.value;
-      const p = searchEl.selectionStart;
-      refresh();
-      const e = document.querySelector('input[aria-label="Search connectors"]');
-      if (e) { e.focus(); e.setSelectionRange(p, p); }
-    });
-    const toolbar = !openApp && tab !== 'add' ? [
-      h('div', { class: 'mcp-toolbar' }, h('div', { class: 'mcp-search' }, icon('search', 16), searchEl),
-        h('span', { class: 'muted mcp-count' }, tab === 'catalog' ? `${filtered.length} of ${apps.length} apps` : `${filtered.filter((a) => a.connected).length} of ${connected.length} connected`)),
-      tab === 'catalog' ? h('div', { class: 'mcp-cats' }, cats.map((c) => btn(c, () => { S.appCat = c; refresh(); }, 'chip' + (cat === c ? ' ok' : ''), { 'aria-pressed': cat === c ? 'true' : 'false' }))) : null] : [];
-    const skeleton = () => h('div', { class: 'mcp-grid' }, [0, 1, 2].map(() => h('div', { class: 'card mcp-card' },
-      h('span', { class: 'skel', style: 'height:42px;width:42px;border-radius:10px' }), h('span', { class: 'skel', style: 'height:14px;width:60%;margin-top:10px' }),
-      h('span', { class: 'skel', style: 'height:12px;width:92%;margin-top:8px' }), h('span', { class: 'skel', style: 'height:12px;width:74%;margin-top:6px' }))));
-    const resetFilters = () => { S.appQ = ''; S.appCat = 'All'; refresh(); };
+    searchEl.addEventListener('input', () => { S.appQ = searchEl.value; applyFilter(); });
+    const toolbar = !openApp && tab !== 'add' && !loading ? [
+      h('div', { class: 'mcp-toolbar mcp3-toolbar' }, h('div', { class: 'mcp-search mcp3-search' }, icon('search', 16), searchEl),
+        h('span', { class: 'muted mcp-count mcp3-result', 'data-mcp-count': '1' }, tab === 'catalog' ? `${filtered.length} of ${apps.length} apps` : `${apps.filter((a) => a.connected && visible(a)).length} of ${connected.length} connected`)),
+      tab === 'catalog' ? h('div', { class: 'mcp-cats mcp3-cats' }, cats.map((c) => btn(c, () => { S.appCat = c; applyFilter(); }, 'chip mcp3-cat', { 'aria-pressed': cat === c ? 'true' : 'false', 'data-mcp-cat': c }))) : null] : [];
+    const skelLine = (style) => h('span', { class: 'skel mcp3-skel-line', style });
+    const skeleton = () => h('div', { class: 'mcp-grid mcp3-grid mcp3-skel' }, [0, 1, 2].map(() => h('div', { class: 'card mcp-card mcp3-card mcp3-skel-card' },
+      skelLine('height:36px;width:36px;border-radius:8px'), skelLine('height:13px;width:55%;margin-top:12px'),
+      skelLine('height:11px;width:92%;margin-top:12px'), skelLine('height:11px;width:70%;margin-top:7px'))));
+    const skeletonRows = () => h('div', { class: 'mcp3-skel' }, [0, 1, 2].map(() => h('div', { class: 'card mcp-conn mcp3-card mcp3-skel-card mcp3-skel-row' },
+      skelLine('height:36px;width:36px;border-radius:8px'), h('div', { class: 'mcp3-skel-copy' }, skelLine('height:13px;width:45%'), skelLine('height:11px;width:75%;margin-top:8px')))));
 
-    const connectApp = (a) => act('connect:' + a.id, async () => {
+    const connectApp = (a, ref) => runAction('connect:' + a.id, ref, 'Connecting…', async () => {
       await api(`/api/apps/${a.id}/connect`, { method: 'POST' });
       await loadApps();
       S.appOpen = a.id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' };
       S.mcpNote = `${a.name} connected in demo mode. No external service is contacted.`;
-    });
-    const refreshServer = (a) => act('refresh:' + a.id, async () => {
+    }, { reload: true });
+    const refreshServer = (a, ref) => runAction('refresh:' + a.id, ref, 'Refreshing…', async () => {
       const r = await api(`/api/mcp/servers/${a.id}/refresh`, { method: 'POST' });
       await loadApps();
       S.mcpNote = `Tools refreshed for ${a.name}: ${fmtTool((r.tools || []).length)}.`;
-    });
-    const removeServer = (a) => {
+    }, { reload: true });
+    const removeServer = (a, ref) => {
       if (S.mcpBusy) return;
       if (!window.confirm(`Remove the MCP server "${a.name}"? Its tools and every agent grant for it are deleted. This cannot be undone.`)) return;
-      act('remove:' + a.id, async () => { await api(`/api/mcp/servers/${a.id}`, { method: 'DELETE' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `Live MCP server ${a.name} removed.`; });
+      runAction('remove:' + a.id, ref, 'Removing…', async () => { await api(`/api/mcp/servers/${a.id}`, { method: 'DELETE' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `Live MCP server ${a.name} removed.`; }, { reload: true });
     };
-    const disconnectApp = (a) => {
+    const disconnectApp = (a, ref) => {
       if (S.mcpBusy) return;
       if (!window.confirm(`Disconnect "${a.name}"? Every agent grant for this app is deleted. You can reconnect it from the catalog at any time.`)) return;
-      act('disconnect:' + a.id, async () => { await api(`/api/apps/${a.id}/disconnect`, { method: 'POST' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `${a.name} disconnected. Agent grants for it were removed.`; });
+      runAction('disconnect:' + a.id, ref, 'Disconnecting…', async () => { await api(`/api/apps/${a.id}/disconnect`, { method: 'POST' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `${a.name} disconnected. Agent grants for it were removed.`; }, { reload: true });
     };
 
     const catalogCard = (a) => {
       const agents = agentsOf(a);
-      return h('div', { class: 'card mcp-card' },
-        h('div', { class: 'mcp-card-top' }, appLogo(a, 42), h('div', { class: 'mcp-card-title' }, h('b', { title: a.name }, a.name), h('div', { class: 'muted' }, a.category))),
-        h('div', { class: 'row2' }, h('span', { class: 'chip' + (a.live ? ' ok' : '') }, a.live ? 'Live' : 'Demo'), a.connected ? h('span', { class: 'chip ok' }, 'Connected') : null,
-          a.tools.some((x) => x.risk === 'secret') ? h('span', { class: 'chip warn' }, 'secrets blocked') : null),
+      const connectRef = actionBtn('Connect', 'btn mcp3-cta', (ref) => connectApp(a, ref));
+      return h('div', { class: 'card mcp-card mcp3-card', hidden: !visible(a), 'data-search': `${a.name} ${a.category} ${a.description}`.toLowerCase(), 'data-cat': a.category },
+        h('div', { class: 'mcp-card-top' }, appLogo(a, 36), h('div', { class: 'mcp-card-title' }, h('b', { title: a.name }, a.name), h('div', { class: 'muted' }, a.category))),
+        h('div', { class: 'row2 mcp3-tags' }, tag(a.live ? 'Live' : 'Demo', a.live), a.connected ? tag('Connected', true) : null,
+          a.tools.some((x) => x.risk === 'secret') ? h('span', { class: 'chip mcp3-tag mcp3-warn' }, 'secrets blocked') : null),
         h('p', { class: 'mcp-desc', title: a.description }, a.description || 'No description provided.'),
         h('div', { class: 'mcp-toolcounts' }, toolSummary(a)),
         h('div', { class: 'mcp-card-foot' },
           h('span', { class: 'mcp-status' }, a.connected ? (agents.length ? `${agents.length} agent${agents.length === 1 ? '' : 's'} with grants` : 'Connected · no agent grants yet') : 'Not connected'),
-          a.connected ? btn('Manage grants', () => openDetail(a.id), 'btn primary') : btn('Connect', () => connectApp(a), 'btn primary', { disabled: busy })));
+          a.connected ? btn('Manage grants', () => openDetail(a.id), 'btn mcp3-cta') : connectRef.b));
     };
     const catalogBody = () => {
       if (loading) return skeleton();
-      if (!filtered.length) return h('div', { class: 'mcp-empty' }, icon('search', 34), h('h3', {}, apps.length ? 'No apps match your search' : 'No apps available'),
-        h('p', { class: 'muted' }, apps.length ? `Nothing in the catalog matches "${q}"${cat !== 'All' ? ' in ' + cat : ''}. Try a different search or reset the filters.` : 'The API returned no apps for this workspace. Reload the dialog to try again.'),
-        apps.length ? btn('Reset filters', resetFilters, 'btn primary') : null);
-      return h('div', { class: 'mcp-grid' }, filtered.map(catalogCard));
+      if (!apps.length) return h('div', { class: 'mcp-empty mcp3-empty' }, icon('grid', 30), h('h3', {}, 'No apps available'), h('p', { class: 'muted' }, 'The API returned no apps for this workspace. Reload the dialog to try again.'));
+      return h('div', {},
+        h('div', { class: 'mcp-grid mcp3-grid' }, apps.map(catalogCard)),
+        h('div', { class: 'mcp-empty mcp3-empty', 'data-mcp-empty': '1', hidden: filtered.length > 0 }, icon('search', 30), h('h3', {}, 'No apps match your search'),
+          h('p', { class: 'muted' }, 'Nothing in the catalog matches the current search or category.'), btn('Reset filters', resetFilters, 'btn mcp3-cta')));
     };
 
     const connRow = (a) => {
       const agents = agentsOf(a);
-      return h('div', { class: 'card mcp-conn' },
-        h('div', { class: 'mcp-conn-main' }, appLogo(a, 40),
+      const refreshRef = actionBtn(a.live ? 'Refresh tools' : 'Disconnect', 'btn mcp3-cta mcp3-sm', (ref) => (a.live ? refreshServer(a, ref) : disconnectApp(a, ref)));
+      const removeRef = a.live ? actionBtn('Remove server', 'link mcp-danger mcp3-danger', (ref) => removeServer(a, ref)) : null;
+      return h('div', { class: 'card mcp-conn mcp3-card', 'data-search': `${a.name} ${a.category} ${a.description}`.toLowerCase() },
+        h('div', { class: 'mcp-conn-main' }, appLogo(a, 36),
           h('div', { class: 'mcp-conn-info' },
-            h('div', { class: 'row2' }, h('b', {}, a.name), h('span', { class: 'chip' + (a.live ? ' ok' : '') }, a.live ? 'Live MCP server' : 'Demo app'), a.live ? null : h('span', { class: 'chip' }, a.category)),
+            h('div', { class: 'row2' }, h('b', {}, a.name), tag(a.live ? 'Live MCP server' : 'Demo app', a.live), a.live ? null : h('span', { class: 'chip mcp3-tag' }, a.category)),
             h('div', { class: 'muted mcp-conn-desc' }, a.description || 'No description provided.'),
-            h('div', { class: 'row2' }, h('span', { class: 'chip' }, fmtTool(a.tools.length)), h('span', { class: 'muted' }, toolSummary(a)))),
-          h('div', { class: 'mcp-conn-actions' }, btn('Manage grants', () => openDetail(a.id), 'btn primary'),
-            a.live ? btn(busy && S.mcpBusy === 'refresh:' + a.id ? 'Refreshing…' : 'Refresh tools', () => refreshServer(a), 'btn', { disabled: busy })
-                   : btn('Disconnect', () => disconnectApp(a), 'btn', { disabled: busy }),
-            a.live ? btn('Remove server', () => removeServer(a), 'link mcp-danger', { disabled: busy }) : null)),
+            h('div', { class: 'row2' }, h('span', { class: 'chip mcp3-tag' }, fmtTool(a.tools.length)), h('span', { class: 'muted' }, toolSummary(a)))),
+          h('div', { class: 'mcp-conn-actions' }, btn('Manage grants', () => openDetail(a.id), 'btn mcp3-cta'),
+            refreshRef.b, removeRef ? removeRef.b : null)),
         h('div', { class: 'mcp-conn-agents' }, h('span', {}, 'With grants:'),
           agents.length ? agents.map((b) => h('span', { class: 'row2 mcp-agentchip' }, tile(b, 20), b.name)) : h('span', { class: 'muted' }, 'no agent yet — open Manage grants to assign tools')));
     };
     const mineBody = () => {
-      if (loading) return skeleton();
-      if (!connected.length) return h('div', { class: 'mcp-empty' }, icon('grid', 34), h('h3', {}, 'No connectors yet'),
+      if (loading) return skeletonRows();
+      if (!connected.length) return h('div', { class: 'mcp-empty mcp3-empty' }, icon('grid', 30), h('h3', {}, 'No connectors yet'),
         h('p', { class: 'muted' }, 'Demo catalog apps connect instantly and contact no external service. Live MCP servers you add are real and run on your own endpoint.'),
-        h('div', { class: 'row2', style: 'justify-content:center' }, btn('Browse catalog', () => setTab('catalog'), 'btn primary'), btn('Add MCP server', () => setTab('add'), 'btn')));
-      const rows = filtered.filter((a) => a.connected);
-      if (!rows.length) return h('div', { class: 'mcp-empty' }, icon('search', 34), h('h3', {}, 'No connectors match your search'),
-        h('p', { class: 'muted' }, `Nothing connected matches "${q}".`), btn('Reset search', resetFilters, 'btn primary'));
+        h('div', { class: 'row2', style: 'justify-content:center' }, btn('Browse catalog', () => setTab('catalog'), 'btn mcp3-cta'), btn('Add MCP server', () => setTab('add'), 'btn mcp3-cta')));
+      const rows = connected.filter((a) => visible(a));
       const liveRows = rows.filter((a) => a.live), demoRows = rows.filter((a) => !a.live);
-      return h('div', {}, liveRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Live MCP servers'), liveRows.map(connRow)) : null,
-        demoRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Demo catalog apps'), demoRows.map(connRow)) : null);
+      return h('div', { class: 'mcp3-conns' },
+        liveRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Live MCP servers'), liveRows.map(connRow)) : null,
+        demoRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Demo catalog apps'), demoRows.map(connRow)) : null,
+        h('div', { class: 'mcp-empty mcp3-empty', 'data-mcp-empty': '1', hidden: rows.length > 0 }, icon('search', 30), h('h3', {}, 'No connectors match your search'),
+          h('p', { class: 'muted' }, 'Try a different search.'), btn('Reset search', resetFilters, 'btn mcp3-cta')));
     };
 
     const addBody = () => {
@@ -2065,31 +2120,30 @@ const overlayRoot = (() => {
       nm.addEventListener('input', () => { m.name = nm.value; });
       url.addEventListener('input', () => { m.url = url.value; });
       tk.addEventListener('input', () => { m.token = tk.value; });
-      const field = (label, inp) => h('label', { class: 'mcp-field' }, h('span', {}, label), inp);
-      const submit = () => {
+      const field = (label, inp) => h('label', { class: 'mcp-field mcp3-field' }, h('span', {}, label), inp);
+      const addRef = actionBtn('Add server', 'btn mcp3-primary', (ref) => {
         if (S.mcpBusy) return;
         const name = (m.name || '').trim(), u = (m.url || '').trim();
-        if (name.length < 2) { S.err = 'The server name needs at least 2 characters.'; S.mcpNote = ''; refresh(); return; }
-        if (!/^https?:\/\//i.test(u)) { S.err = 'The server URL must start with https:// (or http:// only when this deployment allows insecure test servers).'; S.mcpNote = ''; refresh(); return; }
-        act('add', async () => {
+        if (name.length < 2) { S.err = 'The server name needs at least 2 characters.'; S.mcpNote = ''; paintNotice(); return; }
+        if (!/^https?:\/\//i.test(u)) { S.err = 'The server URL must start with https:// (or http:// only when this deployment allows insecure test servers).'; S.mcpNote = ''; paintNotice(); return; }
+        runAction('add', ref, 'Connecting…', async () => {
           const r = await api('/api/mcp/servers', { method: 'POST', body: { name, url: u, token: (m.token || '').trim() || undefined } });
           S.mcp = { name: '', url: '', token: '' };
           await loadApps();
           S.appTab = 'catalog'; S.appOpen = r.id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' };
           S.mcpNote = `Live MCP server added with ${fmtTool((r.tools || []).length)}.`;
-        });
-      };
-      const facts = h('aside', { class: 'card mcp-add-card' }, h('b', {}, 'What this connects to'),
-        h('ul', { class: 'mcp-facts' },
+        }, { reload: true });
+      });
+      const facts = h('aside', { class: 'card mcp-add-card mcp3-card' }, h('b', {}, 'What this connects to'),
+        h('ul', { class: 'mcp-facts mcp3-facts' },
           h('li', {}, h('span', { class: 'dicon' }, icon('panel', 15)), h('span', {}, h('b', {}, 'Streamable HTTP'), 'MCP servers that answer JSON-RPC over HTTP. Their tools are discovered when you add the server; every tool counts as a write unless the server marks it read-only.')),
           h('li', {}, h('span', { class: 'dicon' }, icon('shield', 15)), h('span', {}, h('b', {}, 'Encrypted token'), 'A bearer token is encrypted at rest and never shown again. Token storage needs CFA_SECRET_KEY on the deployment.')),
           h('li', {}, h('span', { class: 'dicon' }, icon('x', 15)), h('span', {}, h('b', {}, 'Not supported'), 'OAuth and legacy SSE-only servers. Secret-looking tools are always blocked by policy.'))));
-      return h('div', { class: 'mcp-add-grid' },
-        h('div', { class: 'card mcp-add-card' }, h('h3', { style: 'margin:0' }, 'Add a live MCP server'),
+      return h('div', { class: 'mcp-add-grid mcp3-add-grid' },
+        h('div', { class: 'card mcp-add-card mcp3-card' }, h('h3', { style: 'margin:0' }, 'Add a live MCP server'),
           h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, 'The server must speak MCP over Streamable HTTP. Shewiun discovers its tools, encrypts the bearer token and never shows it again.'),
           field('Name', nm), field('Server URL', url), field('Bearer token (optional)', tk),
-          h('div', { class: 'row2' }, btn(S.mcpBusy === 'add' ? 'Connecting and discovering tools…' : 'Add server', submit, 'btn primary', { disabled: busy }),
-            h('span', { class: 'muted', style: 'font-size:12px' }, 'Discovery can take a few seconds.'))),
+          h('div', { class: 'row2' }, addRef.b, h('span', { class: 'muted', style: 'font-size:12px' }, 'Discovery can take a few seconds.'))),
         facts);
     };
 
@@ -2097,37 +2151,44 @@ const overlayRoot = (() => {
       const t = S.tcall, callTools = a.tools.filter((x) => x.risk !== 'secret'), grantable = callTools.length;
       if (!callTools.some((x) => x.name === t.tool)) t.tool = grantable ? callTools[0].name : '';
       if (!bots.some((b) => b.id === t.bot)) t.bot = bots.length ? bots[0].id : '';
-      const legend = h('div', { class: 'mcp-legend' },
-        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip ok' }, 'read'), h('span', { class: 'muted' }, 'runs immediately')),
-        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip warn' }, 'write'), h('span', { class: 'muted' }, 'waits for a human approval')),
-        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip risk-high' }, 'secret'), h('span', { class: 'muted' }, 'can never be granted (blocked by policy)')));
-      const matrix = a.tools.length ? h('div', { class: 'tbl-wrap mcp-matrix-wrap' }, h('table', { class: 'mcp-matrix' },
+      const legend = h('div', { class: 'mcp-legend mcp3-legend' },
+        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip mcp3-risk mcp3-risk-read' }, 'read'), h('span', { class: 'muted' }, 'runs immediately')),
+        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip mcp3-risk mcp3-risk-write' }, 'write'), h('span', { class: 'muted' }, 'waits for a human approval')),
+        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip mcp3-risk mcp3-risk-secret' }, 'secret'), h('span', { class: 'muted' }, 'can never be granted (blocked by policy)')));
+      const matrix = a.tools.length ? h('div', { class: 'tbl-wrap mcp-matrix-wrap mcp3-matrix-wrap' }, h('table', { class: 'mcp-matrix mcp3-matrix' },
         h('thead', {}, h('tr', {}, h('th', {}, 'Agent'), a.tools.map((x) => h('th', {}, x.name, h('div', { class: 'mcp-risklabel' }, riskWord(x.risk)))), h('th', {}, 'Grants'))),
         h('tbody', {}, bots.map((b) => {
           const init = a.grants[b.id] || [];
           const switches = a.tools.map((x) => h('input', { type: 'checkbox', role: 'switch', value: x.name, checked: init.includes(x.name), disabled: x.risk === 'secret',
             title: x.risk === 'secret' ? 'Secret-looking tools can never be granted (policy: secrets.read is denied).' : `${x.name}: ${riskWord(x.risk)}`,
             'aria-label': `${b.name} · ${x.name} (${riskWord(x.risk)})` }));
-          const countEl = h('span', { class: 'muted mcp-count' }, `${init.length} of ${grantable} granted`);
+          const countEl = h('span', { class: 'muted mcp-count mcp3-grantcount' }, `${init.length} of ${grantable} granted`);
           const syncCount = () => { countEl.textContent = `${switches.filter((i) => i.checked).length} of ${grantable} granted`; };
           switches.forEach((i) => i.addEventListener('change', syncCount));
           const key = 'grant:' + a.id + ':' + b.id;
-          const save = () => act(key, async () => {
+          const saveRef = actionBtn('Save', 'btn mcp3-cta mcp3-sm', (ref) => runAction(key, ref, 'Saving…', async () => {
             const r = await api(`/api/bots/${b.id}/apps/${a.id}`, { method: 'PUT', body: { tools: switches.filter((i) => i.checked).map((i) => i.value) } });
-            await loadApps();
+            a.grants[b.id] = r.tools || [];
             S.mcpNote = `Grants for ${b.name} saved (${fmtTool((r.tools || []).length)}) and written to the audit log.`;
-          });
+          }));
           const allRead = () => { switches.forEach((i, ix) => { if (a.tools[ix].risk === 'read') i.checked = true; }); syncCount(); };
           return h('tr', {}, h('td', {}, h('span', { class: 'row2' }, tile(b, 24), b.name)),
-            switches.map((i) => h('td', {}, h('label', { class: 'mcp-switch' }, i, h('span', { class: 'mcp-track' }, h('span', { class: 'mcp-knob' }))))),
-            h('td', {}, h('div', { class: 'mcp-agentacts' }, countEl, btn(S.mcpBusy === key ? 'Saving…' : 'Save', save, 'btn', { disabled: busy }), btn('All read', allRead, 'link'))));
+            switches.map((i) => h('td', {}, h('label', { class: 'mcp-switch mcp3-switch' }, i, h('span', { class: 'mcp-track mcp3-track' }, h('span', { class: 'mcp-knob mcp3-knob' }))))),
+            h('td', {}, h('div', { class: 'mcp-agentacts mcp3-agentacts' }, countEl, saveRef.b, btn('All read', allRead, 'link mcp3-link'))));
         })))) : h('p', { class: 'muted' }, 'This connector exposes no tools.');
       const agentSel = h('select', { class: 'field', 'aria-label': 'Agent for test call', onchange: (e) => { t.bot = e.target.value; } }, bots.map((b) => h('option', { value: b.id, selected: b.id === t.bot }, b.name)));
       const toolSel = h('select', { class: 'field', 'aria-label': 'Tool for test call', onchange: (e) => { t.tool = e.target.value; } }, callTools.map((x) => h('option', { value: x.name, selected: x.name === t.tool }, `${x.name} (${riskWord(x.risk)})`)));
       const args = h('textarea', { class: 'field', rows: 2, 'aria-label': 'Arguments as JSON' });
       args.value = t.args;
       args.addEventListener('input', () => { t.args = args.value; });
-      const runCall = () => act('call:' + a.id, async () => {
+      const outSlot = h('div', { class: 'mcp3-tryout-slot' });
+      const paintOut = () => {
+        outSlot.replaceChildren(...(t.out ? [h('div', { class: 'mcp-tryout mcp3-tryout' },
+          h('div', { class: 'row2' }, h('span', { class: 'chip mcp3-tag' + (t.outStatus === 'pending_approval' ? ' warn' : ' on') }, t.outStatus === 'pending_approval' ? 'waiting for approval' : 'completed'), t.outMeta ? h('span', { class: 'muted mcp3-outmeta' }, t.outMeta) : null),
+          h('div', { class: 'pre mcp3-pre' }, t.out))] : []));
+      };
+      paintOut();
+      const runRef = actionBtn('Run call', 'btn mcp3-primary', (ref) => runAction('call:' + a.id, ref, 'Running…', async () => {
         let ar = {};
         try { ar = JSON.parse(t.args || '{}'); } catch { throw new Error('Arguments must be valid JSON.'); }
         const r = await api(`/api/bots/${t.bot}/tools`, { method: 'POST', body: { app: a.id, tool: t.tool, args: ar } });
@@ -2135,33 +2196,32 @@ const overlayRoot = (() => {
         t.outStatus = r.status === 'pending_approval' ? 'pending_approval' : 'completed';
         t.outMeta = `${agentName} · ${a.id}.${t.tool}`;
         t.out = r.status === 'pending_approval' ? `Waiting for approval (${(r.approval || {}).id || 'approval'}). Approve it in Control, then execute. Nothing was executed.` : (r.result || 'The call completed without a result.');
-      });
-      const actions = a.live
-        ? [btn('Refresh tools', () => refreshServer(a), 'btn', { disabled: busy }), btn('Remove server', () => removeServer(a), 'link mcp-danger', { disabled: busy })]
-        : [btn('Disconnect', () => disconnectApp(a), 'link mcp-danger', { disabled: busy })];
-      return h('div', { class: 'mcp-detail' },
-        h('div', { class: 'mcp-backrow' }, btn('Back', back, 'link'), h('span', { class: 'sp' }), actions),
-        h('div', { class: 'mcp-apphead' }, appLogo(a, 44),
+        paintOut();
+      }));
+      const refreshRef = a.live ? actionBtn('Refresh tools', 'btn mcp3-cta mcp3-sm', (ref) => refreshServer(a, ref)) : null;
+      const removeRef = actionBtn(a.live ? 'Remove server' : 'Disconnect', 'link mcp-danger mcp3-danger', (ref) => (a.live ? removeServer(a, ref) : disconnectApp(a, ref)));
+      return h('div', { class: 'mcp-detail mcp3-detail' },
+        h('div', { class: 'mcp-backrow mcp3-backrow' }, btn('Back', back, 'link mcp3-link'), h('span', { class: 'sp' }), refreshRef ? refreshRef.b : null, removeRef.b),
+        h('div', { class: 'mcp-apphead mcp3-apphead' }, appLogo(a, 40),
           h('div', { class: 'mcp-apptitle' }, h('b', {}, a.name),
-            h('div', { class: 'row2' }, h('span', { class: 'chip' + (a.live ? ' ok' : '') }, a.live ? 'Live MCP server' : 'Demo app'), h('span', { class: 'chip ok' }, 'Connected'), a.live ? null : h('span', { class: 'chip' }, a.category)))),
-        h('p', { class: 'muted', style: 'margin:0' }, a.description || 'No description provided.'),
+            h('div', { class: 'row2' }, tag(a.live ? 'Live MCP server' : 'Demo app', a.live), tag('Connected', true), a.live ? null : h('span', { class: 'chip mcp3-tag' }, a.category)))),
+        h('p', { class: 'muted mcp3-desc', style: 'margin:0' }, a.description || 'No description provided.'),
         h('h3', {}, 'Agent tool grants'),
-        h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, 'Each agent needs an explicit grant per tool. Read tools run immediately; write tools create an approval request; secret-looking tools can never be granted.'),
+        h('p', { class: 'muted mcp3-help', style: 'margin:0;font-size:13px' }, 'Each agent needs an explicit grant per tool. Read tools run immediately; write tools create an approval request; secret-looking tools can never be granted.'),
         legend, matrix,
-        h('div', { class: 'card mcp-try' }, h('h3', {}, 'Try a call'),
-          h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, a.live ? 'Runs against the live MCP server. Read tools return immediately; write tools wait for a human approval in Control.' : 'Demo call: no external service is contacted. Read tools return sample data; write tools create a real approval request.'),
-          h('div', { class: 'mcp-trygrid' }, agentSel, toolSel), args,
-          h('div', { class: 'row2' }, btn(S.mcpBusy === 'call:' + a.id ? 'Running…' : 'Run call', runCall, 'btn primary', { disabled: busy || !grantable }),
-            h('span', { class: 'muted', style: 'font-size:12px' }, grantable ? 'The call is audited as this agent.' : 'This connector has no callable tools.')),
-          t.out ? h('div', { class: 'mcp-tryout' },
-            h('div', { class: 'row2' }, h('span', { class: 'chip ' + (t.outStatus === 'pending_approval' ? 'warn' : 'ok') }, t.outStatus === 'pending_approval' ? 'waiting for approval' : 'completed'), t.outMeta ? h('span', { class: 'muted' }, t.outMeta) : null),
-            h('div', { class: 'pre' }, t.out)) : null));
+        h('div', { class: 'card mcp-try mcp3-card mcp3-try' }, h('h3', {}, 'Try a call'),
+          h('p', { class: 'muted mcp3-help', style: 'margin:0;font-size:13px' }, a.live ? 'Runs against the live MCP server. Read tools return immediately; write tools wait for a human approval in Control.' : 'Demo call: no external service is contacted. Read tools return sample data; write tools create a real approval request.'),
+          h('div', { class: 'mcp-trygrid mcp3-trygrid' }, agentSel, toolSel), args,
+          h('div', { class: 'row2' }, runRef.b, h('span', { class: 'muted', style: 'font-size:12px' }, grantable ? 'The call is audited as this agent.' : 'This connector has no callable tools.')),
+          outSlot));
     };
 
     const body = openApp ? detailBody(openApp) : tab === 'mine' ? mineBody() : tab === 'add' ? addBody() : catalogBody();
+    const notice = S.err ? h('div', { class: 'mcp-alert mcp3-alert', role: 'alert' }, S.err) : S.mcpNote ? h('div', { class: 'mcp-success mcp3-success' }, S.mcpNote) : null;
     return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) closeApps(); } },
-      h('div', { class: 'modal mcp-modal', role: 'dialog', 'aria-label': 'Connect apps and MCP servers' },
-        head, tabs, banners, toolbar, h('div', { id: 'mcp-body' }, body)));
+      h('div', { class: 'modal mcp-modal mcp3-modal', role: 'dialog', 'aria-label': 'Connect apps and MCP servers' },
+        head, tabs, h('div', { id: 'mcp-notice', class: 'mcp3-notice' }, notice), banner, toolbar,
+        h('div', { id: 'mcp-body', 'data-mode': openApp ? 'detail' : tab }, body)));
   }
   function agentModal() {
     const d = S.ag, t = S.tmpl.find((x) => x.id === d.template) || { scopes: [] };
@@ -3572,9 +3632,10 @@ const overlayRoot = (() => {
             S.unreadA[b.id] ? h('span', { class: 'av3-unread', title: 'Unread', 'aria-label': 'Unread' }) : null))];
       })),
       meterBlock(),
-      h('button', { class: 'appsbtn av3-mcp', type: 'button', title: 'Connect apps and MCP servers', onclick: openApps }, icon('grid', 20),
-        h('span', { class: 'av3-mcp-txt' }, h('b', {}, 'Connect apps'), h('small', {}, `${S.sum.apps || 0} connected · MCP`)),
-        h('span', { class: 'av3-mcp-badge' }, h('i', { class: 'av3-dot' + (S.sum.apps ? ' on' : '') }), h('span', { class: 'chip' }, 'MCP'))),
+      h('button', { class: 'appsbtn mcp3-connect', type: 'button', title: 'Connect apps and MCP servers', onclick: openApps },
+        h('span', { class: 'mcp3-connect-ic' }, icon('grid', 18)),
+        h('span', { class: 'mcp3-connect-txt' }, h('b', {}, 'Connect apps'), h('small', {}, `${S.sum.apps || 0} connected · MCP`)),
+        h('span', { class: 'mcp3-connect-count', 'aria-hidden': 'true' }, String(S.sum.apps || 0))),
       h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => openSettings(), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct av3-acct', type: 'button', 'aria-expanded': S.menu, 'aria-label': 'Account menu', onclick: () => { S.menu = !S.menu; render(); } },

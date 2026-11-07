@@ -175,9 +175,11 @@ def test_sidebar_keeps_every_label_and_gains_sticky_groups_pins_and_footer_chips
     # Pin and unread are real indicators, no longer a "• " string prefix.
     assert "(S.pinned[b.id] ? '• ' : '')" not in js
     assert "av3Pin(12)" in js
-    # Connect-apps button: status dot driven by the real connected-app count + count text + MCP chip.
-    assert "'appsbtn av3-mcp'" in js
-    assert "class: 'av3-dot' + (S.sum.apps ? ' on' : '')" in js
+    # Connect-apps button: flat neutral surface card with a neutral count chip (wave-3 batch 15
+    # replaced the batch-7 gradient surface + green status dot; label and count text are kept).
+    assert "'appsbtn mcp3-connect'" in js
+    assert "mcp3-connect-count" in js
+    assert "av3-dot" not in js
     assert "connected · MCP" in js and "'Connect apps'" in js
     # Account footer: avatar, name, email/role, model state, version chip and a menu chevron.
     for marker in ("'acct av3-acct'", "'av3-acctav'", "av3-usertile", "'av3-accttxt'",
@@ -212,10 +214,15 @@ def test_sidebar_styles_are_appended_and_live_at_the_very_end(tmp_path, monkeypa
     assert block.strip().startswith(CSS_MARKER)
     assert css.rstrip().endswith("}")
     for selector in (".av3-agents", ".av3-group", ".av3-gcount", ".av3-agent", ".av3-agenttxt",
-                     ".av3-pin", ".av3-unread", ".appsbtn.av3-mcp", ".av3-dot", ".av3-mcp-badge",
+                     ".av3-pin", ".av3-unread",
                      ".acct.av3-acct", ".av3-acctchip", ".av3-dhead", ".av3-dgroup", ".av3-ditem",
                      ".av3-dfoot", ".av3-walk"):
         assert selector in block, selector
+    # Wave-3 batch 15 moved the Connect-apps surface into its own flat block; the old gradient
+    # selectors must be gone while the flat replacement is appended at the end.
+    assert "/* ===== Batch 15 — Connector polish ===== */" in block
+    assert ".appsbtn.mcp3-connect" in block
+    assert ".appsbtn.av3-mcp" not in css
     # Prominent sticky group headings + a clear 3 px active bar.
     assert "position: sticky" in block and "text-transform: uppercase" in block
     assert "letter-spacing" in block and "font-weight: 700" in block
