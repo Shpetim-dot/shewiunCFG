@@ -273,7 +273,7 @@ const overlayRoot = (() => {
       if (view === 'inventory') { S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }
       if (view === 'usage') { [S.usage, S.provs, S.prices, S.cu] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices'), api('/api/computer-use/status')]); }
       if (view === 'market') S.market = (await api('/api/marketplace')).curated;
-      if (view === 'control') { S.afilter = {}; S.policyDraft = {}; S.auditOpen = {}; [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=200').then((d) => { S.audit = d.events || []; S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered; return S.audit; }), api('/api/security/policies').then((d) => { S.policyMeta = d; return d.policies; }), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary')]); }
+      if (view === 'control') { S.afilter = {}; S.policyDraft = {}; S.auditOpen = {}; [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=200').then((d) => { S.audit = d.events || []; S.auditIntegrity = d.integrity || null; S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered; return S.audit; }), api('/api/security/policies').then((d) => { S.policyMeta = d; return d.policies; }), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary'), api('/api/inventory').then((d) => { S.ctlInv = d; return d; }), api('/api/inventory/summary').then((d) => { S.ctlInvSum = d; return d; })]); }
     });
   }
   async function pick(id) {
@@ -1510,6 +1510,7 @@ const overlayRoot = (() => {
   const ctlLoadAudit = async () => {
     const d = await api(ctlAuditPath());
     S.audit = d.events || [];
+    S.auditIntegrity = d.integrity || null;
     S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered;
     S.auditOpen = {};
   };
@@ -1559,6 +1560,207 @@ const overlayRoot = (() => {
   };
   const ctlToggleAudit = (id) => { S.auditOpen = S.auditOpen || {}; S.auditOpen[id] = !S.auditOpen[id]; render(); };
   const ctlChevron = (open) => { const v = icon('up', 14); v.style.transform = open ? 'rotate(180deg)' : ''; return v; };
+  const ctlDecide = (a, decision) => run(async () => {
+    await api(`/api/security/approvals/${a.id}/decision`, { method: 'POST', body: { decision, decided_by: 'ui' } });
+    await go('control');
+  });
+
+  // ---- batch 19: dashboard helpers (real data only) ----
+  const ctl2Age = (ts) => {
+    const ms = Date.now() - Date.parse(ts || '');
+    if (!Number.isFinite(ms) || ms < 0) return 'moment';
+    const h = Math.floor(ms / 36e5);
+    return h < 1 ? 'under 1 h' : h < 48 ? h + ' h' : Math.floor(h / 24) + ' days';
+  };
+  const ctl2Kpi = (label, value, sub, tone) => h('div', { class: 'ctl2-kpi' + (tone ? ' ' + tone : '') },
+    h('div', { class: 'ctl2-kpi-label' }, label),
+    h('div', { class: 'ctl2-kpi-value' }, value),
+    h('div', { class: 'ctl2-kpi-sub' }, sub));
+  const ctl2Card = (title, note, ...kids) => h('div', { class: 'ctl2-card' },
+    h('div', { class: 'ctl2-card-head' }, h('b', {}, title), note ? h('span', { class: 'muted ctl2-card-note' }, note) : null),
+    ...kids);
+  const ctl2RiskCounts = () => {
+    const k = { low: 0, medium: 0, high: 0, suspended: 0 };
+    (S.ctlInv || []).forEach((a) => { const lvl = (a.risk && a.risk.level) || 'low'; k[lvl] = (k[lvl] || 0) + 1; });
+    return k;
+  };
+  const ctl2RiskChart = () => {
+    if (S.ctlInv == null) return h('p', { class: 'muted ctl2-empty' }, 'Loading inventory risk…');
+    const k = ctl2RiskCounts(), order = [['low', '#1B7F79'], ['medium', '#B7791F'], ['high', '#B42318'], ['suspended', '#7C8BA5']];
+    const total = order.reduce((n, [lvl]) => n + (k[lvl] || 0), 0);
+    if (!total) return h('p', { class: 'muted ctl2-empty' }, 'No agents in this workspace yet. Risk levels appear once agents exist.');
+    const W = 320, H = 148, barX = 78, barW = 176, max = Math.max(1, ...order.map(([lvl]) => k[lvl] || 0));
+    const s = svg(W, H);
+    order.forEach(([lvl, color], i) => {
+      const y = 16 + i * 32, w = Math.round(((k[lvl] || 0) / max) * barW);
+      sadd(s, 'text', { x: 0, y: y + 10, 'font-size': 11, fill: 'var(--muted)' }, lvl);
+      sadd(s, 'rect', { x: barX, y: y, width: barW, height: 12, rx: 6, fill: 'var(--line)' });
+      if (w > 0) sadd(s, 'rect', { x: barX, y: y, width: Math.max(4, w), height: 12, rx: 6, fill: color });
+      sadd(s, 'text', { x: W - 2, y: y + 10, 'text-anchor': 'end', 'font-size': 12, fill: 'var(--ink)' }, String(k[lvl] || 0));
+    });
+    return s;
+  };
+  const ctl2AuditDays = () => {
+    const counts = {};
+    (S.audit || []).forEach((e) => { const day = String(e.created_at || '').slice(0, 10); if (day) counts[day] = (counts[day] || 0) + 1; });
+    const out = [];
+    for (let i = 13; i >= 0; i--) {
+      const day = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10);
+      out.push({ day, n: counts[day] || 0 });
+    }
+    return out;
+  };
+  const ctl2AuditChart = () => {
+    if (!(S.audit || []).length) return h('p', { class: 'muted ctl2-empty' }, 'No audit events in the loaded window yet.');
+    const days = ctl2AuditDays(), W = 320, H = 130, pad = 14, bw = (W - 2 * pad) / days.length;
+    const max = Math.max(1, ...days.map((d) => d.n));
+    const s = svg(W, H);
+    days.forEach((d, i) => {
+      const barW = Math.max(4, bw - 8), x = pad + i * bw + 4;
+      const hgt = d.n ? Math.max(3, Math.round(((H - 56) * d.n) / max)) : 2;
+      const y = H - 30 - hgt;
+      sadd(s, 'rect', { x, y, width: barW, height: hgt, rx: 3, fill: d.n ? 'var(--accent)' : 'var(--line)' });
+      if (i % 2 === 0) sadd(s, 'text', { x: x + barW / 2, y: H - 12, 'text-anchor': 'middle', 'font-size': 9, fill: 'var(--muted)' }, d.day.slice(5));
+      if (d.n) sadd(s, 'text', { x: x + barW / 2, y: y - 4, 'text-anchor': 'middle', 'font-size': 10, fill: 'var(--ink)' }, String(d.n));
+    });
+    return s;
+  };
+  const ctl2CoverageBars = () => {
+    const items = (S.cov && S.cov.items) || [];
+    if (!items.length) return h('p', { class: 'muted ctl2-empty' }, 'Coverage data is loading.');
+    return h('div', { class: 'ctl2-bars' }, items.map((c) => {
+      const covered = c.status === 'covered', partial = c.status === 'partial';
+      const pct = covered ? 100 : partial ? 50 : 0, tone = covered ? 'ok' : partial ? 'warn' : 'bad';
+      return h('div', { class: 'ctl2-barrow' },
+        h('div', { class: 'ctl2-bar-label' },
+          h('span', { class: 'ctl2-dot ' + tone, 'aria-hidden': 'true' }),
+          h('span', { class: 'ctl2-bar-name', title: c.name }, (String(c.id).startsWith('ASI') ? c.id + ' · ' : '') + c.name)),
+        h('div', { class: 'ctl2-track', role: 'progressbar', 'aria-valuenow': pct, 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-label': c.name + ' coverage' },
+          h('i', { class: 'ctl2-fill ' + tone, style: 'width:' + pct + '%' })),
+        h('span', { class: 'ctl2-bar-status chip ctl-status ' + tone }, c.status));
+    }));
+  };
+  const ctl2AttendanceCount = () => {
+    const inv = S.ctlInv || [];
+    return {
+      unverified: inv.filter((a) => a.trust === 'unverified').length,
+      gaps: inv.filter((a) => (a.accountability || []).length).length,
+      high: inv.filter((a) => a.risk && a.risk.level === 'high').length,
+    };
+  };
+  const ctl2Kpis = () => {
+    const pend = (S.approvals || []).filter((a) => a.status === 'pending');
+    const invSum = S.ctlInvSum, counts = ctl2AttendanceCount();
+    const covItems = (S.cov && S.cov.items) || [];
+    const covered = covItems.filter((c) => c.status === 'covered').length;
+    const partial = covItems.filter((c) => c.status === 'partial').length;
+    const policies = S.policies || [], custom = policies.filter((p) => p.overridden).length;
+    const oldest = pend.length ? ctl2Age(pend[pend.length - 1].created_at) : '';
+    return h('div', { class: 'ctl2-kpis' },
+      ctl2Kpi('Pending approvals', pend.length ? String(pend.length) : String((S.sum || {}).pending_approvals ?? 0),
+        pend.length ? 'oldest open ' + oldest : 'nothing waits for a decision', pend.length ? 'warn' : 'ok'),
+      ctl2Kpi('Suspended agents', String((S.sum || {}).suspended ?? 0),
+        'of ' + ((S.sum || {}).agents ?? '—') + ' agents · switch below', (S.sum || {}).suspended ? 'warn' : 'ok'),
+      ctl2Kpi('High-risk agents', invSum ? String(invSum.high_risk) : '—',
+        invSum ? 'risk score 4+ · ' + invSum.total + ' agents inventoried' : 'inventory is loading', counts.high ? 'bad' : 'ok'),
+      ctl2Kpi('Unverified agents', S.ctlInv == null ? '—' : String(counts.unverified),
+        S.ctlInv == null ? 'inventory is loading' : 'imported from outside, read-only rights', counts.unverified ? 'warn' : 'ok'),
+      ctl2Kpi('Accountability gaps', S.ctlInv == null ? '—' : String(counts.gaps),
+        invSum ? `${invSum.ownerless} no owner · ${invSum.no_sponsor} no sponsor · ${invSum.no_purpose} no purpose` : 'inventory is loading', counts.gaps ? 'warn' : 'ok'),
+      ctl2Kpi('Coverage', covItems.length ? covered + ' / ' + covItems.length : '—',
+        covItems.length ? partial + ' partial · ' + (covItems.length - covered - partial) + ' not covered' : 'coverage is loading',
+        covItems.length && covered === covItems.length ? 'ok' : 'warn'),
+      ctl2Kpi('Custom policies', policies.length ? custom + ' / ' + policies.length : '—',
+        'effects changed from the defaults', custom ? 'info' : 'ok'));
+  };
+  const ctl2MetaStrip = () => h('div', { class: 'ctl2-meta' },
+    [['Agents', (S.sum || {}).agents], ['Memory drafts', (S.sum || {}).drafts], ['Apps connected', (S.sum || {}).apps], ['Audit events', S.auditTotal]]
+      .map(([label, value]) => h('span', { class: 'ctl2-meta-item' }, h('span', { class: 'muted' }, label), h('b', {}, String(value ?? '—')))));
+
+  const ctl2Attention = () => {
+    const inv = S.ctlInv || [], pend = (S.approvals || []).filter((a) => a.status === 'pending');
+    const high = inv.filter((a) => a.risk && a.risk.level === 'high').sort((a, b) => (b.risk.score || 0) - (a.risk.score || 0));
+    const gaps = inv.filter((a) => (a.accountability || []).length);
+    const rows = [];
+    pend.slice(0, 3).forEach((a) => rows.push(h('div', { class: 'ctl2-att-row' },
+      h('span', { class: 'chip warn' }, 'approval'),
+      h('div', { class: 'ctl2-att-main' }, h('b', {}, a.action_type), h('div', { class: 'muted' }, (a.risk_level || '') + ' risk · ' + a.description)),
+      h('div', { class: 'ctl2-att-actions' }, btn('Approve', () => ctlDecide(a, 'approved'), 'link'), btn('Reject', () => ctlDecide(a, 'rejected'), 'link')))));
+    high.slice(0, 3).forEach((a) => rows.push(h('div', { class: 'ctl2-att-row' },
+      h('span', { class: 'chip risk-high' }, 'high risk'),
+      h('div', { class: 'ctl2-att-main' }, h('b', {}, a.name), h('div', { class: 'muted' }, (a.team || 'General') + ' · score ' + ((a.risk && a.risk.score) || 0) + '/10 · ' + a.trust)),
+      h('div', { class: 'ctl2-att-actions' }, btn('Review', () => go('inventory'), 'link')))));
+    gaps.filter((a) => !(a.risk && a.risk.level === 'high')).slice(0, 3).forEach((a) => rows.push(h('div', { class: 'ctl2-att-row' },
+      h('span', { class: 'chip warn' }, 'gaps'),
+      h('div', { class: 'ctl2-att-main' }, h('b', {}, a.name), h('div', { class: 'muted' }, 'missing: ' + (a.accountability || []).join(', ') + ' · ' + (a.team || 'General'))),
+      h('div', { class: 'ctl2-att-actions' }, btn('Assign', () => go('inventory'), 'link')))));
+    const total = pend.length + high.length + gaps.length;
+    return ctl2Card('Needs attention', total ? total + ' item' + (total === 1 ? '' : 's') : 'all clear',
+      rows.length ? h('div', { class: 'ctl2-att-list' }, rows) : h('p', { class: 'muted ctl2-empty' }, 'Nothing needs attention: no pending approvals, no high-risk agents and no accountability gaps.'),
+      total > rows.length ? h('p', { class: 'muted ctl2-more' }, (total - rows.length) + ' more item' + (total - rows.length === 1 ? '' : 's') + ' in the sections below.') : null);
+  };
+  const ctl2TopRisks = () => {
+    const list = (S.ctlInv || []).slice().sort((a, b) => (((b.risk || {}).score) || 0) - (((a.risk || {}).score) || 0)).slice(0, 6);
+    return ctl2Card('Top risks by score', 'Agents ranked by the inventory risk score',
+      list.length ? h('div', { class: 'ctl2-risks' }, list.map((a) => {
+        const score = (a.risk && a.risk.score) || 0, lvl = (a.risk && a.risk.level) || 'low';
+        return h('div', { class: 'ctl2-risk-row' }, tile(a, 26),
+          h('div', { class: 'ctl2-risk-main' }, h('b', {}, a.name), h('div', { class: 'muted ctl2-risk-sub' }, (a.team || 'General') + ' · ' + a.trust + ' · ' + a.status)),
+          h('div', { class: 'ctl2-risk-score' },
+            h('div', { class: 'ctl2-score', role: 'meter', 'aria-valuenow': score, 'aria-valuemin': 0, 'aria-valuemax': 10, 'aria-label': a.name + ' risk score' }, h('i', { style: 'width:' + Math.min(100, score * 10) + '%' })),
+            h('span', { class: 'mono' }, score + '/10')),
+          h('span', { class: 'chip risk-' + lvl }, lvl));
+      })) : h('p', { class: 'muted ctl2-empty' }, 'No agent inventory yet.'),
+      h('div', { class: 'ctl2-card-foot' }, btn('Open inventory', () => go('inventory'), 'link')));
+  };
+  const ctl2Incident = () => h('div', { class: 'ctl2-incident' },
+    h('div', { class: 'ctl2-incident-main' },
+      h('div', { class: 'ctl2-card-head' }, h('b', {}, 'Incident switch'), h('span', { class: 'chip ' + (S.sum.suspended ? 'warn' : 'ok') }, S.sum.suspended ? S.sum.suspended + ' suspended' : 'all agents active')),
+      h('p', { class: 'muted' }, 'Suspends every agent at once: chat, calls and tool use stop. Resume restores them. Both actions are written to the audit log.')),
+    h('div', { class: 'ctl2-incident-actions' },
+      btn(S.panicArm ? 'Click again to suspend all agents' : 'Suspend all agents', () => {
+        if (!S.panicArm) { S.panicArm = true; return render(); }
+        S.panicArm = false;
+        run(async () => { const r = await api('/api/security/panic', { method: 'POST', body: { action: 'suspend_all', reason: 'incident switch' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = `${r.agents} agent(s) suspended.`; });
+      }, S.panicArm ? 'btn primary' : 'btn'),
+      btn('Resume all', () => run(async () => { await api('/api/security/panic', { method: 'POST', body: { action: 'resume_all' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = 'All agents resumed.'; }))));
+
+  // ---- audit trail: one detail renderer for the feed and the full table ----
+  const ctlAuditDetail = (e) => h('div', { class: 'ctl-audit-detail-body' },
+    h('div', { class: 'mono ctl-audit-meta' },
+      h('div', {}, 'id: ' + e.id),
+      h('div', {}, 'seq: ' + e.seq),
+      h('div', {}, 'created_at: ' + e.created_at),
+      h('div', {}, 'org_id: ' + e.org_id),
+      h('div', {}, 'previous_hash: ' + e.previous_hash),
+      h('div', {}, 'event_hash: ' + e.event_hash)),
+    h('div', { class: 'muted ctl-audit-payload-label' }, 'Payload'),
+    h('pre', { class: 'ctl-audit-json' }, JSON.stringify(e.payload, null, 2)));
+  const ctl2FeedRow = (e) => {
+    const open = !!(S.auditOpen || {})[e.id];
+    const toggle = () => ctlToggleAudit(e.id);
+    return h('div', { class: 'ctl2-feed-item' },
+      h('div', { class: 'ctl2-feed-row', tabindex: 0, role: 'button', 'aria-expanded': open ? 'true' : 'false',
+        'aria-label': `Event ${e.event_type} by ${e.actor || 'system'} — show details`, onclick: toggle,
+        onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } } },
+        h('span', { class: 'mono ctl2-feed-time' }, when(e.created_at)),
+        h('span', { class: 'ctl2-feed-type' }, e.event_type),
+        h('span', { class: 'muted ctl2-feed-actor' }, e.actor || 'system'),
+        h('span', { class: 'mono muted ctl2-feed-hash' }, String(e.event_hash || '').slice(0, 10)),
+        h('span', { class: 'ctl-audit-chev' }, ctlChevron(open))),
+      open ? h('div', { class: 'ctl2-feed-detail' }, ctlAuditDetail(e)) : null);
+  };
+  const ctl2AuditTrail = () => {
+    const events = (S.audit || []).slice(0, 15), integ = S.auditIntegrity;
+    const chain = integ
+      ? (integ.valid ? h('span', { class: 'chip ok' }, 'chain valid · ' + integ.checked + ' events') : h('span', { class: 'chip warn' }, 'chain broken'))
+      : h('span', { class: 'chip' }, 'integrity not checked yet');
+    return h('section', { class: 'ctl2-sec', 'aria-label': 'Audit trail' },
+      h('div', { class: 'ctl2-sec-head' }, h('h2', { class: 'ctl2-h2' }, 'Audit trail'), chain, h('span', { class: 'sp' }),
+        btn('Open all events', () => { const el = document.getElementById('ctl2-all-audit'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 'link')),
+      h('p', { class: 'muted ctl2-note' }, 'Newest first. Click a row for the payload and the hash chain fields. The full, filterable log with the SIEM export is in the next section.'),
+      events.length ? h('div', { class: 'ctl2-feed' }, events.map(ctl2FeedRow)) : h('p', { class: 'muted ctl2-empty' }, 'No audit events yet. The first action in this workspace starts the chain.'));
+  };
 
   function ctlCoverage() {
     const cov = S.cov || {}, items = cov.items || [];
@@ -1639,16 +1841,7 @@ const overlayRoot = (() => {
         h('td', {}, e.actor || 'system'),
         h('td', { class: 'mono' }, String(e.event_hash || '').slice(0, 12)),
         h('td', {}, h('span', { class: 'ctl-audit-chev' }, ctlChevron(open)))),
-        open ? h('tr', { class: 'ctl-audit-detail' }, h('td', { colspan: 5 },
-          h('div', { class: 'mono ctl-audit-meta' },
-            h('div', {}, 'id: ' + e.id),
-            h('div', {}, 'seq: ' + e.seq),
-            h('div', {}, 'created_at: ' + e.created_at),
-            h('div', {}, 'org_id: ' + e.org_id),
-            h('div', {}, 'previous_hash: ' + e.previous_hash),
-            h('div', {}, 'event_hash: ' + e.event_hash)),
-          h('div', { class: 'muted ctl-audit-payload-label' }, 'Payload'),
-          h('pre', { class: 'ctl-audit-json' }, JSON.stringify(e.payload, null, 2)))) : null];
+        open ? h('tr', { class: 'ctl-audit-detail' }, h('td', { colspan: 5 }, ctlAuditDetail(e))) : null];
     };
     return [h('h2', {}, 'Audit log'),
       h('p', { class: 'muted' }, 'Hash-linked chain per organisation. Filters run on the server; the export sends the same filters as NDJSON for SIEM tools. Click a row to see the full payload.'),
@@ -1673,24 +1866,47 @@ const overlayRoot = (() => {
 
   function controlView() {
     const pend = (S.approvals || []).filter((a) => a.status === 'pending');
-    const sumCards = h('div', { class: 'cards', style: 'margin-bottom:16px' }, [['Agents', S.sum.agents], ['Suspended', S.sum.suspended], ['Pending approvals', S.sum.pending_approvals], ['Memory drafts', S.sum.drafts], ['Apps connected', S.sum.apps]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l), h('b', { style: 'font-size:22px' }, String(v ?? 0)))));
-    const incident = h('div', { class: 'card', style: 'margin-bottom:16px' }, h('b', {}, 'Incident switch'), h('p', { class: 'muted' }, 'Suspends every agent at once: chat, calls and tool use stop. Resume restores them. Both are written to the audit log.'),
-      h('div', { class: 'row2' }, btn(S.panicArm ? 'Click again to suspend all agents' : 'Suspend all agents', () => { if (!S.panicArm) { S.panicArm = true; return render(); } S.panicArm = false; run(async () => { const r = await api('/api/security/panic', { method: 'POST', body: { action: 'suspend_all', reason: 'incident switch' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = `${r.agents} agent(s) suspended.`; }); }, S.panicArm ? 'btn primary' : 'btn'),
-        btn('Resume all', () => run(async () => { await api('/api/security/panic', { method: 'POST', body: { action: 'resume_all' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = 'All agents resumed.'; }))));
-    return h('div', { class: 'body' }, h('div', { class: 'col' }, sumCards, ctlCoverage(), incident,
+    const header = h('div', { class: 'ctl2-head' },
+      h('div', { class: 'ctl2-headtext' },
+        h('div', { class: 'ctl2-eyebrow' }, 'Governance'),
+        h('h2', { class: 'ctl2-title' }, 'Control'),
+        h('p', { class: 'muted ctl2-sub' }, 'Live posture for this organisation: approvals, agent risk, coverage and the hash-linked audit trail. Every value comes from the server.')),
+      h('div', { class: 'ctl2-headactions' }, btn('Refresh', () => { go('control'); }, 'btn'), btn('Open inventory', () => go('inventory'), 'btn')));
+    const auditDays = ctl2AuditDays(), auditDaysUsed = auditDays.filter((d) => d.n).length;
+    const auditCaption = 'Events per day from the loaded audit window (' + (S.audit || []).length + ' of up to 200 newest events).'
+      + (auditDaysUsed === 1 && (S.audit || []).length ? ' The loaded window covers a single day so far; the chart fills in as the workspace is used.' : '');
+    const charts = h('div', { class: 'ctl2-charts' },
+      ctl2Card('Risk distribution', 'Inventory levels', h('div', { class: 'ctl2-chart' }, ctl2RiskChart()),
+        h('p', { class: 'muted ctl2-caption' }, 'Computed from capabilities, tool grants, trust and criticality — not a model guess.')),
+      ctl2Card('Agentic coverage', 'Self-assessment', h('div', { class: 'ctl2-chart ctl2-chart-tight' }, ctl2CoverageBars()),
+        h('p', { class: 'muted ctl2-caption' }, 'Covered means every mapped control is present; partial means gaps remain. Full details below.')),
+      ctl2Card('Audit volume', 'Last 14 days', h('div', { class: 'ctl2-chart' }, ctl2AuditChart()),
+        h('p', { class: 'muted ctl2-caption' }, auditCaption)));
+    const mid = h('div', { class: 'ctl2-mid' }, ctl2Attention(), ctl2TopRisks());
+    const approvalsSec = h('section', { class: 'ctl2-sec', 'aria-label': 'Approval queue' },
       h('h2', {}, 'Approval queue'), h('p', { class: 'muted' }, 'Approving records a human decision. A tool call only runs when you execute it afterwards.'),
-      pend.length ? pend.map((a) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, a.action_type), ` (${a.risk_level}): ${a.description}`, h('div', { class: 'row2', style: 'margin-top:8px' }, ['approved', 'rejected'].map((d) => btn(d === 'approved' ? 'Approve' : 'Reject', () => run(async () => { await api(`/api/security/approvals/${a.id}/decision`, { method: 'POST', body: { decision: d, decided_by: 'ui' } }); await go('control'); })))))) : h('p', { class: 'muted' }, 'Nothing pending.'),
-      h('h2', {}, 'Tool calls'), S.toolCalls.length ? S.toolCalls.map((t) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, `${t.app}.${t.tool}`), ` as ${botBy(t.bot_id).name}`, h('span', { class: 'chip ' + (['invalidated', 'expired'].includes(t.status) ? 'warn' : ''), style: 'margin-left:8px' }, `${t.status} / approval ${t.approval_status}`), h('div', { class: 'pre' }, JSON.stringify(t.args)), t.payload_hash ? h('div', { class: 'muted mono', style: 'font-size:11px' }, `Approval covers exactly this payload (${t.payload_hash})` + (t.expires_at ? `, valid until ${when(t.expires_at)}` : '')) : null,
-        t.status === 'pending' && t.approval_status === 'approved' ? h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Execute now', () => run(async () => { await api(`/api/tool-calls/${t.approval_id}/execute`, { method: 'POST' }); await go('control'); }), 'btn primary')) : null, t.result ? h('div', { class: 'pre' }, t.result) : null)) : h('p', { class: 'muted' }, 'No tool calls waiting.'),
+      pend.length ? h('div', { class: 'ctl2-list' }, pend.map((a) => h('div', { class: 'card ctl2-item' }, h('b', {}, a.action_type), ` (${a.risk_level}): ${a.description}`, h('div', { class: 'row2', style: 'margin-top:8px' }, ['approved', 'rejected'].map((d) => btn(d === 'approved' ? 'Approve' : 'Reject', () => ctlDecide(a, d))))))) : h('p', { class: 'muted ctl2-empty' }, 'Nothing pending.'));
+    const toolSec = h('section', { class: 'ctl2-sec', 'aria-label': 'Tool calls' },
+      h('h2', {}, 'Tool calls'), S.toolCalls.length ? h('div', { class: 'ctl2-list' }, S.toolCalls.map((t) => h('div', { class: 'card ctl2-item' }, h('b', {}, `${t.app}.${t.tool}`), ` as ${botBy(t.bot_id).name}`, h('span', { class: 'chip ' + (['invalidated', 'expired'].includes(t.status) ? 'warn' : ''), style: 'margin-left:8px' }, `${t.status} / approval ${t.approval_status}`), h('div', { class: 'pre' }, JSON.stringify(t.args)), t.payload_hash ? h('div', { class: 'muted mono', style: 'font-size:11px' }, `Approval covers exactly this payload (${t.payload_hash})` + (t.expires_at ? `, valid until ${when(t.expires_at)}` : '')) : null,
+        t.status === 'pending' && t.approval_status === 'approved' ? h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Execute now', () => run(async () => { await api(`/api/tool-calls/${t.approval_id}/execute`, { method: 'POST' }); await go('control'); }), 'btn primary')) : null, t.result ? h('div', { class: 'pre' }, t.result) : null))) : h('p', { class: 'muted ctl2-empty' }, 'No tool calls waiting.'));
+    const selftestSec = h('section', { class: 'ctl2-sec', 'aria-label': 'Self-test section' },
       h('h2', {}, 'Authorization self-test'), h('p', { class: 'muted' }, "Synthetic probes against this app: capabilities, tool grants, suspended agents, memory spaces, unverified and instruction-like notes. It tests this app's enforcement, not model behavior."),
       h('div', { class: 'row2' }, btn(S.covBusy ? 'Running self-test…' : [icon('flask', 16), 'Run self-test'], ctlRunSelfTest, 'btn', { disabled: !!S.covBusy }), btn('Run finance demo', () => run(async () => { S.demo = await api('/api/demo/finance', { method: 'POST' }); S.test = await api('/api/selftest/latest'); S.cov = await api('/api/coverage'); await go('control'); }))),
       S.demo ? h('div', {}, S.demo.steps.map((x) => h('p', {}, (x.ok ? 'OK: ' : 'FAIL: ') + x.step))) : null,
       S.test && S.test.id ? [h('p', {}, h('b', {}, `${S.test.passed} passed, ${S.test.failed} failed `), btn('Download report', () => run(async () => { await dl(`/api/selftest/${S.test.id}/report.md`, 'selftest-report.md'); }), 'link'), ' ', S.test.share_url ? [h('a', { class: 'link', href: S.test.share_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open public link'), ' ', btn('Copy', () => { navigator.clipboard && navigator.clipboard.writeText(location.origin + S.test.share_url); S.info = 'Link copied. Anyone with it can read this report.'; render(); }, 'link'), ' ', btn('Revoke', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'DELETE' }); S.test = await api('/api/selftest/latest'); }), 'link')] : btn('Create public link', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'POST' }); S.test = await api('/api/selftest/latest'); }), 'link')),
-        h('table', {}, h('tbody', {}, S.test.probes.filter((x) => !x.ok).concat(S.test.probes.filter((x) => x.ok).slice(0, 6)).map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.expected), h('td', {}, x.actual), h('td', {}, x.ok ? 'pass' : 'FAIL')))))] : null,
-      ctlPolicies(),
-      S.funnel ? [h('h2', {}, 'Pipeline'), h('div', { class: 'cards' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l + ' (30 days)'), h('b', { style: 'font-size:22px' }, String(v || 0))))),
-        S.leads.length ? h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60)))))) : h('p', { class: 'muted' }, 'No leads yet. The public page /welcome has the pilot form.')] : null,
-      ctlAudit()));
+        h('div', { class: 'tbl-wrap' }, h('table', { class: 'ctl-selftest-table' }, h('tbody', {}, S.test.probes.filter((x) => !x.ok).concat(S.test.probes.filter((x) => x.ok).slice(0, 6)).map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.expected), h('td', {}, x.actual), h('td', {}, x.ok ? 'pass' : 'FAIL'))))))] : null);
+    const pipelineSec = S.funnel ? h('section', { class: 'ctl2-sec', 'aria-label': 'Pipeline' },
+      h('h2', {}, 'Pipeline'), h('div', { class: 'ctl2-pipeline' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'ctl2-mini' }, h('span', { class: 'muted' }, l + ' · 30 days'), h('b', {}, String(v || 0))))),
+      S.leads.length ? h('div', { class: 'tbl-wrap' }, h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60))))))) : h('p', { class: 'muted ctl2-empty' }, 'No leads yet. The public page /welcome has the pilot form.')) : null;
+    return h('div', { class: 'body' }, h('div', { class: 'wide ctl2' },
+      header, ctl2Kpis(), ctl2MetaStrip(), charts, ctl2Incident(), mid,
+      h('div', { class: 'ctl2-two' }, approvalsSec, toolSec),
+      ctl2AuditTrail(),
+      h('section', { id: 'ctl2-all-audit', class: 'ctl2-sec', 'aria-label': 'All audit events' }, ctlAudit()),
+      ctlCoverage(),
+      h('section', { class: 'ctl2-sec', 'aria-label': 'Policies' }, ctlPolicies()),
+      selftestSec,
+      pipelineSec));
   }
 
   // ---------- modals ----------
