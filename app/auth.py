@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
   email_verified_at TEXT, failed_logins INTEGER NOT NULL DEFAULT 0,
   locked_until TEXT, last_login_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  mfa_secret TEXT, mfa_enabled INTEGER NOT NULL DEFAULT 0, mfa_recovery TEXT,
   FOREIGN KEY(org_id) REFERENCES orgs(id)
 );
 CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
@@ -126,9 +127,64 @@ def db():
     key = str(pf._m().DB_PATH)
     if key not in _ensured:
         con.executescript(SCHEMA)
+        for col, ddl in (("mfa_secret", "TEXT"), ("mfa_enabled", "INTEGER NOT NULL DEFAULT 0"), ("mfa_recovery", "TEXT")):
+            if col not in {r[1] for r in con.execute("PRAGMA table_info(users)")}:
+                con.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
         con.commit()
         _ensured.add(key)
     return con
+
+
+def _totp(secret: str | None, at: float | None = None, step: int = 30, digits: int = 6) -> str:
+    """RFC 6238 TOTP with SHA1, implemented with the standard library only."""
+    import base64
+    import hashlib
+    import hmac
+    import struct
+    import time
+    if not secret:
+        return ""
+    pad = "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode((secret + pad).upper())
+    counter = int((time.time() if at is None else at) // step)
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    return str((struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % (10 ** digits)).zfill(digits)
+
+
+def _verify_totp(secret: str | None, code: str, window: int = 1) -> bool:
+    import time
+    code = (code or "").strip().replace(" ", "")
+    if not secret or not code.isdigit():
+        return False
+    now = time.time()
+    return any(_totp(secret, now + i * 30) == code for i in range(-window, window + 1))
+
+
+def _new_secret() -> str:
+    import base64
+    import os as _os
+    return base64.b32encode(_os.urandom(20)).decode().rstrip("=")
+
+
+def _second_factor(con, row, code: str):
+    """True/False for a valid or invalid second factor; None when no code was supplied."""
+    import json as _json
+    if not code:
+        return None
+    if _verify_totp(row["mfa_secret"], code):
+        return True
+    try:
+        hashes = _json.loads(row["mfa_recovery"] or "[]")
+    except Exception:
+        hashes = []
+    digest = _hash(code.strip())
+    if digest in hashes:
+        hashes.remove(digest)  # recovery codes are single use
+        con.execute("UPDATE users SET mfa_recovery=?, updated_at=? WHERE id=?", (_json.dumps(hashes), _now(), row["id"]))
+        con.commit()
+        return True
+    return False
 
 
 def user_count() -> int:
@@ -324,6 +380,7 @@ def _create_session(con, user_id: str, request: Request) -> tuple[str, str]:
 def _public_user(row) -> dict[str, Any]:
     return {"id": row["id"], "email": row["email"], "name": row["name"], "role": row["role"],
             "org_id": row["org_id"], "status": row["status"], "email_verified": bool(row["email_verified_at"]),
+        "mfa_enabled": bool(row["mfa_enabled"]) if "mfa_enabled" in row.keys() else False,
             "created_at": row["created_at"]}
 
 
@@ -354,6 +411,7 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: str = Field(max_length=254)
     password: str = Field(max_length=512)
+    mfa_code: str = Field(default="", max_length=64)
 
 
 class ForgotIn(BaseModel):
@@ -465,6 +523,14 @@ def login(item: LoginIn, request: Request, response: Response) -> dict[str, Any]
             raise HTTPException(429, "too many failed attempts, this account is temporarily locked")
         if os.getenv("CFA_REQUIRE_EMAIL_VERIFICATION") == "1" and not row["email_verified_at"]:
             raise HTTPException(403, "please verify your email address first")
+        if "mfa_enabled" in row.keys() and row["mfa_enabled"]:
+            factor = _second_factor(con, row, (item.mfa_code or "").strip())
+            if factor is None:
+                raise HTTPException(401, {"mfa_required": True,
+                                          "detail": "Enter the 6-digit code from your authenticator app."})
+            if not factor:
+                _audit_in_org(row["org_id"], "auth.mfa_failed", email, {"ip": ip})
+                raise HTTPException(401, "the authenticator code is not valid")
         con.execute("UPDATE users SET failed_logins=0, locked_until=NULL, last_login_at=?, updated_at=? WHERE id=?",
                     (_now(), _now(), row["id"]))
         token, csrf = _create_session(con, row["id"], request)
@@ -486,6 +552,85 @@ def logout(request: Request, response: Response) -> dict[str, bool]:
     response.delete_cookie(SESSION_COOKIE, path="/")
     response.delete_cookie(CSRF_COOKIE, path="/")
     return {"ok": True}
+
+
+class MfaCodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=64)
+
+
+class MfaDisableIn(BaseModel):
+    password: str = Field(min_length=1, max_length=512)
+    code: str = Field(default="", max_length=64)
+
+
+@router.post("/api/auth/mfa/setup")
+def mfa_setup(request: Request) -> dict[str, Any]:
+    """Create a pending TOTP secret for the signed-in user (enable requires one valid code)."""
+    p = pf._principal(request)
+    uid = p.get("user_id")
+    if not uid:
+        raise HTTPException(401, "authentication required")
+    from urllib.parse import quote
+    with db() as con:
+        row = con.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "user not found")
+        if row["mfa_enabled"]:
+            raise HTTPException(409, "two-factor authentication is already enabled")
+        secret = _new_secret()
+        con.execute("UPDATE users SET mfa_secret=?, updated_at=? WHERE id=?", (secret, _now(), uid))
+        con.commit()
+        email = row["email"]
+    return {"secret": secret, "digits": 6, "period": 30, "algorithm": "SHA1",
+            "otpauth": f"otpauth://totp/Shewiun:{quote(email)}?secret={secret}&issuer=Shewiun&algorithm=SHA1&digits=6&period=30"}
+
+
+@router.post("/api/auth/mfa/enable")
+def mfa_enable(item: MfaCodeIn, request: Request) -> dict[str, Any]:
+    p = pf._principal(request)
+    uid = p.get("user_id")
+    if not uid:
+        raise HTTPException(401, "authentication required")
+    import json as _json
+    import secrets as _secrets
+    with db() as con:
+        row = con.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "user not found")
+        if row["mfa_enabled"]:
+            raise HTTPException(409, "two-factor authentication is already enabled")
+        if not _verify_totp(row["mfa_secret"], item.code):
+            raise HTTPException(401, "the authenticator code is not valid")
+        codes = [_secrets.token_hex(4) for _ in range(8)]
+        con.execute("UPDATE users SET mfa_enabled=1, mfa_recovery=?, updated_at=? WHERE id=?",
+                    (_json.dumps([_hash(c) for c in codes]), _now(), uid))
+        con.commit()
+        org, email = row["org_id"], row["email"]
+    _audit_in_org(org, "auth.mfa_enabled", email, {})
+    return {"enabled": True, "recovery_codes": codes}
+
+
+@router.post("/api/auth/mfa/disable")
+def mfa_disable(item: MfaDisableIn, request: Request) -> dict[str, Any]:
+    p = pf._principal(request)
+    uid = p.get("user_id")
+    if not uid:
+        raise HTTPException(401, "authentication required")
+    with db() as con:
+        row = con.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "user not found")
+        if not row["mfa_enabled"]:
+            return {"enabled": False, "already": True}
+        if not verify_password(row["password_hash"], item.password):
+            raise HTTPException(401, "password is incorrect")
+        if _second_factor(con, row, item.code.strip() if item.code else "") is not True:
+            raise HTTPException(401, "a valid authenticator or recovery code is required")
+        con.execute("UPDATE users SET mfa_enabled=0, mfa_secret=NULL, mfa_recovery=NULL, updated_at=? WHERE id=?", (_now(), uid))
+        con.commit()
+        org, email = row["org_id"], row["email"]
+    _audit_in_org(org, "auth.mfa_disabled", email, {})
+    return {"enabled": False}
 
 
 @router.get("/api/auth/me")

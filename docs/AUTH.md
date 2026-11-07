@@ -106,3 +106,24 @@ Without SMTP nothing is sent, `/api/health` reports `mail_configured: false`, an
 3. Set `CFA_ALLOW_SIGNUP=0` and restart. From now on only invitations create users.
 4. Configure `SMTP_*`, otherwise invitations and password resets cannot be delivered.
 5. Optional: `CFA_REQUIRE_EMAIL_VERIFICATION=1` once mail delivery works.
+
+
+## Two-factor authentication (TOTP)
+
+Optional per user, recommended for owner and admin accounts.
+
+- `POST /api/auth/mfa/setup` creates a pending Base32 secret and returns an otpauth URI
+  (`otpauth://totp/Shewiun:<email>?secret=...&issuer=Shewiun`). Calling it again rotates the
+  secret while it is still pending.
+- `POST /api/auth/mfa/enable` needs one valid code from the authenticator. On success it returns
+  **eight single-use recovery codes** (shown once, stored only as SHA-256 hashes).
+- Login (`POST /api/auth/login`) then requires `mfa_code`. Without a code the API answers 401 with
+  `{"detail": {"mfa_required": true}}` so the UI can ask for it; a wrong code answers 401 and is
+  written to the audit log as `auth.mfa_failed`.
+- `POST /api/auth/mfa/disable` needs the password **and** a valid authenticator or recovery code.
+- Implementation: RFC 6238, SHA-1, 6 digits, 30 second step, +/-1 step window, standard library
+  only (no extra dependency). Recovery codes are single use and are removed when used.
+
+## Two-factor authentication (TOTP)
+
+

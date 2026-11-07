@@ -1,3 +1,18 @@
+# Implementation changelog (v18)
+
+Tests: `python -m pytest -q` -> **198 passed** (194 + 4 in `tests/test_mfa.py`).
+
+## B1: two-factor authentication (TOTP)
+- `app/auth.py`: RFC 6238 TOTP (SHA-1, 6 digits, 30 s, +/-1 window) implemented with the
+  standard library; users get `mfa_secret`, `mfa_enabled`, `mfa_recovery` (migration included).
+- Endpoints `POST /api/auth/mfa/setup|enable|disable`; enable returns eight single-use recovery
+  codes (stored as hashes); disable requires password + valid factor; every change is audited.
+- Login gate: with 2FA enabled a password-only login returns 401 `{"detail":{"mfa_required":true}}`;
+  a recovery code can be used instead of the authenticator code and is consumed.
+- UI: sign-in shows the code field only when the server asks for it; Settings has a two-factor
+  card with setup (secret + otpauth URI), activation, recovery codes and a disable form.
+- Tests: RFC 6238 vectors, full flow, single-use recovery, wrong password/code, disable, no-op.
+
 # Implementation changelog (v14)
 
 Tests: `python -m pytest -q` -> **176 passed** (173 + 3 new in `tests/test_channels_stream.py`).

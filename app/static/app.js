@@ -870,6 +870,32 @@
         S.newKey ? h('div', { class: 'pre' }, `New token for ${S.newKey.name} (${S.newKey.role}): ${S.newKey.token}\nCopy it now. It cannot be shown again.`) : null,
         k ? h('table', {}, h('tbody', {}, k.keys.map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.role), h('td', { class: 'mono' }, 'used ' + (when(x.last_used) || 'never')), h('td', {}, x.revoked ? h('span', { class: 'chip warn' }, 'revoked') : btn('Revoke', () => run(async () => { await api('/api/admin/keys/' + x.id, { method: 'DELETE' }); S.keys = await api('/api/admin/keys'); }), 'link')))))) : null, k && k.env_keys ? h('p', { class: 'muted' }, `${k.env_keys} key(s) come from the environment.`) : null,
         h('div', { class: 'row2', style: 'margin-top:8px' }, kname, krole, btn('Create key', () => run(async () => { S.newKey = await api('/api/admin/keys', { method: 'POST', body: { name: kname.value, role: krole.value } }); S.keys = await api('/api/admin/keys'); }), 'btn primary'))),
+      h('div', { class: 'card', style: 'margin-bottom:14px' }, h('b', {}, 'Zwei-Faktor-Authentifizierung (TOTP)'),
+        h('p', { class: 'muted' }, 'Optional, aber empfohlen fuer Owner und Admins. Funktioniert mit Google Authenticator, 1Password, Authy und allen RFC-6238-Apps. Recovery-Codes werden einmal angezeigt.'),
+        (S.me && S.me.user && S.me.user.mfa_enabled)
+          ? h('div', {}, h('p', {}, h('span', { class: 'chip ok' }, '2FA aktiv')), h('details', { style: 'margin-top:8px' }, h('summary', { class: 'muted' }, '2FA deaktivieren'),
+            h('div', { style: 'margin-top:8px' }, h('p', { class: 'muted', style: 'font-size:12px' }, 'Passwort und ein gueltiger Code sind erforderlich.'),
+              h('input', { class: 'field', id: 'mfa-off-pw', type: 'password', placeholder: 'Passwort', autocomplete: 'current-password' }),
+              h('div', { style: 'height:6px' }),
+              h('input', { class: 'field', id: 'mfa-off-code', placeholder: 'Authenticator- oder Recovery-Code', autocomplete: 'one-time-code' }),
+              h('div', { style: 'margin-top:8px' }, btn('2FA deaktivieren', () => run(async () => {
+                const password = (document.getElementById('mfa-off-pw') || {}).value || '';
+                const code = (document.getElementById('mfa-off-code') || {}).value || '';
+                await api('/api/auth/mfa/disable', { method: 'POST', body: { password, code } });
+                S.me = await api('/api/auth/me'); S.info = '2FA wurde deaktiviert.'; render();
+              }), 'btn')))))
+          : (S.mfaSetup
+            ? h('div', {}, h('p', { class: 'muted' }, 'Secret in der App hinterlegen (Base32):'), h('div', { class: 'pre', style: 'word-break:break-all' }, S.mfaSetup.secret),
+              h('p', { class: 'muted', style: 'font-size:12px' }, 'OTC-Link: ' + (S.me && S.me.user ? '' : '') + S.mfaSetup.otpauth),
+              h('div', { style: 'margin-top:8px' }, h('input', { class: 'field', id: 'mfa-on-code', placeholder: '6-stelliger Code aus der App', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 12 }),
+                h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Aktivieren', () => run(async () => {
+                  const code = (document.getElementById('mfa-on-code') || {}).value || '';
+                  const r = await api('/api/auth/mfa/enable', { method: 'POST', body: { code } });
+                  S.mfaCodes = r.recovery_codes; S.mfaSetup = null; S.me = await api('/api/auth/me'); render();
+                }), 'btn primary'))))
+            : h('div', {}, btn('2FA einrichten', () => run(async () => { S.mfaSetup = await api('/api/auth/mfa/setup', { method: 'POST' }); render(); }), 'btn primary'))),
+        (S.mfaCodes || []).length ? h('div', { style: 'margin-top:10px' }, h('b', {}, 'Recovery-Codes - jetzt speichern'),
+          h('div', { class: 'pre' }, S.mfaCodes.join('\n')), h('p', { class: 'muted', style: 'font-size:12px' }, 'Jeder Code funktioniert genau einmal. Danach sind sie nicht mehr abrufbar.')) : null),
       h('div', { class: 'card', id: 'set-backups' }, h('b', {}, 'Backups and data'), h('p', { class: 'muted' }, 'Backups copy the whole database. Keep CFA_SECRET_KEY somewhere else. The audit log is never purged.'),
         h('div', { class: 'row2' }, btn('Back up now', () => run(async () => { await api('/api/admin/backup', { method: 'POST' }); S.backups = await api('/api/admin/backups'); S.info = 'Backup created.'; }), 'btn primary'), btn('Export all data (JSON)', () => run(async () => { await dl('/api/admin/export', 'cfa-export.json'); }))),
         h('div', { style: 'margin-top:8px' }, (S.backups || []).slice(0, 6).map((x) => h('div', { class: 'row2' }, h('span', { class: 'mono', style: 'flex:1' }, x.name), h('span', { class: 'muted' }, Math.round(x.bytes / 1024) + ' KB'), btn('Download', () => run(async () => { await dl('/api/admin/backups/' + x.name, x.name); }), 'link')))),
@@ -905,17 +931,19 @@
     const name = (document.getElementById('auth-name') || {}).value || '';
     const org = (document.getElementById('auth-org') || {}).value || '';
     S.tokenErr = '';
-    const body = kind === 'register' ? { email, password, name, org_name: org } : { email, password };
+    const body = kind === 'register' ? { email, password, name, org_name: org } : { email, password, mfa_code: S.mfaCode || '' };
     try {
       const r = await fetch(kind === 'register' ? '/api/auth/register' : '/api/auth/login',
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        const detail = typeof d.detail === 'string' ? d.detail : 'Sign-in failed';
-        if (r.status === 409 && /no account/i.test(detail)) { S.setup = true; S.tokenErr = ''; S.info = detail; }
-        else S.tokenErr = detail; render(); return;
+        const detail = d && d.detail && typeof d.detail === 'object' ? d.detail : null;
+        const text = typeof (d && d.detail) === 'string' ? d.detail : 'Sign-in failed';
+        if (detail && detail.mfa_required) { S.mfa = true; S.tokenErr = detail.detail || 'Enter your authenticator code.'; render(); return; }
+        if (r.status === 409 && /no account/i.test(text)) { S.setup = true; S.tokenErr = ''; S.info = text; }
+        else S.tokenErr = text; render(); return;
       }
-      S.auth = false; S.setup = false; token = ''; sessionStorage.removeItem('cfa_token');
+      S.auth = false; S.setup = false; S.mfa = false; S.mfaCode = ''; S.tokenErr = ''; token = ''; sessionStorage.removeItem('cfa_token');
       await init();
     } catch (e) { S.tokenErr = e.message; render(); }
   }
@@ -937,9 +965,13 @@
     }
     const email = h('input', { class: 'field', id: 'auth-email', type: 'email', placeholder: 'you@company.com', autocomplete: 'username', 'aria-label': 'Email' });
     const pw = h('input', { class: 'field', id: 'auth-password', type: 'password', placeholder: 'Password', autocomplete: 'current-password', 'aria-label': 'Password' });
-    [email, pw].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth('login'); }));
+    const mfa = h('input', { class: 'field', id: 'auth-mfa', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 11, placeholder: 'Authenticator-Code oder Recovery-Code', 'aria-label': 'Two-factor code' });
+    mfa.value = S.mfaCode || '';
+    mfa.addEventListener('input', () => { S.mfaCode = mfa.value; });
+    [email, pw, mfa].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth('login'); }));
     return h('div', { class: 'login' }, h('div', { class: 'card login-card' }, h('div', { class: 'logo' }, 'Shewiun'), h('h2', { style: 'margin-top:18px' }, 'Sign in'), h('p', { class: 'muted' }, 'Use the email address and password of your Shewiun account.'),
-      email, pw, S.tokenErr ? h('p', { class: 'warn-text', role: 'alert' }, S.tokenErr) : null, h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Sign in', () => submitAuth('login'), 'btn primary')),
+      email, pw, S.mfa ? [h('p', { class: 'muted', style: 'font-size:12px' }, '2FA ist fuer dieses Konto aktiv: Code aus der Authenticator-App eingeben oder einen Recovery-Code verwenden.'), mfa] : null,
+      S.tokenErr ? h('p', { class: 'warn-text', role: 'alert' }, S.tokenErr) : null, h('div', { class: 'row2', style: 'margin-top:12px' }, btn('Sign in', () => submitAuth('login'), 'btn primary')),
       h('p', { class: 'muted', style: 'font-size:12px;margin-top:16px' }, 'Forgot your password? Ask an admin to send a reset link, or use the API: POST /api/auth/password/forgot.'), storageWarn));
   }
   const logout = async () => { try { await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders('POST'), credentials: 'same-origin' }); } catch {} sessionStorage.removeItem('cfa_token'); token = ''; S.auth = true; location.reload(); };
