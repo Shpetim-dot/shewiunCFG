@@ -161,7 +161,7 @@ const overlayRoot = (() => {
     await run(async () => {
       if (view === 'brain') { await loadNotes(); await loadBots(); S.graph = S.notes.length > 0; if (!S.note && S.notes[0]) await openNote(S.notes[0].id, true); S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
       if (view === 'council') S.calls = await api('/api/calls');
-      if (view === 'research') S.rlist = await api('/api/research');
+      if (view === 'research') { S.rlist = await api('/api/research'); try { S.health = await api('/api/health'); S.ssearch = await api('/api/search/status'); } catch {} }
       if (view === 'org') { await loadOrg(); if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; } }
       if (view === 'teams') { await Promise.all([loadTeams(), loadBots()]); await loadChannelIndex(); } else if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; }
       if (view === 'plans') S.bill = await api('/api/billing');
@@ -565,6 +565,7 @@ const overlayRoot = (() => {
     const chip = (label, on, f, dis) => h('button', { type: 'button', class: 'chip' + (on ? ' ok' : ''), 'aria-pressed': on, disabled: !!dis, onclick: f }, label);
     const DEPTHS = [['quick', 'Quick', '3 sub-questions, fast scan'], ['standard', 'Standard', '6 sub-questions, balanced depth'], ['thorough', 'Thorough', '9 sub-questions, deepest coverage']];
     const depthChips = DEPTHS.map(([v, l, d]) => h('button', { type: 'button', class: 'depth-card' + (S.rdepth === v ? ' on' : ''), 'aria-pressed': S.rdepth === v, onclick: () => { S.rdepth = v; render(); } }, h('b', {}, l), h('span', { class: 'muted' }, d)));
+    const webReady = !!(S.ssearch ? S.ssearch.configured : S.health.search_configured);
     const r = S.rs, rep = r && r.report;
     const srcKinds = () => { const k = { brain: 0, web: 0, other: 0 }; (r ? r.sources : []).forEach((s) => { k[s.kind === 'brain' ? 'brain' : s.kind === 'web' ? 'web' : 'other'] += 1; }); return k; };
     const kindDonut = () => {
@@ -609,8 +610,9 @@ const overlayRoot = (() => {
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Deep research'),
       h('p', { class: 'muted' }, 'Plans sub-questions, searches your Brain' + (S.health.search_configured ? ' and the web' : '') + ', and writes a report with numbered citations and a chart. Without a model the report is extractive: it quotes sources and adds no generated claims.'),
       h('div', { class: 'rbox' }, q, cx), h('div', { class: 'row2', style: 'margin:10px 0;flex-wrap:wrap' }, depthChips,
-        chip(S.rweb && S.health.search_configured ? 'Web: on' : 'Web: off', S.rweb && S.health.search_configured, () => { S.rweb = !S.rweb; render(); }, !S.health.search_configured),
-        S.health.search_configured ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'Web search needs CFA_SEARCH_API_KEY'), h('span', { class: 'sp' }), rbtn),
+        chip((S.rweb && webReady ? 'Web: on - ' + (S.ssearch ? S.ssearch.provider : 'search') : 'Web: off'), S.rweb && webReady, () => { if (!webReady) { go('settings'); return; } S.rweb = !S.rweb; render(); }, false),
+        webReady ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'No search key in this running instance - set CFA_SEARCH_API_KEY and redeploy, then check Settings > Web search > Test key. ',
+          btn('Open settings', () => go('settings'), 'link')), h('span', { class: 'sp' }), rbtn),
       r ? h('div', { class: 'room' }, h('div', {},
         r.running ? h('div', { class: 'card research-run' },
           h('div', { class: 'row2' }, h('b', {}, 'Research in progress'), h('span', { class: 'chip warn' }, r.agent ? r.agent.name : 'planning'), h('span', { class: 'sp' }),
