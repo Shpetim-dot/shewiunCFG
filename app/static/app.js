@@ -326,34 +326,26 @@ const overlayRoot = (() => {
   }
   function passport() {
     const b = S.bot; if (!b) return null;
-    const tabs = ['overview', 'screen', 'memory', 'apps'].map((t) => h('button', { type: 'button', role: 'tab', 'aria-selected': S.tab === t, onclick: () => { S.tab = t; render(); } }, t[0].toUpperCase() + t.slice(1)));
+    const modelOk = agxHasModel(b);
+    const tabActive = (t) => (t === 'activity' ? S.tab === 'activity' || S.tab === 'screen' : S.tab === t);
+    if (S.tab === 'overview') agxEnsureInv(false);
+    const tabs = h('div', { class: 'agx-tabs', role: 'tablist', 'aria-label': 'Agent details' },
+      [['overview', 'Overview'], ['activity', 'Activity'], ['memory', 'Memory'], ['apps', 'Apps']].map(([t, label]) =>
+        h('button', { type: 'button', role: 'tab', class: 'agx-tab', 'aria-selected': tabActive(t) ? 'true' : 'false', onclick: () => { S.tab = t; render(); } }, label)));
+    const head = h('div', { class: 'agx-head' },
+      h('div', { class: 'agx-ident' }, tile(b, 56, { float: true }),
+        h('div', { class: 'agx-idtext' }, h('div', { class: 'agx-name' }, b.name), h('div', { class: 'agx-role' }, b.role))),
+      h('div', { class: 'agx-chips' },
+        h('span', { class: 'chip' }, b.team || 'General'),
+        h('span', { class: 'chip ' + (b.status === 'suspended' ? 'warn' : 'ok') }, b.status === 'suspended' ? 'Suspended' : 'Active'),
+        h('span', { class: 'chip agx-modelchip' + (modelOk ? '' : ' warn') }, agxModelLabel(b))),
+      btn([agxGear(15), 'Agent settings'], () => openAgentSettings('general'), 'btn agx-gearbtn'));
     let body;
-    if (S.tab === 'overview') {
-      const boxes = S.caps.length ? S.caps : ['memory.read', 'memory.write', 'call.join', 'approval.request', 'payments.propose'];
-      const inputs = boxes.map((c) => h('label', { class: 'row', style: 'display:flex;margin:4px 0' }, h('input', { type: 'checkbox', value: c, checked: b.scopes.includes(c) }), c));
-      const kv = (k, v) => h('div', { class: 'kv' }, h('span', { class: 'muted' }, k), h('span', {}, v));
-      body = h('div', {}, kv('Role', b.role), kv('Team', b.team), modelEditor(b), kv('Source', b.source), kv('Trust', b.trust), kv('Status', b.status),
-        h('h2', { style: 'margin-top:16px' }, 'Permissions'), inputs,
-        h('div', { class: 'row2' }, btn('Save permissions', () => run(async () => { await api(`/api/bots/${b.id}/scopes`, { method: 'PUT', body: { scopes: inputs.map((l) => l.firstChild).filter((i) => i.checked).map((i) => i.value) } }); await loadBots(); S.info = 'Permissions saved and written to the audit log.'; }))),
-        admin('Admin only. The server enforces every capability.'),
-        h('h2', {}, 'Controls'), h('div', { class: 'row2' },
-          btn(b.status === 'suspended' ? 'Resume agent' : 'Suspend agent', () => run(async () => { await api(`/api/bots/${b.id}/status`, { method: 'POST', body: { status: b.status === 'suspended' ? 'active' : 'suspended', reason: 'manual' } }); await loadBots(); })),
-          b.trust === 'unverified' ? btn('Mark as reviewed', () => run(async () => { await api(`/api/bots/${b.id}/trust`, { method: 'POST', body: { trust: 'verified' } }); await loadBots(); })) : null,
-          btn('Export card', () => run(async () => { await dl(`/api/bots/${b.id}/card`, `${b.id}-card.json`); }))));
-    } else if (S.tab === 'screen') {
-      body = h('div', {}, h('div', { class: 'screenwin' }, h('div', { class: 'screenbar' }, icon('panel', 14), h('span', { style: 'flex:1' }, `${b.name} · live`), h('span', { class: 'chip ok' }, 'LIVE')), h('div', { class: 'screenbody', id: 'screenbody' })),
-        h('div', { class: 'row2', style: 'margin-top:10px' }, btn('Ask a sample question', () => { S.draft = 'Summarize what you know about payment limits.'; S.tab = 'screen'; send(); }, 'btn primary', { disabled: b.status === 'suspended' })),
-        admin('This is a live stream of what the agent actually did: messages, notes read or written, tool calls and council turns. It is not a remote desktop.'));
-    } else if (S.tab === 'memory') {
-      const mine = S.notes.filter((n) => b.spaces.includes(n.space) && n.status === 'verified').slice(0, 10);
-      body = h('div', {}, h('p', { class: 'muted' }, 'This agent reads verified notes from these spaces only:'), h('div', { class: 'row2' }, b.spaces.map((s) => h('span', { class: 'chip ok' }, s))),
-        h('h2', { style: 'margin-top:16px' }, 'Notes it can use'), mine.length ? mine.map((n) => h('div', {}, btn(n.title, () => openNote(n.id), 'link'))) : h('p', { class: 'muted' }, 'No verified notes yet.'),
-        h('p', {}, btn([icon('graph', 16), "Open this agent's brain"], () => { S.graph = true; S.graphAgent = b.id; go('brain').then(() => { S.graph = true; render(); }); }, 'btn')));
-    } else {
-      const mine = S.apps.filter((a) => a.connected && (a.grants[b.id] || []).length);
-      body = h('div', {}, mine.length ? mine.map((a) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, a.name), h('div', { class: 'row2' }, a.grants[b.id].map((t) => h('span', { class: 'chip' }, t + (a.tools.find((x) => x.name === t)?.risk === 'write' ? ' (needs approval)' : '')))))) : h('p', { class: 'muted' }, 'No app grants. Without a grant this agent cannot call any tool.'), h('p', {}, btn('Manage apps', openApps)));
-    }
-    return h('aside', { class: 'panel', 'aria-label': 'Agent details' }, h('div', { style: 'display:flex;gap:12px;align-items:center' }, tile(b, 52, { float: true }), h('div', {}, h('b', {}, b.name), h('div', { class: 'muted' }, b.role))), h('div', { class: 'tabs', role: 'tablist' }, tabs), body);
+    if (S.tab === 'overview') body = agxOverviewTab(b);
+    else if (S.tab === 'activity' || S.tab === 'screen') body = agxActivityTab(b);
+    else if (S.tab === 'memory') body = agxMemoryTab(b);
+    else body = agxAppsTab(b);
+    return h('aside', { class: 'panel agx-panel', 'aria-label': 'Agent details' }, head, tabs, h('div', { class: 'agx-body' }, body));
   }
 
   // ---------- council (live) ----------
@@ -1989,12 +1981,483 @@ const overlayRoot = (() => {
     return h('div', { class: 'mbar' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', onclick: () => { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
       h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Connect apps', onclick: openApps }, icon('grid')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus')));
   }
-  function modelEditor(b) {
-    const inp = h('input', { class: 'field', placeholder: 'default, or hf:MiniMaxAI/MiniMax-M2', value: b.model.endsWith('(no key)') ? b.model.replace(' (no key)', '') : (b.model === 'demo mode' ? '' : b.model), 'aria-label': 'Model for this agent', list: 'models-list' });
-    const dlist = h('datalist', { id: 'models-list' }, ((S.models && S.models.suggested) || []).map((x) => h('option', { value: x.id }, x.name)));
-    return h('div', { style: 'margin:6px 0' }, h('div', { class: 'kv' }, h('span', { class: 'muted' }, 'Model'), h('span', {}, b.model)), inp, dlist,
-      h('div', { class: 'row2', style: 'margin-top:6px' }, btn('Save model', () => run(async () => { await api(`/api/bots/${b.id}/model`, { method: 'PUT', body: { model: inp.value.trim() } }); await loadBots(); S.info = 'Model saved. Open models run through Hugging Face when HF_TOKEN is set.'; }), 'btn'), btn('Settings', () => go('settings'), 'link')));
+  // model editor shared by the agent panel and the agent settings overlay.
+  // An agent with no live model says "Model must be configured" instead of pretending.
+  function agxSaveModel(b, inp) {
+    const st = S.modal === 'agentSettings' ? S.agx : null;
+    const ok = (msg) => { S.info = msg; S.err = ''; if (st && S.modal === 'agentSettings') { st.busy = ''; st.info = msg; syncOverlays(true); } else render(); };
+    const bad = (e) => { S.err = e.message; if (st && S.modal === 'agentSettings') { st.busy = ''; st.err = e.message; syncOverlays(true); } else render(); };
+    if (st) { st.busy = 'model'; st.err = ''; st.info = ''; syncOverlays(true); }
+    api(`/api/bots/${b.id}/model`, { method: 'PUT', body: { model: String(inp.value || '').trim() } })
+      .then(() => loadBots())
+      .then(() => ok('Model saved. Open models run through Hugging Face when HF_TOKEN is set.'))
+      .catch(bad);
   }
+  function modelEditor(b) {
+    const raw = String((b && b.model) || ''), configured = agxHasModel(b), listId = 'models-list-' + (++gid);
+    const inp = h('input', { class: 'field agx-model-input', placeholder: 'default, or hf:MiniMaxAI/MiniMax-M2', value: raw.endsWith('(no key)') ? raw.replace(' (no key)', '') : raw === 'demo mode' ? '' : raw, 'aria-label': 'Model for this agent', list: listId });
+    const dlist = h('datalist', { id: listId }, ((S.models && S.models.suggested) || []).map((x) => h('option', { value: x.id }, x.name)));
+    return h('div', { class: 'agx-model' },
+      h('div', { class: 'agx-model-head' },
+        h('span', { class: 'agx-model-label' }, 'Current model'),
+        h('span', { class: 'chip ' + (configured ? '' : 'warn') }, agxModelLabel(b))),
+      configured ? null : h('div', { class: 'agx-model-warn' }, h('b', {}, AGX_MODEL_MISSING), h('p', { class: 'muted' }, 'This agent has no live model, so replies are scripted demo text. Enter a model id below or connect a provider in Settings.')),
+      h('div', { class: 'row2 agx-model-actions' }, inp, btn('Save model', () => agxSaveModel(b, inp), 'btn primary'), dlist),
+      h('div', { class: 'agx-model-links' },
+        btn('Provider settings', () => { if (S.modal === 'agentSettings') { S.agx = null; S.modal = null; syncOverlays(true); } go('settings'); }, 'link'),
+        h('span', { class: 'muted agx-hint' }, 'Model ids look like hf:owner/model or a plain provider model name.')));
+  }
+
+  // ---------- agent settings v2 (wave 2, batch 8) ----------
+  // Panel + overlay helpers. Everything reads the endpoints the server already exposes; the UI
+  // never invents a value. "Model must be configured" is the honest state for an agent that has
+  // no live provider model (model === 'demo mode', ends with '(no key)', or is empty).
+  const AGX_MODEL_MISSING = 'Model must be configured';
+  const agxHasModel = (b) => { const m = String((b && b.model) || '').trim(); return !!m && m !== 'demo mode' && !m.endsWith('(no key)'); };
+  const agxModelLabel = (b) => (agxHasModel(b) ? String(b.model) : AGX_MODEL_MISSING);
+  const AGX_CAP_INFO = {
+    'memory.read': { why: 'Reads verified notes from its memory spaces.', short: 'read-only', level: 'low' },
+    'memory.write': { why: 'Writes memory drafts that a human reviews first.', short: 'writes memory', level: 'medium' },
+    'call.join': { why: 'Joins council calls and can revise its position.', short: 'joins calls', level: 'low' },
+    'approval.request': { why: 'Can ask a human to approve an action.', short: 'can request approvals', level: 'medium' },
+    'payments.propose': { why: 'Can propose payments; a human still approves every payment.', short: 'can propose payments', level: 'high' },
+  };
+  const agxCapInfo = (c) => AGX_CAP_INFO[c] || { why: 'Capability enforced by the server on every request.', short: 'capability', level: 'low' };
+  // Custom gear mark (the shared G icon map is owned by other batches and has no gear).
+  const agxGear = (s = 16) => {
+    const v = document.createElementNS(NS, 'svg');
+    for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) v.setAttribute(k, x);
+    v.innerHTML = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>';
+    return v;
+  };
+
+  // inventory is the only endpoint that exposes owner/sponsor/purpose/last_activity per agent,
+  // so the panel and the overlay read it lazily and cache it for the session.
+  const agxInvRow = (id) => (Array.isArray(S.agxInv) ? S.agxInv.find((r) => r.id === id) || null : null);
+  function agxInvalidate() { S.agxInv = null; S.agxInvState = ''; S.agxPanelAudit = null; }
+  function agxEnsureInv(reload) {
+    if (reload) { S.agxInv = null; S.agxInvState = ''; }
+    if (S.agxInvState === 'loading' || S.agxInvState === 'ready' || S.agxInvState === 'error') return;
+    S.agxInvState = 'loading';
+    api('/api/inventory').then((rows) => {
+      S.agxInv = rows; S.agxInvState = 'ready';
+      if (S.modal === 'agentSettings') syncOverlays(true); else render();
+    }).catch(() => {
+      S.agxInvState = 'error';
+      if (S.modal === 'agentSettings') syncOverlays(true); else render();
+    });
+  }
+
+  // recent per-agent audit events for the panel's Activity tab
+  function agxPanelAudit(botId) {
+    const st = S.agxPanelAudit;
+    if (st && st.bot === botId) return st;
+    S.agxPanelAudit = { bot: botId, loading: true, data: null, err: '' };
+    api(`/api/bots/${encodeURIComponent(botId)}/audit?limit=12`).then((d) => {
+      if (!S.agxPanelAudit || S.agxPanelAudit.bot !== botId) return;
+      S.agxPanelAudit = { bot: botId, loading: false, data: d, err: '' }; render();
+    }).catch((e) => {
+      if (!S.agxPanelAudit || S.agxPanelAudit.bot !== botId) return;
+      S.agxPanelAudit = { bot: botId, loading: false, data: null, err: e.message }; render();
+    });
+    return S.agxPanelAudit;
+  }
+
+  // App mark for the agent panel/overlay: a local letter tile. Deliberately no logo request:
+  // the catalog logos are served by the apps connector (batch 9), so the settings surfaces stay
+  // free of 404s when no logo file exists for an app.
+  function agxAppLogo(a, s = 26) {
+    return h('span', { class: 'agx-applogo', style: `width:${s}px;height:${s}px;font-size:${Math.round(s * 0.45)}px`, 'aria-hidden': 'true' }, String((a && a.name) || '?')[0].toUpperCase());
+  }
+
+  // switch-like capability rows shared by the panel and the overlay. The server is the source of
+  // truth for capabilities (/api/templates); checked state comes from the agent's scopes.
+  function agxScopeRows(scopes) {
+    const list = (S.caps && S.caps.length) ? S.caps : Object.keys(AGX_CAP_INFO);
+    const boxes = [];
+    const rows = list.map((c) => {
+      const info = agxCapInfo(c), on = (scopes || []).includes(c);
+      const cb = h('input', { type: 'checkbox', value: c, checked: on, class: 'agx-check', 'aria-label': 'Capability ' + c });
+      cb.addEventListener('change', () => { const row = cb.closest('label'); if (row) row.classList.toggle('on', cb.checked); });
+      boxes.push(cb);
+      return h('label', { class: 'agx-switchrow' + (on ? ' on' : '') },
+        h('span', { class: 'agx-switchtxt' },
+          h('span', { class: 'agx-caprow' }, h('b', {}, c),
+            info.level === 'low' ? null : h('span', { class: 'chip risk-' + info.level + ' agx-risk', title: info.why }, info.level === 'high' ? 'high risk' : 'medium risk')),
+          h('small', {}, info.why)),
+        cb, h('span', { class: 'agx-switch', 'aria-hidden': 'true' }));
+    });
+    return { rows, value: () => boxes.filter((x) => x.checked).map((x) => x.value) };
+  }
+
+  // the live screen stays available; in the new panel it lives inside the Activity tab.
+  function agxLiveWindow(b) {
+    return h('div', { class: 'agx-live' },
+      h('div', { class: 'screenwin' }, h('div', { class: 'screenbar' }, icon('panel', 14), h('span', { style: 'flex:1' }, `${b.name} · live`), h('span', { class: 'chip ok' }, 'LIVE')), h('div', { class: 'screenbody', id: 'screenbody' })),
+      h('div', { class: 'row2 agx-live-actions' },
+        btn('Ask a sample question', () => { S.draft = 'Summarize what you know about payment limits.'; send(); }, 'btn primary', { disabled: b.status === 'suspended' }),
+        btn('Hide live view', () => { S.tab = 'activity'; render(); }, 'link')),
+      admin('This is a live stream of what the agent actually did: messages, notes read or written, tool calls and council turns. It is not a remote desktop.'));
+  }
+
+  // ---------- panel tabs ----------
+  function agxOverviewTab(b) {
+    const modelOk = agxHasModel(b), inv = agxInvRow(b.id);
+    const fact = (k, v, cls) => h('div', { class: 'agx-fact' }, h('span', { class: 'agx-fact-k' }, k), h('span', { class: 'agx-fact-v' + (cls ? ' ' + cls : '') }, v));
+    const last = inv ? (inv.last_activity ? when(inv.last_activity) : 'No recorded activity') : (S.agxInvState === 'error' ? 'Unavailable' : 'Loading…');
+    const facts = h('div', { class: 'agx-card agx-facts' },
+      fact('Role', b.role),
+      fact('Team', b.team || 'General'),
+      fact('Model', agxModelLabel(b), modelOk ? '' : 'agx-warn'),
+      fact('Source', b.source || 'builtin'),
+      fact('Trust', h('span', { class: 'chip ' + (b.trust === 'verified' ? 'ok' : 'warn') }, b.trust === 'verified' ? 'Verified' : 'Unverified')),
+      fact('Criticality', h('span', { class: 'chip risk-' + (b.criticality || 'medium') }, b.criticality || 'medium')),
+      fact('Status', h('span', { class: 'chip ' + (b.status === 'suspended' ? 'warn' : 'ok') }, b.status === 'suspended' ? 'Suspended' : 'Active')),
+      fact('Last activity', last));
+    const scopes = agxScopeRows(b.scopes);
+    const permissions = h('div', { class: 'agx-card' },
+      h('div', { class: 'agx-card-h' }, h('b', {}, 'Permissions'), h('span', { class: 'sp' }), h('span', { class: 'chip' }, `${(b.scopes || []).length} of ${scopes.rows.length}`)),
+      h('div', { class: 'agx-switchlist' }, scopes.rows),
+      h('div', { class: 'agx-card-actions' }, btn('Save permissions', () => run(async () => {
+        await api(`/api/bots/${b.id}/scopes`, { method: 'PUT', body: { scopes: scopes.value() } });
+        await loadBots(); agxInvalidate(); S.info = 'Permissions saved and written to the audit log.';
+      }), 'btn primary')),
+      admin('Admin only. The server enforces every capability.'));
+    const controls = h('div', { class: 'agx-card' },
+      h('div', { class: 'agx-card-h' }, h('b', {}, 'Controls')),
+      h('div', { class: 'agx-btnrow' },
+        btn(b.status === 'suspended' ? 'Resume agent' : 'Suspend agent', () => run(async () => {
+          await api(`/api/bots/${b.id}/status`, { method: 'POST', body: { status: b.status === 'suspended' ? 'active' : 'suspended', reason: 'manual' } });
+          await loadBots(); agxInvalidate();
+          S.info = b.status === 'suspended' ? 'Agent resumed.' : 'Agent suspended. Chat, calls and tools stop immediately.';
+        }), 'btn'),
+        b.trust === 'unverified' ? btn('Mark as reviewed', () => run(async () => {
+          await api(`/api/bots/${b.id}/trust`, { method: 'POST', body: { trust: 'verified' } });
+          await loadBots(); agxInvalidate(); S.info = 'Agent marked as reviewed.';
+        })) : null,
+        btn('Export card', () => run(async () => { await dl(`/api/bots/${b.id}/card`, `${b.id}-card.json`); }))),
+      btn([agxGear(15), 'Open full settings'], () => openAgentSettings('general'), 'btn agx-widebtn'));
+    return h('div', {}, facts, permissions, h('div', { class: 'agx-card' }, modelEditor(b)), controls);
+  }
+
+  function agxActivityTab(b) {
+    const live = S.tab === 'screen', pa = agxPanelAudit(b.id);
+    const data = pa && pa.data, evs = (data && data.entries) || [], total = data ? data.total : 0;
+    const list = evs.length ? h('div', { class: 'agx-evs' }, evs.map((e) => h('div', { class: 'agx-ev' },
+      h('span', { class: 'mono agx-ev-time' }, when(e.ts)),
+      h('span', { class: 'chip agx-ev-kind' }, e.kind),
+      h('span', { class: 'agx-ev-sum' }, e.summary || '—'),
+      h('span', { class: 'muted agx-ev-actor' }, e.actor || 'system')))) : null;
+    return h('div', {},
+      live ? agxLiveWindow(b) : h('div', { class: 'agx-card' },
+        h('div', { class: 'agx-card-h' }, h('b', {}, 'Live view')),
+        h('p', { class: 'muted agx-note' }, 'Follow what the agent is doing right now: messages, notes it reads or writes, tool calls and council turns.'),
+        btn('Open live view', () => { S.tab = 'screen'; render(); }, 'btn')),
+      h('div', { class: 'agx-card' },
+        h('div', { class: 'agx-card-h' }, h('b', {}, 'Recent activity'), h('span', { class: 'sp' }),
+          pa && pa.loading ? h('span', { class: 'muted' }, 'Loading…') : btn('Refresh', () => { S.agxPanelAudit = null; render(); }, 'link')),
+        pa && pa.err ? h('p', { class: 'agx-warn agx-note' }, 'Activity could not be loaded: ' + pa.err) : null,
+        pa && !pa.loading && !pa.err ? (evs.length ? list : h('div', { class: 'agx-empty' }, h('b', {}, 'No activity recorded yet'), h('p', { class: 'muted' }, 'The per-agent audit chain has no entries. Chat with the agent or run a council call, then refresh.'))) : null,
+        data ? h('div', { class: 'agx-card-foot' },
+          h('span', { class: 'chip ' + (data.integrity && data.integrity.valid ? 'ok' : 'warn') }, data.integrity && data.integrity.valid ? 'Chain intact' : 'Chain not verified'),
+          h('span', { class: 'muted' }, `${total} event${total === 1 ? '' : 's'} recorded` + (total > evs.length ? `, newest ${evs.length} shown` : ''))) : null),
+      admin('Activity comes from the agent\'s own audited history, not from a simulated feed.'));
+  }
+
+  function agxMemoryTab(b) {
+    const mine = (S.notes || []).filter((n) => (b.spaces || []).includes(n.space) && n.status === 'verified').slice(0, 10);
+    return h('div', {},
+      h('div', { class: 'agx-card' },
+        h('div', { class: 'agx-card-h' }, h('b', {}, 'Memory spaces')),
+        h('p', { class: 'muted agx-note' }, 'This agent reads verified notes from these spaces only.'),
+        h('div', { class: 'row2' }, (b.spaces || []).map((s) => h('span', { class: 'chip ok' }, s)))),
+      h('div', { class: 'agx-card' },
+        h('div', { class: 'agx-card-h' }, h('b', {}, 'Notes it can use')),
+        mine.length ? h('div', { class: 'agx-list' }, mine.map((n) => btn(n.title, () => openNote(n.id), 'link'))) : h('p', { class: 'muted agx-note' }, 'No verified notes in its spaces yet.')),
+      btn([icon('graph', 16), 'Open this agent\'s brain'], () => { S.graph = true; S.graphAgent = b.id; go('brain').then(() => { S.graph = true; render(); }); }, 'btn'));
+  }
+
+  function agxAppsTab(b) {
+    const connected = (S.apps || []).filter((a) => a.connected);
+    const grantsOf = (a) => (a.grants || {})[b.id] || [];
+    const mine = connected.filter((a) => grantsOf(a).length);
+    const cards = mine.map((a) => h('div', { class: 'agx-card agx-app' },
+      h('div', { class: 'agx-card-h' }, agxAppLogo(a, 26), h('b', {}, a.name), h('span', { class: 'chip ' + (a.live ? 'ok' : '') }, a.live ? 'Live' : 'Demo')),
+      h('div', { class: 'row2 agx-toolchips' }, grantsOf(a).map((t) => {
+        const risk = (a.tools.find((x) => x.name === t) || {}).risk;
+        return h('span', { class: 'chip' + (risk === 'write' ? ' warn' : '') }, t + (risk === 'write' ? ' (needs approval)' : risk === 'read' ? ' (read)' : ''));
+      }))));
+    const noGrant = connected.filter((a) => !grantsOf(a).length).map((a) => a.name);
+    return h('div', {},
+      mine.length ? h('div', {}, cards) : h('div', { class: 'agx-card agx-empty' }, h('b', {}, 'No app grants'), h('p', { class: 'muted' }, 'Without a grant this agent cannot call any tool.')),
+      noGrant.length ? h('p', { class: 'muted agx-note' }, 'Connected apps with no grant for this agent: ' + noGrant.join(', ') + '.') : null,
+      h('div', { class: 'row2' }, btn('Open connector', openApps, 'btn primary'), btn('Refresh grants', () => run(async () => { await loadApps(); }), 'link')));
+  }
+
+  // ---------- full agent settings overlay ----------
+  const AGX_SECTIONS = [
+    ['general', 'General', 'wrench'],
+    ['permissions', 'Permissions', 'shield'],
+    ['accountability', 'Accountability', 'user'],
+    ['activity', 'Activity', 'radar'],
+    ['apps', 'Apps & tools', 'grid'],
+    ['danger', 'Danger', 'x'],
+  ];
+  function openAgentSettings(section, botId) {
+    const b = (botId && (S.bots || []).find((x) => x.id === botId)) || S.bot;
+    if (!b) return;
+    S.modal = 'agentSettings';
+    S.menu = false; S.drawer = false; S.err = ''; S.info = '';
+    S.agx = { bot: b.id, section: section || 'general', loading: true, busy: '', err: '', info: '', name: b.name,
+      criticality: b.criticality || 'medium', owner: '', sponsor: '', purpose: '', acctLoaded: false,
+      audit: null, auditLoading: true, auditErr: '', appsErr: '', verify: null };
+    syncOverlays(true);
+    agxLoad();
+  }
+  async function agxLoad() {
+    const st = S.agx; if (!st) return;
+    const id = st.bot, keep = () => S.agx === st && st.bot === id;
+    st.loading = true; syncOverlays(true);
+    await Promise.all([
+      api('/api/inventory').then((rows) => { S.agxInv = rows; S.agxInvState = 'ready'; }).catch(() => { if (S.agxInvState !== 'ready') S.agxInvState = 'error'; }),
+      api(`/api/bots/${encodeURIComponent(id)}/audit?limit=30`).then((d) => { if (keep()) { st.audit = d; st.auditErr = ''; } }).catch((e) => { if (keep()) st.auditErr = e.message; }).finally(() => { if (keep()) st.auditLoading = false; }),
+      loadApps().catch((e) => { if (keep()) st.appsErr = e.message; }),
+      S.models ? Promise.resolve() : api('/api/models').then((m) => { S.models = m; }).catch(() => {}),
+    ]);
+    if (!keep()) return;
+    st.auditLoading = false;
+    const inv = agxInvRow(id);
+    if (inv && !st.acctLoaded) { st.owner = inv.owner === 'system' ? '' : (inv.owner || ''); st.sponsor = inv.sponsor || ''; st.purpose = inv.purpose || ''; st.acctLoaded = true; }
+    st.loading = false;
+    syncOverlays(true);
+  }
+  async function agxAct(key, fn) {
+    const st = S.agx; if (!st || st.busy) return;
+    st.busy = key; st.err = ''; st.info = ''; S.err = '';
+    syncOverlays(true);
+    try { const msg = (await fn()) || 'Saved.'; st.info = msg; S.info = msg; S.err = ''; }
+    catch (e) { st.err = e.message; S.err = e.message; }
+    if (S.agx !== st) return;
+    st.busy = '';
+    if (key !== 'verify') {
+      try { S.agxInv = await api('/api/inventory'); S.agxInvState = 'ready'; } catch { S.agxInvState = 'error'; }
+      S.agxPanelAudit = null;
+      try { st.audit = await api(`/api/bots/${encodeURIComponent(st.bot)}/audit?limit=30`); st.auditErr = ''; } catch (e) { st.auditErr = e.message; }
+    }
+    syncOverlays(true);
+  }
+  function agxRow(label, node, hint) {
+    return h('div', { class: 'agx-row' }, h('span', { class: 'agx-row-k' }, label), h('div', { class: 'agx-row-v' }, node, hint ? h('small', { class: 'muted agx-hint' }, hint) : null));
+  }
+  function agxCard(title, kids) {
+    return h('section', { class: 'agx-card' }, title ? h('div', { class: 'agx-card-h' }, h('b', {}, title)) : null, kids);
+  }
+  function agxModelSection(b, st) {
+    return agxCard('Model', modelEditor(b));
+  }
+  function agxGeneralSection(b, st) {
+    const name = h('input', { class: 'field agx-nameinput', maxlength: 40, value: st.name || b.name, 'aria-label': 'Agent name', style: 'flex:1;min-width:180px' });
+    const rename = () => {
+      const v = (st.name || '').trim();
+      if (v.length < 2) { st.err = 'The name needs at least 2 characters.'; st.info = ''; syncOverlays(true); return; }
+      if (v === b.name) { st.err = 'That is already the agent name.'; st.info = ''; syncOverlays(true); return; }
+      agxAct('rename', async () => { await api(`/api/bots/${b.id}`, { method: 'PATCH', body: { name: v } }); await loadBots(); return `Renamed to "${v}". The rename is audited; the id stays stable.`; });
+    };
+    const renameBtn = btn(st.busy === 'rename' ? 'Renaming…' : 'Rename agent', rename, 'btn primary', { disabled: !!st.busy || (st.name || b.name).trim() === b.name });
+    name.addEventListener('input', () => {
+      st.name = name.value;
+      const v = name.value.trim();
+      renameBtn.disabled = !!st.busy || v === b.name || v.length < 2;
+      if (st.err) { st.err = ''; syncOverlays(true); }
+    });
+    const crit = h('select', { class: 'field agx-select', 'aria-label': 'Criticality' },
+      ['low', 'medium', 'high'].map((x) => h('option', { value: x, selected: (st.criticality || b.criticality) === x }, x)));
+    const metaBtn = btn(st.busy === 'meta' ? 'Saving…' : 'Save criticality', () => agxAct('meta', async () => {
+      await api(`/api/bots/${b.id}/meta`, { method: 'PUT', body: { criticality: crit.value } });
+      await loadBots(); return `Criticality set to ${crit.value}.`;
+    }), 'btn primary', { disabled: !!st.busy || (st.criticality || b.criticality) === b.criticality });
+    crit.addEventListener('change', () => { st.criticality = crit.value; metaBtn.disabled = !!st.busy || crit.value === b.criticality; });
+    return h('div', {},
+      agxCard('Identity', [
+        agxRow('Name', h('div', { class: 'row2' }, name, renameBtn)),
+        agxRow('Role', h('span', {}, b.role), 'Roles come from the agent template and do not change after the agent is created.'),
+        agxRow('Team', h('span', {}, b.team || 'General'), 'The team is set when the agent is created.'),
+        agxRow('Icon & colour', h('span', { class: 'row2' }, tile(b, 26), h('span', { class: 'mono' }, b.color || '—')), 'The face is drawn from the agent name; the icon and colour are set at creation.'),
+      ]),
+      agxModelSection(b, st),
+      agxCard('Criticality', [
+        agxRow('Criticality', h('div', { class: 'row2' }, crit, metaBtn), 'How much review this agent needs before it acts: low, medium or high.'),
+      ]),
+      h('p', { class: 'muted agx-hint' }, 'Every change here is admin-only and written to the audit log.'));
+  }
+  function agxPermissionsSection(b, st) {
+    const scopes = agxScopeRows(b.scopes);
+    return h('div', {},
+      agxCard('Capabilities', [
+        h('p', { class: 'muted agx-note' }, 'Capabilities control what this agent may do. The server checks every capability on every request; this page only edits the list.'),
+        h('div', { class: 'agx-switchlist' }, scopes.rows),
+        h('div', { class: 'agx-card-actions' },
+          btn(st.busy === 'scopes' ? 'Saving…' : 'Save permissions', () => agxAct('scopes', async () => {
+            await api(`/api/bots/${b.id}/scopes`, { method: 'PUT', body: { scopes: scopes.value() } });
+            await loadBots(); return 'Permissions saved and written to the audit log.';
+          }), 'btn primary', { disabled: !!st.busy })),
+        admin('Admin only. Payments can only be proposed, never executed, and approvals still need a human decision.'),
+      ]));
+  }
+  function agxAccountabilitySection(b, st) {
+    const inv = agxInvRow(b.id), missing = (inv && inv.accountability) || [];
+    const field = (k, ph, max) => {
+      const el = h('input', { class: 'field', maxlength: max, value: st[k] || '', placeholder: ph, 'aria-label': ph });
+      el.addEventListener('input', () => { st[k] = el.value; });
+      return el;
+    };
+    const purpose = h('textarea', { class: 'field', rows: 3, maxlength: 300, 'aria-label': 'Purpose', placeholder: 'What may this agent do, and where are its limits?' });
+    purpose.value = st.purpose || '';
+    purpose.addEventListener('input', () => { st.purpose = purpose.value; });
+    const gaps = missing.length
+      ? h('div', { class: 'row2 agx-gaprow' }, h('span', { class: 'muted' }, 'Missing:'), missing.map((g) => h('span', { class: 'chip warn' }, g === 'no_owner' ? 'owner' : g === 'no_sponsor' ? 'sponsor' : 'purpose')))
+      : h('div', { class: 'row2 agx-gaprow' }, h('span', { class: 'chip ok' }, 'Accountability complete'));
+    return h('div', {},
+      agxCard('Accountability', [
+        h('p', { class: 'muted agx-note' }, 'A named human owner, a sponsor and a stated purpose are what the agent inventory calls accountability. Empty fields show up as gaps.'),
+        gaps,
+        agxRow('Owner', field('owner', 'Name of the accountable person', 80)),
+        agxRow('Sponsor', field('sponsor', 'Name of the sponsor', 80)),
+        agxRow('Purpose', purpose),
+        h('div', { class: 'agx-card-actions' }, btn(st.busy === 'acct' ? 'Saving…' : 'Save accountability', () => agxAct('acct', async () => {
+          await api(`/api/bots/${b.id}/accountability`, { method: 'PATCH', body: { owner: (st.owner || '').trim(), sponsor: (st.sponsor || '').trim(), purpose: (st.purpose || '').trim() } });
+          await loadBots(); return 'Accountability saved. The inventory updates immediately.';
+        }), 'btn primary', { disabled: !!st.busy })),
+      ]));
+  }
+  function agxActivitySection(b, st) {
+    const d = st.audit, evs = (d && d.entries) || [], total = d ? d.total : 0;
+    const refresh = () => {
+      st.auditLoading = true; st.auditErr = ''; syncOverlays(true);
+      api(`/api/bots/${encodeURIComponent(b.id)}/audit?limit=30`).then((r) => {
+        if (S.agx !== st) return;
+        st.audit = r; st.auditLoading = false; syncOverlays(true);
+      }).catch((e) => { if (S.agx !== st) return; st.auditErr = e.message; st.auditLoading = false; syncOverlays(true); });
+    };
+    const verify = () => agxAct('verify', async () => {
+      const v = await api(`/api/bots/${encodeURIComponent(b.id)}/audit/verify`);
+      st.verify = v;
+      return v.valid ? `Chain intact: ${v.checked} event${v.checked === 1 ? '' : 's'} checked.` : 'Chain broken: ' + JSON.stringify(v);
+    });
+    const list = evs.length ? h('div', { class: 'agx-evs agx-evs-lg' }, evs.map((e) => h('div', { class: 'agx-ev' },
+      h('span', { class: 'mono agx-ev-time' }, when(e.ts)),
+      h('span', { class: 'chip agx-ev-kind' }, e.kind),
+      h('span', { class: 'agx-ev-sum' }, e.summary || '—'),
+      h('span', { class: 'muted agx-ev-actor' }, e.actor || 'system')))) : null;
+    return agxCard('History', [
+      h('p', { class: 'muted agx-note' }, 'Every message, note read or written, tool call and approval for this agent is appended to its own hash-linked audit chain. The chain detects edits; it is not an external signature.'),
+      h('div', { class: 'row2 agx-activity-bar' },
+        st.auditLoading ? h('span', { class: 'muted' }, 'Loading activity…') : btn('Refresh', refresh, 'btn'),
+        btn('Verify chain', verify, 'btn', { disabled: !!st.busy }),
+        btn('Export NDJSON', () => agxAct('export', async () => { await dl(`/api/bots/${b.id}/audit/export`, `agent-${b.id}-audit.ndjson`); return 'Audit export downloaded as NDJSON.'; }), 'btn', { disabled: !!st.busy }),
+        d ? h('span', { class: 'chip ' + (d.integrity && d.integrity.valid ? 'ok' : 'warn') }, d.integrity && d.integrity.valid ? 'Chain intact' : 'Chain not verified') : null,
+        h('span', { class: 'sp' }),
+        d ? h('span', { class: 'muted agx-hint' }, `${total} event${total === 1 ? '' : 's'} recorded${total > evs.length ? `, newest ${evs.length} shown` : ''}`) : null),
+      st.auditErr ? h('p', { class: 'agx-warn agx-note' }, 'Activity could not be loaded: ' + st.auditErr) : null,
+      st.auditLoading ? null : (evs.length ? list : h('div', { class: 'agx-empty agx-empty-lg' }, h('b', {}, 'No activity recorded yet'), h('p', { class: 'muted' }, 'The per-agent audit chain is empty. Chat with the agent or run a council call, then refresh.'))),
+    ]);
+  }
+  function agxAppsSection(b, st) {
+    const connected = (S.apps || []).filter((a) => a.connected);
+    const grantsOf = (a) => (a.grants || {})[b.id] || [];
+    const mine = connected.filter((a) => grantsOf(a).length);
+    const cards = mine.map((a) => h('div', { class: 'agx-card agx-app' },
+      h('div', { class: 'agx-card-h' }, agxAppLogo(a, 30), h('b', {}, a.name), h('span', { class: 'chip ' + (a.live ? 'ok' : '') }, a.live ? 'Live MCP server' : 'Demo app')),
+      h('p', { class: 'muted agx-note' }, a.description || ''),
+      h('div', { class: 'row2 agx-toolchips' }, grantsOf(a).map((t) => {
+        const risk = (a.tools.find((x) => x.name === t) || {}).risk;
+        return h('span', { class: 'chip' + (risk === 'write' ? ' warn' : '') }, t + (risk === 'write' ? ' (needs approval)' : risk === 'read' ? ' (read)' : ''));
+      }))));
+    const noGrant = connected.filter((a) => !grantsOf(a).length).map((a) => a.name);
+    return h('div', {},
+      h('p', { class: 'muted agx-note' }, 'Tools are granted per agent in the apps connector. Write tools only create an approval request; secret tools can never be granted.'),
+      mine.length ? h('div', {}, cards) : h('div', { class: 'agx-card agx-empty' }, h('b', {}, 'No app grants'), h('p', { class: 'muted' }, 'Without a grant this agent cannot call any tool.')),
+      noGrant.length ? h('p', { class: 'muted agx-note' }, 'Connected apps with no grant for this agent: ' + noGrant.join(', ') + '.') : null,
+      st.appsErr ? h('p', { class: 'agx-warn agx-note' }, 'Apps could not be refreshed: ' + st.appsErr) : null,
+      h('div', { class: 'row2' },
+        btn('Open connector', () => { S.agx = null; S.modal = null; syncOverlays(true); openApps(); }, 'btn primary'),
+        btn('Refresh grants', () => agxAct('apps', async () => { await loadApps(); return 'Grants reloaded from the server.'; }), 'btn', { disabled: !!st.busy })));
+  }
+  function agxDangerSection(b, st) {
+    const status = () => agxAct('status', async () => {
+      const next = b.status === 'suspended' ? 'active' : 'suspended';
+      await api(`/api/bots/${b.id}/status`, { method: 'POST', body: { status: next, reason: 'manual' } });
+      await loadBots();
+      return next === 'suspended' ? 'Agent suspended. Chat, calls and tools stop immediately.' : 'Agent resumed.';
+    });
+    const trust = () => agxAct('trust', async () => {
+      const next = b.trust === 'verified' ? 'unverified' : 'verified';
+      await api(`/api/bots/${b.id}/trust`, { method: 'POST', body: { trust: next } });
+      await loadBots();
+      return next === 'verified' ? 'Agent marked as reviewed.' : 'Agent marked as unverified.';
+    });
+    const remove = () => {
+      if (!window.confirm(`Delete "${b.name}"? This cannot be undone. The agent's audit trail stays in the recording tables.`)) return;
+      agxAct('delete', async () => {
+        await api(`/api/bots/${b.id}`, { method: 'DELETE' });
+        S.agx = null; S.modal = null; S.agxInv = null; S.agxInvState = ''; S.agxPanelAudit = null;
+        await loadBots();
+        if (S.bot && S.bot.id === b.id) {
+          S.bot = S.bots[0] || null;
+          S.msgs = S.bot ? await api(`/api/bots/${S.bot.id}/messages`) : [];
+          S.tab = 'overview';
+        }
+        S.info = `Agent "${b.name}" deleted.`;
+        render();
+        return S.info;
+      });
+    };
+    return h('div', {},
+      agxCard('Status', [
+        agxRow('Current status', h('span', { class: 'chip ' + (b.status === 'suspended' ? 'warn' : 'ok') }, b.status === 'suspended' ? 'Suspended' : 'Active'), 'A suspended agent cannot chat, join calls or use tools. It can be resumed at any time.'),
+        h('div', { class: 'agx-card-actions' }, btn(st.busy === 'status' ? 'Working…' : (b.status === 'suspended' ? 'Resume agent' : 'Suspend agent'), status, 'btn', { disabled: !!st.busy })),
+      ]),
+      agxCard('Review status', [
+        agxRow('Trust', h('span', { class: 'chip ' + (b.trust === 'verified' ? 'ok' : 'warn') }, b.trust === 'verified' ? 'Verified' : 'Unverified'), 'Verified means a human reviewed this agent. The inventory uses this for its trust score.'),
+        h('div', { class: 'agx-card-actions' }, btn(st.busy === 'trust' ? 'Working…' : (b.trust === 'verified' ? 'Mark as unverified' : 'Mark as reviewed'), trust, 'btn', { disabled: !!st.busy })),
+      ]),
+      h('section', { class: 'agx-card agx-danger' },
+        h('div', { class: 'agx-card-h' }, h('b', {}, 'Delete this agent')),
+        h('p', { class: 'muted agx-note' }, 'Deletes the agent, its messages, grants and team membership. The audit trail stays in the recording tables. This cannot be undone.'),
+        h('div', { class: 'agx-card-actions' }, btn(st.busy === 'delete' ? 'Deleting…' : 'Delete agent', remove, 'btn agx-danger-btn', { disabled: !!st.busy }))));
+  }
+  function agentSettingsModal() {
+    const st = S.agx;
+    const b = st ? (S.bots || []).find((x) => x.id === st.bot) : null;
+    if (!st || !b) return h('div');
+    const close = () => { S.agx = null; S.modal = null; render(); };
+    const sec = st.section || 'general';
+    const def = AGX_SECTIONS.find((s) => s[0] === sec) || AGX_SECTIONS[0];
+    let content;
+    if (sec === 'permissions') content = agxPermissionsSection(b, st);
+    else if (sec === 'accountability') content = agxAccountabilitySection(b, st);
+    else if (sec === 'activity') content = agxActivitySection(b, st);
+    else if (sec === 'apps') content = agxAppsSection(b, st);
+    else if (sec === 'danger') content = agxDangerSection(b, st);
+    else content = agxGeneralSection(b, st);
+    return h('div', { class: 'scrim agx-scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
+      h('div', { class: 'modal agx-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Agent settings' },
+        h('div', { class: 'agx-modal-h' }, tile(b, 44, { float: true }),
+          h('div', { class: 'agx-modal-id' }, h('b', {}, b.name), h('div', { class: 'muted' }, b.role + ' · ' + (b.team || 'General'))),
+          h('span', { class: 'chip ' + (agxHasModel(b) ? '' : 'warn') }, agxModelLabel(b)),
+          h('span', { class: 'sp' }),
+          h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close agent settings', onclick: close }, icon('x'))),
+        h('div', { class: 'agx-modal-body' },
+          h('nav', { class: 'agx-nav', 'aria-label': 'Agent settings sections' }, AGX_SECTIONS.map(([id, label, ic]) =>
+            h('button', { type: 'button', class: 'agx-navbtn', 'aria-current': sec === id ? 'page' : false, onclick: () => { st.section = id; syncOverlays(true); } }, icon(ic, 18), h('span', {}, label)))),
+          h('div', { class: 'agx-sec' },
+            h('div', { class: 'agx-sec-h' }, h('h2', {}, def[1])),
+            st.err ? h('div', { class: 'banner agx-banner agx-banner-bad', role: 'alert' }, st.err) : null,
+            st.info ? h('div', { class: 'banner agx-banner', role: 'status' }, st.info) : null,
+            st.loading ? h('div', { class: 'agx-loading' }, 'Loading agent data…') : null,
+            content))));
+  }
+
   // Reader view: shows the source the agent is reading right now. It is a text extract, not a live browser; a real browser needs an isolated provider.
   function readerView(r) {
     const src = r.sources[r.sources.length - 1], web = src && src.kind === 'web', url = !src ? (r.running ? 'searching…' : '') : web ? src.ref : 'Brain · ' + src.title;
@@ -2501,7 +2964,8 @@ const overlayRoot = (() => {
 
   function syncOverlays(force) {
     const upSig = S.up && S.modal === 'upgrade' ? '|up:' + S.up.plan + ':' + S.up.seats + ':' + (S.up.quote ? 'q' : '') + ':' + (S.up.busy ? 'b' : '') + ':' + (S.up.err || '') : '';
-    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig;
+    const agxSig = S.modal === 'agentSettings' && S.agx ? '|agx:' + S.agx.bot + ':' + S.agx.section + ':' + (S.agx.loading ? 'l' : '') + ':' + (S.agx.busy ? 'b' : '') : '';
+    const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig + agxSig;
     if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
     S._ovlSig = sig;
     const parts = [];
@@ -2514,6 +2978,7 @@ const overlayRoot = (() => {
     else if (m === 'lead') parts.push(leadModal());
     else if (m === 'notif') parts.push(notifModal());
     else if (m === 'upgrade') parts.push(upgradeModal());
+    else if (m === 'agentSettings') parts.push(agentSettingsModal());
     if (S.ctx) parts.push(...agentCtx());
     if (S.tmodal) parts.push(teamModal());
     if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);
