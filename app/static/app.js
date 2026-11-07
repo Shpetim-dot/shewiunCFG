@@ -925,7 +925,7 @@
     const quick = h('div', { class: 'quick' }, [['New agent', 'plus', openAgent], ['New note', 'doc', () => { S.newNote = true; S.graph = false; go('brain').then(() => { S.newNote = true; S.graph = false; render(); }); }], ['New call', 'council', () => { S.room = null; go('council'); }], ['Upload file', 'up', () => { pickFile(); go('brain'); }]].map(([l, ic, fn]) => h('button', { type: 'button', class: 'qbtn', onclick: fn }, icon(ic, 18), h('span', {}, l))));
     const q = h('input', { class: 'field', placeholder: 'Search the menu', value: S.menuQ, 'aria-label': 'Search the menu' });
     q.addEventListener('input', () => { S.menuQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search the menu"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
-    return [h('div', { class: 'dscrim', onclick: () => { S.drawer = false; render(); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
+    return [h('div', { class: 'dscrim', onclick: () => { if (Date.now() - (S._drawerOpened || 0) < 300) return; S.drawer = false; render(); } }), h('nav', { class: 'drawer', 'aria-label': 'Main menu' },
       h('div', { style: 'display:flex;align-items:center;gap:10px;margin:2px 4px 10px' }, h('div', { class: 'logo', style: 'flex:1' }, 'Shewiun'), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close menu', onclick: () => { S.drawer = false; render(); } }, icon('x'))), q, quick,
       h('div', { class: 'm-only' }, h('h3', {}, 'Agents'), S.bots.map((b) => h('button', { class: 'ditem', type: 'button', onclick: () => pick(b.id) }, tile(b, 34), h('span', {}, b.name, h('small', {}, b.role))))),
       group('Organisation', [it('Organisation', 'Workspace, Mitglieder, Umsatz, Mitteilungen', 'shield', 'org', null, S.org ? S.org.members.length : null)]),
@@ -1020,21 +1020,26 @@
       h('div', { class: 'card hero', style: 'padding:18px;margin-bottom:14px' },
         h('div', { class: 'row2' }, h('div', {}, h('h2', { style: 'margin:0' }, me.org ? me.org.name : 'Organisation'), h('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Dein Workspace: Mitglieder, Rollen, Umsatz und Mitteilungen.')),
           h('span', { class: 'chip ok' }, role || '–')),
-        money,
         met ? h('p', { class: 'muted', style: 'font-size:12px' }, 'Agenten ' + met.counts.agents + ' · Notizen ' + met.counts.notes + ' · Calls ' + met.counts.calls + ' · offene Approvals ' + met.counts.approvals_pending + ' · Audit-Events ' + met.counts.audit_events) : null),
-      h('h3', {}, 'Mitglieder (' + o.members.length + ')'),
-      o.members.map(memberCard), inviteBtn,
-      o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Offene Einladungen: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
-      h('h3', { style: 'margin-top:18px' }, 'Announcements'),
-      annCard, notices.length ? notices : emptyState('chat', 'Keine Mitteilungen', 'Announcements erreichen dein Engineering-Team direkt in der Plattform.'),
-      danger));
+      h('div', { class: 'org-grid' },
+        h('div', { class: 'org-col' },
+          h('h3', {}, 'Mitglieder (' + o.members.length + ')'),
+          o.members.map(memberCard), inviteBtn,
+          o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Offene Einladungen: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
+          h('h3', { style: 'margin-top:18px' }, 'Announcements'),
+          annCard, notices.length ? notices : emptyState('chat', 'Keine Mitteilungen', 'Announcements erreichen dein Engineering-Team direkt in der Plattform.')),
+        h('div', { class: 'org-col' },
+          h('h3', {}, 'Billing & Umsatz'),
+          money,
+          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Stripe'), h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, 'Checkout, Customer Portal und Rechnungen laufen pro Organisation ueber Stripe. Kein geteilter Customer.'), btn('Plans & Upgrade', () => go('plans'), 'btn primary')),
+          danger))));
   }
 
   function render() {
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
     const side = h('aside', { class: 'side' },
-      h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: () => { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
+      h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); render(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Search notes', onclick: () => go('brain') }, icon('search')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus'))),
       h('div', { class: 'agents' }, groups.map((g) => [h('div', { class: 'group' }, g), S.bots.filter((b) => b.team === g).map((b) => h('button', { class: 'agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false, onclick: () => pick(b.id) }, tile(b, 38), h('span', {}, h('b', {}, b.name), h('small', {}, b.status === 'suspended' ? 'suspended' : b.preview || b.role))))])),
       meterBlock(),
