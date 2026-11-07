@@ -50,192 +50,127 @@ const overlayRoot = (() => {
   let gid = 0;
   const mix = (hex, a) => { const n = parseInt(col(hex).slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(a < 0 ? v * (1 + a) : v + (255 - v) * a)); return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''); };
   // ---------- voxel agents: flat isometric blocks (front, top, side) with a pixel face and a pixel symbol badge ----------
-    // No gradients and no per-agent filters: three flat tones per block give the depth. The look of one agent is
-    // three small settings (symbol, colour, figure) that the agent settings dialog can change and the API stores.
-    const INK = '#1B2433';
-    const hsl = (hex) => { const n = parseInt(col(hex).slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, bl = (n & 255) / 255, mx = Math.max(r, g, bl), mn = Math.min(r, g, bl), l = (mx + mn) / 2; let hh = 0, sa = 0;
-      if (mx !== mn) { const d = mx - mn; sa = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); hh = mx === r ? (g - bl) / d + (g < bl ? 6 : 0) : mx === g ? (bl - r) / d + 2 : (r - g) / d + 4; hh *= 60; } return [hh, sa, l]; };
-    const fromHsl = (hh, sa, l) => { const k = sa * Math.min(l, 1 - l), f = (n) => { const q = (n + hh / 30) % 12; return Math.round(255 * (l - k * Math.max(-1, Math.min(q - 3, 9 - q, 1)))); }; return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join(''); };
-    const lum = (hex) => { const n = parseInt(col(hex).slice(1), 16); return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; };
-    // 7x7 pixel symbols for the badge. '#' = filled pixel. A name that is not in this map falls back to "spark".
-    const SPRITES = {
-      spark: ['...#...', '...#...', '..###..', '#######', '..###..', '...#...', '...#...'],
-      eagle: ['..#....', '.###...', '#####..', '#######', '.#####.', '..###..', '...##..'],
-      shield: ['.#####.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
-      lens: ['.###...', '#...#..', '#...#..', '#...#..', '.###.#.', '......#', '.......'],
-      compass: ['..###..', '.#...#.', '#..#..#', '#.###.#', '#..#..#', '.#...#.', '..###..'],
-      wrench: ['##...##', '###.###', '.#####.', '..###..', '..###..', '..###..', '..###..'],
-      scales: ['...#...', '.#####.', '#..#..#', '#..#..#', '.#.#.#.', '...#...', '.#####.'],
-      coins: ['.#####.', '#.....#', '.#####.', '#.....#', '.#####.', '#.....#', '.#####.'],
-      book: ['.##.##.', '#..#..#', '#..#..#', '#..#..#', '#..#..#', '.##.##.', '.......'],
-      chat: ['.#####.', '#.....#', '#.....#', '#.....#', '.#####.', '..#....', '.#.....'],
-      pen: ['.....##', '....###', '...###.', '..###..', '.###...', '##.#...', '#......'],
-      rocket: ['...#...', '..###..', '..###..', '..###..', '.#####.', '.#.#.#.', '...#...'],
-      chart: ['.....#.', '.....#.', '...#.#.', '...#.#.', '.#.#.#.', '.#.#.#.', '#######'],
-      terminal: ['#######', '#.....#', '#.#...#', '#..#..#', '#.#.###', '#.....#', '#######'],
-      bug: ['.#...#.', '..###..', '.#####.', '#######', '.#####.', '#.###.#', '.#...#.'],
-      flask: ['..###..', '...#...', '...#...', '..###..', '.#####.', '#######', '#######'],
-      doc: ['#####..', '#...##.', '#...###', '#.....#', '#.....#', '#.....#', '#######'],
-      bolt: ['....##.', '...##..', '..##...', '.#####.', '...##..', '..##...', '.##....'],
-      heart: ['.##.##.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
-      star: ['...#...', '...#...', '#######', '.#####.', '..###..', '.##.##.', '.#...#.'],
-      eye: ['.......', '..###..', '.#...#.', '#..#..#', '.#...#.', '..###..', '.......'],
-      gem: ['.#####.', '###.###', '#######', '.#####.', '..###..', '...#...', '.......'],
-      crown: ['#..#..#', '##.#.##', '#######', '#######', '#######', '.......', '.......'],
-      bulb: ['..###..', '.#####.', '.#####.', '.#####.', '..###..', '..###..', '...#...'],
-      lock: ['..###..', '.#...#.', '.#...#.', '#######', '##...##', '##.#.##', '#######'],
-    };
-    const SYMBOLS = Object.keys(SPRITES);
-    const FIGURES = ['block', 'antenna', 'ears', 'crest'];
-    const FIGURE_LABEL = { block: 'Block', antenna: 'Antenne', ears: 'Ohren', crest: 'Kamm' };
-    const AV_COLORS = ['#2F5BD3', '#3B82F6', '#1B7F79', '#16A37F', '#3D7A4F', '#B7791F', '#E5484D', '#B5543C', '#7A4E9C', '#DB2777', '#5B6B88', '#0F172A'];
-    const spriteCache = {};
-    const spritePath = (name, u) => {
-      const key = name + '|' + u; if (spriteCache[key]) return spriteCache[key];
-      const rows = SPRITES[name] || SPRITES.spark, n = (v) => +v.toFixed(2); let d = '';
-      rows.forEach((row, y) => { let x = 0; while (x < 7) { if (row[x] !== '#') { x++; continue; } let e = x; while (e < 7 && row[e] === '#') e++; d += `M${n(x * u)} ${n(y * u)}h${n((e - x) * u)}v${n(u)}h-${n((e - x) * u)}z`; x = e; } });
-      return (spriteCache[key] = d);
-    };
-    // The face is drawn on a 12x12 pixel grid (one pixel = 2 units on the 48 unit canvas).
-    const R = (x, y, w = 1, t = 1) => `M${x} ${y}h${w}v${t}h-${w}z`;
-    const FACE_EYES = {
-      dot: R(3, 4, 2, 2) + R(7, 4, 2, 2),
-      wide: R(2, 3, 3, 3) + R(7, 3, 3, 3),
-      tall: R(3, 3, 2, 4) + R(7, 3, 2, 4),
-      happy: R(2, 5) + R(3, 4, 2, 1) + R(5, 5) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
-      calm: R(3, 5, 3, 1) + R(7, 5, 3, 1),
-      wink: R(3, 4, 2, 2) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
-    };
-    const EYE_SPEC = { wide: R(2, 3) + R(7, 3), tall: R(3, 3) + R(7, 3) };
-    const FACE_BROWS = {
-      none: '', raise: R(3, 2, 3, 1) + R(7, 1, 3, 1), soft: R(3, 2, 3, 1) + R(7, 2, 3, 1),
-      slant: R(2, 2, 2, 1) + R(4, 3) + R(8, 2, 2, 1) + R(7, 3),
-    };
-    const FACE_MOUTHS = {
-      smile: R(3, 8) + R(4, 9, 4, 1) + R(8, 8), flat: R(4, 9, 4, 1), smirk: R(4, 9, 4, 1) + R(8, 8),
-      open: R(5, 8, 2, 2), dot: R(5, 9, 2, 2), grin: R(3, 8, 6, 1) + R(4, 9, 4, 1),
-    };
-    const CORE_FACE = {
-      strategist: { ring: ['#3B6FE0', '#F2A93B'], eyes: 'dot', brow: 'none', mouth: 'smile' },
-      skeptic: { ring: ['#E5484D', '#2B3A67'], eyes: 'dot', brow: 'raise', mouth: 'flat' },
-      builder: { ring: ['#16A37F', '#F2A93B'], eyes: 'wide', brow: 'slant', mouth: 'smirk' },
-      chair: { ring: ['#7A4E9C', '#3B6FE0'], eyes: 'dot', brow: 'none', mouth: 'dot' },
-    };
-    const CORE_SEED = { strategist: '#2F5BD3', skeptic: '#B7791F', builder: '#1B7F79', chair: '#5B6B88' };
-    const hashOf = (str) => { let x = 7; for (const ch of String(str)) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
-    const pickKey = (o, n) => { const k = Object.keys(o); return k[n % k.length]; };
-    // Everything one figure needs, from the agent record: body colour, accent, face, figure shape and badge symbol.
-    function lookOf(b) {
-      b = b || {};
-      const key = (b.id || b.name || 'x'), core = CORE_FACE[key], x = hashOf(key);
-      let body = col(b.color);
-      if (core && (!b.color || String(b.color).toLowerCase() === CORE_SEED[key].toLowerCase())) body = core.ring[0];
-      const accent = core ? core.ring[1] : fromHsl((hsl(body)[0] + 150) % 360, 0.62, 0.55);
-      const face = core || { eyes: pickKey(FACE_EYES, x >> 3), brow: pickKey(FACE_BROWS, x >> 6), mouth: pickKey(FACE_MOUTHS, x >> 9) };
-      return { body, accent, eyes: face.eyes, brow: face.brow, mouth: face.mouth,
-        figure: FIGURES.includes(b.figure) ? b.figure : FIGURES[x % FIGURES.length], sym: SPRITES[b.icon] ? b.icon : 'spark' };
-    }
-    // A tiny custom mark for "pinned": the G icon map is shared and must not grow for one sidebar state.
-    const av3Pin = (s = 12) => {
-      const v = document.createElementNS(NS, 'svg');
-      for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true' })) v.setAttribute(k, x);
-      v.innerHTML = '<path fill-rule="evenodd" d="M12 2.5a6.5 6.5 0 0 1 6.5 6.4c0 4.6-6.5 12-6.5 12S5.5 13.5 5.5 8.9A6.5 6.5 0 0 1 12 2.5zm0 4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z"/>';
-      return v;
-    };
-    // A pixel symbol as its own small svg (used by the symbol picker).
-    const symbolSvg = (name, s = 22) => {
-      const v = document.createElementNS(NS, 'svg');
-      for (const [k, x] of Object.entries({ viewBox: '0 0 7 7', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true', 'shape-rendering': 'crispEdges' })) v.setAttribute(k, x);
-      v.innerHTML = `<path d="${spritePath(name, 1)}"/>`;
-      return v;
-    };
-    // state: o.thinking = the agent is working or answering (it hops and the mouth moves); o.float = a calm idle bob
-    // for the one hero avatar of a screen. Every other figure is static markup, so lists of agents cost nothing.
-    function tile(b, s = 40, o = {}) {
-      const L=lookOf(b), c=L.body, top=mix(c,.32), side=mix(c,-.3), ink=lum(c)>.55?INK:'#F8FAFC', acc=L.accent;
-      // Four HTML-inspired voxel silhouettes. Eagle is a pixel badge, not wings.
-      const shapes={
-        block:['############','############','############','############','############','############','############','############','############','############'],
-        antenna:['.....##.....','.....##.....','.....##.....','..########..','.##########.','############','############','############','############','############'],
-        ears:['##........##','###......###','############','############','############','############','############','############','############','############'],
-        crest:['....##......','...####......','..######.....','############','############','############','############','############','############','############']
-      };
-      const rows=shapes[L.figure]||shapes.block, cell=2.8, ox=7.2, oy=12, has=(x,y)=>!!(rows[y]&&rows[y][x]==='#');
-      let front='',tops='',sides='';
-      for(let y=0;y<rows.length;y++)for(let x=0;x<rows[y].length;x++)if(has(x,y)){
-        const X=ox+x*cell,Y=oy+y*cell;
-        front+='<rect x="'+X+'" y="'+Y+'" width="'+(cell+.08)+'" height="'+(cell+.08)+'" fill="'+c+'"/>';
-        if(!has(x,y-1))tops+='<path d="M'+X+' '+Y+'l2 -2h'+cell+'l-2 2z" fill="'+top+'"/>';
-        if(!has(x+1,y))sides+='<path d="M'+(X+cell)+' '+Y+'l2 -2v'+cell+'l-2 2z" fill="'+side+'"/>';
-      }
-      const face='<g fill="'+ink+'"><rect x="15" y="25" width="4" height="5"/><rect x="29" y="25" width="4" height="5"/></g><path d="M20 34h8" stroke="'+ink+'" stroke-width="1.6"/>';
-      const badge=s>=28&&!o.nobadge?'<g class="av-tag" transform="translate(34 34)"><rect width="13" height="13" rx="2" fill="'+acc+'" stroke="#fff" stroke-width=".8"/><path d="'+spritePath(L.sym,1.05)+'" transform="translate(3 3)" fill="#fff"/></g>':'';
-      const v=document.createElementNS(NS,'svg'); v.setAttribute('viewBox','0 0 48 48');v.setAttribute('width',s);v.setAttribute('height',s);v.setAttribute('aria-hidden','true');v.setAttribute('shape-rendering','crispEdges');v.setAttribute('class','av'+(o.float?' bob':'')+(o.thinking?' thinking':''));
-      v.innerHTML='<ellipse class="av-ground" cx="24" cy="45.5" rx="14" ry="1.5"/><g class="av-fig">'+tops+sides+front+face+'</g>'+badge;
-      return h('span',{class:'avatar',style:'width:'+s+'px;height:'+s+'px'},v);
-    }  // ---------- cursor gaze: one global pointer tracker moves the hovered avatar's eyes, never a listener per tile ----------
-  const av3Reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-  const av3Fine = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
-  const AV3_GAZE_MAX = 2.1;   // 48x48 viewBox units, so the shift stays subtle at every rendered size
-  let av3Hover = null, av3Px = 0, av3Py = 0, av3Raf = 0;
-  function av3Parts(el) { return { av: el.querySelector('.av'), look: el.querySelector('.look') }; }
-  function av3ClearGaze(el) {
-    const target = el || av3Hover; if (!target) return;
-    const { av, look } = av3Parts(target);
-    if (look) look.style.transform = '';
-    if (av) av.classList.remove('av3-gaze');
-    if (!el || el === av3Hover) av3Hover = null;
+  // No gradients and no per-agent filters: three flat tones per block give the depth. The look of one agent is
+  // three small settings (symbol, colour, figure) that the agent settings dialog can change and the API stores.
+  const INK = '#1B2433';
+  const hsl = (hex) => { const n = parseInt(col(hex).slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, bl = (n & 255) / 255, mx = Math.max(r, g, bl), mn = Math.min(r, g, bl), l = (mx + mn) / 2; let hh = 0, sa = 0;
+    if (mx !== mn) { const d = mx - mn; sa = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); hh = mx === r ? (g - bl) / d + (g < bl ? 6 : 0) : mx === g ? (bl - r) / d + 2 : (r - g) / d + 4; hh *= 60; } return [hh, sa, l]; };
+  const fromHsl = (hh, sa, l) => { const k = sa * Math.min(l, 1 - l), f = (n) => { const q = (n + hh / 30) % 12; return Math.round(255 * (l - k * Math.max(-1, Math.min(q - 3, 9 - q, 1)))); }; return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join(''); };
+  const lum = (hex) => { const n = parseInt(col(hex).slice(1), 16); return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; };
+  // 7x7 pixel symbols for the badge. '#' = filled pixel. A name that is not in this map falls back to "spark".
+  const SPRITES = {
+    spark: ['...#...', '...#...', '..###..', '#######', '..###..', '...#...', '...#...'],
+    shield: ['.#####.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
+    lens: ['.###...', '#...#..', '#...#..', '#...#..', '.###.#.', '......#', '.......'],
+    compass: ['..###..', '.#...#.', '#..#..#', '#.###.#', '#..#..#', '.#...#.', '..###..'],
+    wrench: ['##...##', '###.###', '.#####.', '..###..', '..###..', '..###..', '..###..'],
+    scales: ['...#...', '.#####.', '#..#..#', '#..#..#', '.#.#.#.', '...#...', '.#####.'],
+    coins: ['.#####.', '#.....#', '.#####.', '#.....#', '.#####.', '#.....#', '.#####.'],
+    book: ['.##.##.', '#..#..#', '#..#..#', '#..#..#', '#..#..#', '.##.##.', '.......'],
+    chat: ['.#####.', '#.....#', '#.....#', '#.....#', '.#####.', '..#....', '.#.....'],
+    pen: ['.....##', '....###', '...###.', '..###..', '.###...', '##.#...', '#......'],
+    rocket: ['...#...', '..###..', '..###..', '..###..', '.#####.', '.#.#.#.', '...#...'],
+    chart: ['.....#.', '.....#.', '...#.#.', '...#.#.', '.#.#.#.', '.#.#.#.', '#######'],
+    terminal: ['#######', '#.....#', '#.#...#', '#..#..#', '#.#.###', '#.....#', '#######'],
+    bug: ['.#...#.', '..###..', '.#####.', '#######', '.#####.', '#.###.#', '.#...#.'],
+    flask: ['..###..', '...#...', '...#...', '..###..', '.#####.', '#######', '#######'],
+    doc: ['#####..', '#...##.', '#...###', '#.....#', '#.....#', '#.....#', '#######'],
+    bolt: ['....##.', '...##..', '..##...', '.#####.', '...##..', '..##...', '.##....'],
+    heart: ['.##.##.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
+    star: ['...#...', '...#...', '#######', '.#####.', '..###..', '.##.##.', '.#...#.'],
+    eye: ['.......', '..###..', '.#...#.', '#..#..#', '.#...#.', '..###..', '.......'],
+    gem: ['.#####.', '###.###', '#######', '.#####.', '..###..', '...#...', '.......'],
+    crown: ['#..#..#', '##.#.##', '#######', '#######', '#######', '.......', '.......'],
+    bulb: ['..###..', '.#####.', '.#####.', '.#####.', '..###..', '..###..', '...#...'],
+    lock: ['..###..', '.#...#.', '.#...#.', '#######', '##...##', '##.#.##', '#######'],
+  };
+  const SYMBOLS = Object.keys(SPRITES);
+  const FIGURES = ['block', 'antenna', 'ears', 'crest'];
+  const FIGURE_LABEL = { block: 'Block', antenna: 'Antenna', ears: 'Ears', crest: 'Crest' };
+  const AV_COLORS = ['#2F5BD3', '#3B82F6', '#1B7F79', '#16A37F', '#3D7A4F', '#B7791F', '#E5484D', '#B5543C', '#7A4E9C', '#DB2777', '#5B6B88', '#0F172A'];
+  const spriteCache = {};
+  const spritePath = (name, u) => {
+    const key = name + '|' + u; if (spriteCache[key]) return spriteCache[key];
+    const rows = SPRITES[name] || SPRITES.spark, n = (v) => +v.toFixed(2); let d = '';
+    rows.forEach((row, y) => { let x = 0; while (x < 7) { if (row[x] !== '#') { x++; continue; } let e = x; while (e < 7 && row[e] === '#') e++; d += `M${n(x * u)} ${n(y * u)}h${n((e - x) * u)}v${n(u)}h-${n((e - x) * u)}z`; x = e; } });
+    return (spriteCache[key] = d);
+  };
+  // The face is drawn on a 12x12 pixel grid (one pixel = 2 units on the 48 unit canvas).
+  const R = (x, y, w = 1, t = 1) => `M${x} ${y}h${w}v${t}h-${w}z`;
+  const FACE_EYES = {
+    dot: R(3, 4, 2, 2) + R(7, 4, 2, 2),
+    wide: R(2, 3, 3, 3) + R(7, 3, 3, 3),
+    tall: R(3, 3, 2, 4) + R(7, 3, 2, 4),
+    happy: R(2, 5) + R(3, 4, 2, 1) + R(5, 5) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
+    calm: R(3, 5, 3, 1) + R(7, 5, 3, 1),
+    wink: R(3, 4, 2, 2) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
+  };
+  const EYE_SPEC = { wide: R(2, 3) + R(7, 3), tall: R(3, 3) + R(7, 3) };
+  const FACE_BROWS = {
+    none: '', raise: R(3, 2, 3, 1) + R(7, 1, 3, 1), soft: R(3, 2, 3, 1) + R(7, 2, 3, 1),
+    slant: R(2, 2, 2, 1) + R(4, 3) + R(8, 2, 2, 1) + R(7, 3),
+  };
+  const FACE_MOUTHS = {
+    smile: R(3, 8) + R(4, 9, 4, 1) + R(8, 8), flat: R(4, 9, 4, 1), smirk: R(4, 9, 4, 1) + R(8, 8),
+    open: R(5, 8, 2, 2), dot: R(5, 9, 2, 2), grin: R(3, 8, 6, 1) + R(4, 9, 4, 1),
+  };
+  const CORE_FACE = {
+    strategist: { ring: ['#3B6FE0', '#F2A93B'], eyes: 'dot', brow: 'none', mouth: 'smile' },
+    skeptic: { ring: ['#E5484D', '#2B3A67'], eyes: 'dot', brow: 'raise', mouth: 'flat' },
+    builder: { ring: ['#16A37F', '#F2A93B'], eyes: 'wide', brow: 'slant', mouth: 'smirk' },
+    chair: { ring: ['#7A4E9C', '#3B6FE0'], eyes: 'dot', brow: 'none', mouth: 'dot' },
+  };
+  const CORE_SEED = { strategist: '#2F5BD3', skeptic: '#B7791F', builder: '#1B7F79', chair: '#5B6B88' };
+  const hashOf = (str) => { let x = 7; for (const ch of String(str)) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
+  const pickKey = (o, n) => { const k = Object.keys(o); return k[n % k.length]; };
+  // Everything one figure needs, from the agent record: body colour, accent, face, figure shape and badge symbol.
+  function lookOf(b) {
+    b = b || {};
+    const key = (b.id || b.name || 'x'), core = CORE_FACE[key], x = hashOf(key);
+    let body = col(b.color);
+    if (core && (!b.color || String(b.color).toLowerCase() === CORE_SEED[key].toLowerCase())) body = core.ring[0];
+    const accent = core ? core.ring[1] : fromHsl((hsl(body)[0] + 150) % 360, 0.62, 0.55);
+    const face = core || { eyes: pickKey(FACE_EYES, x >> 3), brow: pickKey(FACE_BROWS, x >> 6), mouth: pickKey(FACE_MOUTHS, x >> 9) };
+    return { body, accent, eyes: face.eyes, brow: face.brow, mouth: face.mouth,
+      figure: FIGURES.includes(b.figure) ? b.figure : FIGURES[x % FIGURES.length], sym: SPRITES[b.icon] ? b.icon : 'spark' };
   }
-  function av3GazeFrame() {
-    av3Raf = 0;
-    const el = av3Hover; if (!el) return;
-    if (!el.isConnected) { av3Hover = null; return; }
-    const { av, look } = av3Parts(el); if (!av || !look) return;
-    const r = av.getBoundingClientRect(); if (!r.width) return;
-    const reach = r.width * 0.7 + 26;
-    const nx = Math.max(-1, Math.min(1, (av3Px - (r.left + r.width / 2)) / reach));
-    const ny = Math.max(-1, Math.min(1, (av3Py - (r.top + r.height / 2)) / reach));
-    av.classList.add('av3-gaze');
-    look.style.transform = `translate(${(nx * AV3_GAZE_MAX).toFixed(2)}px, ${(ny * AV3_GAZE_MAX).toFixed(2)}px)`;
-  }
-  document.addEventListener('pointermove', (e) => {
-    if (e.pointerType && e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
-    if ((av3Reduce && av3Reduce.matches) || (av3Fine && !av3Fine.matches) || !e.target || !e.target.closest) { av3ClearGaze(); return; }
-    const hit = e.target.closest('.avatar');
-    if (av3Hover && av3Hover !== hit) av3ClearGaze(av3Hover);
-    av3Hover = hit; av3Px = e.clientX; av3Py = e.clientY;
-    if (hit && !av3Raf) av3Raf = requestAnimationFrame(av3GazeFrame);
-  }, { passive: true });
-  document.addEventListener('pointerout', (e) => { if (!e.relatedTarget && av3Hover) av3ClearGaze(); });
-  document.addEventListener('scroll', () => { if (av3Hover && !av3Raf) av3Raf = requestAnimationFrame(av3GazeFrame); }, { passive: true, capture: true });
-  window.addEventListener('blur', () => av3ClearGaze());
-  // ---------- walk-to-message: the agent's little avatar hops from the sidebar edge to a live reply ----------
-  function av3WalkToMessage(bot) {
-    if (!bot || S.view !== 'chat' || (av3Reduce && av3Reduce.matches)) return;
-    const replies = document.querySelectorAll('#scroll .msgs .msg.agent');
-    const target = replies[replies.length - 1];
-    if (!target) return;
-    const tr = target.getBoundingClientRect();
-    if (tr.width < 20 || tr.height < 10) return;
-    const side = document.querySelector('.side');
-    const sr = side ? side.getBoundingClientRect() : null;
-    const size = 30, narrow = window.innerWidth <= 760 || !sr || sr.width < 40;
-    const startX = narrow ? 12 : Math.max(6, sr.right + 2);
-    const startY = Math.min(window.innerHeight - size - 8, Math.max(8, tr.top + tr.height / 2 - size / 2));
-    const endX = Math.min(window.innerWidth - size - 8, Math.max(8, tr.left + 6));
-    const endY = Math.min(window.innerHeight - size - 8, Math.max(8, tr.top - 4));
-    const walker = h('div', { class: 'av3-walk', 'aria-hidden': 'true' }, tile(bot, size, { thinking: true }));
-    walker.style.left = startX + 'px';
-    walker.style.top = startY + 'px';
-    walker.style.setProperty('--av3-dx', (endX - startX).toFixed(1) + 'px');
-    walker.style.setProperty('--av3-dy', (endY - startY).toFixed(1) + 'px');
-    const stop = () => { if (walker.parentNode) walker.remove(); };
-    walker.addEventListener('animationend', stop);
-    setTimeout(stop, 1200);
-    document.body.append(walker);
+  // A tiny custom mark for "pinned": the G icon map is shared and must not grow for one sidebar state.
+  const av3Pin = (s = 12) => {
+    const v = document.createElementNS(NS, 'svg');
+    for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true' })) v.setAttribute(k, x);
+    v.innerHTML = '<path fill-rule="evenodd" d="M12 2.5a6.5 6.5 0 0 1 6.5 6.4c0 4.6-6.5 12-6.5 12S5.5 13.5 5.5 8.9A6.5 6.5 0 0 1 12 2.5zm0 4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z"/>';
+    return v;
+  };
+  // A pixel symbol as its own small svg (used by the symbol picker).
+  const symbolSvg = (name, s = 22) => {
+    const v = document.createElementNS(NS, 'svg');
+    for (const [k, x] of Object.entries({ viewBox: '0 0 7 7', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true', 'shape-rendering': 'crispEdges' })) v.setAttribute(k, x);
+    v.innerHTML = `<path d="${spritePath(name, 1)}"/>`;
+    return v;
+  };
+  // state: o.thinking = the agent is working or answering (it hops and the mouth moves); o.float = a calm idle bob
+  // for the one hero avatar of a screen. Every other figure is static markup, so lists of agents cost nothing.
+  function tile(b, s = 40, o = {}) {
+    const L = lookOf(b), c = L.body, top = mix(c, 0.32), side = mix(c, -0.3), ink = lum(c) > 0.55 ? INK : '#F8FAFC';
+    const acc = L.accent, aTop = mix(acc, 0.3), aSide = mix(acc, -0.3);
+    const back = L.figure === 'ears' ? `<rect x="3" y="27" width="4" height="9" fill="${acc}"/><rect x="41" y="17" width="3" height="9" fill="${aSide}"/>` : '';
+    const deco = L.figure === 'antenna' ? `<rect x="23" y="5" width="2" height="9" fill="${side}"/><rect x="21" y="2" width="6" height="4" fill="${acc}"/>`
+      : L.figure === 'crest' ? `<rect x="16" y="12" width="4" height="4" fill="${aTop}"/><rect x="21" y="10" width="4" height="4" fill="${aTop}"/><rect x="26" y="12" width="4" height="4" fill="${aTop}"/>` : '';
+    const badge = s >= 28 && !o.nobadge ? `<g class="av-tag" transform="translate(31 31)"><rect class="av-tagbg" width="16" height="16" rx="2.5"/><path class="av-sym" transform="translate(2.4 2.4)" d="${spritePath(L.sym, 1.6)}"/></g>` : '';
+    const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true'); v.setAttribute('shape-rendering', 'crispEdges');
+    v.setAttribute('class', 'av' + (o.float ? ' bob' : '') + (o.thinking ? ' thinking' : ''));
+    v.style.setProperty('--bd', `-${(Math.random() * 5).toFixed(1)}s`);
+    v.innerHTML = '<ellipse class="av-ground" cx="22" cy="45.4" rx="15" ry="1.6"/>'
+      + `<g class="av-fig">${back}`
+      + `<path class="av-side" d="M31 19L41 9V33L31 43Z" fill="${side}"/>`
+      + `<path class="av-top" d="M7 19L17 9H41L31 19Z" fill="${top}"/>`
+      + `<rect class="av-front" x="7" y="19" width="24" height="24" fill="${c}"/>`
+      + `<rect x="7" y="19" width="24" height="1" fill="#FFFFFF" opacity=".28"/>${deco}`
+      + `<g transform="translate(7 19) scale(2)" fill="${ink}"><g class="av-eyes"><path d="${FACE_EYES[L.eyes] || FACE_EYES.dot}"/>${EYE_SPEC[L.eyes] ? `<path fill="#FFFFFF" d="${EYE_SPEC[L.eyes]}"/>` : ''}</g>`
+      + `<path d="${FACE_BROWS[L.brow] || ''}"/><g class="av-mouth"><path d="${FACE_MOUTHS[L.mouth] || FACE_MOUTHS.smile}"/></g></g></g>${badge}`;
+    return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
   }
   const when = (t) => (t || '').slice(0, 16).replace('T', ' ');
-  const notif = window.ShewiunNotif ? window.ShewiunNotif({ h, when, icon, btn, openNote: (...args) => openNote(...args) }) : null;
   const botBy = (id) => S.bots.find((b) => b.id === id) || { color: '#5B6B88', icon: 'spark', name: id };
   const admin = (t) => h('p', { class: 'muted', style: 'font-size:12px' }, t);
   const badge = (n) => (n ? h('span', { class: 'badge' }, String(n)) : null);
@@ -271,7 +206,7 @@ const overlayRoot = (() => {
       let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const line = chunk.split('\n').find((l) => l.startsWith('data: ')); if (line) onEv(JSON.parse(line.slice(6))); }
     }
   }
-  const run = async (f) => { S.err = ''; try { await f(); } catch (e) { S.err = e.message; if (notif && !S.upsell) notif.toast(e.message, 'bad'); if (S.upsell) { S.modal = 'upsell'; S.err = ''; } } render(); };
+  const run = async (f) => { S.err = ''; try { await f(); } catch (e) { S.err = e.message; if (S.upsell) { S.modal = 'upsell'; S.err = ''; } } render(); };
   const loadBots = async () => { S.bots = await api('/api/bots'); if (S.bot) S.bot = S.bots.find((b) => b.id === S.bot.id) || S.bots[0]; };
   const loadNotes = async () => { S.notes = await api('/api/brain/notes'); };
   const loadApps = async () => { S.apps = await api('/api/apps'); };
@@ -327,12 +262,8 @@ const overlayRoot = (() => {
   function updateTicker() { const t = document.getElementById('ticker'); if (t) t.replaceChildren(...S.activity.slice(0, 6).map((e) => h('div', {}, `${when(e.ts)} · ${e.bot || 'someone'} ${e.kind === 'read' ? 'read' : 'wrote'} "${e.title || 'a note'}"`))); }
   async function send() {
     const text = S.draft.trim(); if (!text || S.busy) return;
-    const before = S.msgs.length;
     S.draft = ''; S.busy = true; S.msgs.push({ role: 'user', content: text }); render();
     await run(async () => { try { const r = await api(`/api/bots/${S.bot.id}/messages`, { method: 'POST', body: { content: text } }); S.msgs.push({ role: 'agent', content: r.reply, note: r.draft_note_id, used: r.used }); } finally { S.busy = false; } });
-    // Walk the little avatar to the bubble only for a live reply (never while history is loading).
-    const last = S.msgs[S.msgs.length - 1];
-    if (last && last.role === 'agent' && S.msgs.length > before) av3WalkToMessage(S.bot);
   }
   async function loadDemo() { await run(async () => { const r = await api('/api/demo/workspace', { method: 'POST' }); await Promise.all([loadBots(), loadNotes(), loadApps(), loadTeams()]); S.menu = false; S.info = `Demo workspace loaded: ${r.agents} agents, ${r.notes} notes, 2 teams, 3 apps. All of it is sample data.`; }); }
 
@@ -344,6 +275,63 @@ const overlayRoot = (() => {
     return h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, `Getting started: ${items.filter((i) => i[1]).length} of ${items.length}`), btn('Hide', () => { S.skip = true; render(); }, 'link')),
       items.map(([t, done, f, l]) => h('div', { class: 'check' + (done ? ' done' : '') }, h('span', { class: 'tick' }, done ? icon('check', 14) : null), h('span', { style: 'flex:1' }, t), done ? null : btn(l, f, 'btn'))));
   }
+  // ---------- calm feedback: small toasts instead of banners that stay on screen ----------
+  const ago = (ts) => {
+    const t = Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(ts || '') ? ts : (ts || '') + 'Z'); if (!t) return when(ts);
+    const d = Math.max(0, (Date.now() - t) / 1000);
+    return d < 60 ? 'now' : d < 3600 ? Math.floor(d / 60) + ' min' : d < 86400 ? Math.floor(d / 3600) + ' h' : Math.floor(d / 86400) + ' d';
+  };
+  function toast(msg, kind) {
+    let box = document.getElementById('toasts');
+    if (!box) { box = h('div', { id: 'toasts', class: 'toasts', 'aria-live': 'polite' }); document.body.append(box); }
+    const el = h('div', { class: 'toast' + (kind === 'bad' ? ' bad' : ''), role: kind === 'bad' ? 'alert' : 'status' }, h('span', { class: 'toast-text' }, String(msg)),
+      h('button', { class: 'toast-x', type: 'button', 'aria-label': 'Dismiss', onclick: () => el.remove() }, icon('x', 14)));
+    box.append(el); while (box.children.length > 3) box.firstChild.remove();
+    setTimeout(() => el.remove(), kind === 'bad' ? 7000 : 4200);
+  }
+
+  // ---------- chat: the agent speaks as a profile (avatar, name, role, time), you speak as a plain bubble ----------
+  function chatRow(b, m, prev) {
+    if (m.role !== 'agent') return h('div', { class: 'msgrow user' }, h('div', { class: 'msg user' }, m.content));
+    const cont = !!prev && prev.role === 'agent';
+    return h('div', { class: 'msgrow ai' + (cont ? ' cont' : '') },
+      h('span', { class: 'msgav' }, cont ? null : tile(b, 36)),
+      h('div', { class: 'msgmain' },
+        cont ? null : h('div', { class: 'msghead' }, h('b', {}, b.name), h('span', { class: 'muted' }, b.role), m.created_at ? h('span', { class: 'muted mono' }, when(m.created_at)) : null),
+        h('div', { class: 'msg agent' }, m.content),
+        h('small', { class: 'muted msgsrc' }, m.used && m.used.length ? ['Based on: ', m.used.flatMap((u) => [btn(u.title, () => openNote(u.id), 'link'), ' '])] : 'Based on no verified notes'),
+        m.note ? h('small', {}, btn('Saved to Brain as draft', () => openNote(m.note), 'link')) : null));
+  }
+  const chatTyping = (b) => h('div', { class: 'msgrow ai' }, h('span', { class: 'msgav' }, tile(b, 36, { thinking: true })),
+    h('div', { class: 'msgmain' }, h('div', { class: 'msghead' }, h('b', {}, b.name), h('span', { class: 'muted' }, 'is answering…')),
+      h('div', { class: 'skel-lines', 'aria-hidden': 'true' }, h('span', { class: 'skel-line' }), h('span', { class: 'skel-line short' }))));
+
+  // ---------- notification centre: a side panel with filters, day groups, per-item read state ----------
+  const NT_ICON = { approval: 'shield', run: 'terminal', audit: 'doc' };
+  const ntDay = (ts) => { const t = Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(ts || '') ? ts : (ts || '') + 'Z'); return t && new Date(t).toDateString() === new Date().toDateString() ? 'Today' : 'Earlier'; };
+  const markRead = (keys) => api('/api/notifications/read', { method: 'POST', body: { keys } }).then(loadNotifs).then(() => render()).catch(() => {});
+  function notifModal() {
+    const n = S.notifs || { items: [], unread: 0 }, f = S.nfilter || 'all';
+    const close = () => { S.modal = null; syncOverlays(true); };
+    const items = n.items.filter((i) => (f === 'unread' ? !i.read : f === 'approval' ? i.kind === 'approval' : true));
+    const tab = (id, label, count) => h('button', { type: 'button', class: 'nt-tab', 'aria-selected': f === id ? 'true' : 'false', onclick: () => { S.nfilter = id; syncOverlays(true); } }, label, count ? h('span', { class: 'nt-count' }, String(count)) : null);
+    const row = (i) => h('button', { type: 'button', class: 'nt-item' + (i.read ? '' : ' unread'),
+      onclick: () => { if (!i.read) markRead([i.key]); S.modal = null; syncOverlays(true); go(i.view || 'control'); } },
+      h('span', { class: 'nt-ic' }, icon(NT_ICON[i.kind] || 'bell', 16)),
+      h('span', { class: 'nt-main' }, h('b', {}, i.title), h('span', { class: 'nt-detail muted' }, String(i.detail || ''))),
+      h('span', { class: 'nt-time muted' }, ago(i.ts)), i.read ? null : h('span', { class: 'nt-dot', 'aria-label': 'Unread' }));
+    const groups = ['Today', 'Earlier'].map((g) => [g, items.filter((i) => ntDay(i.ts) === g)]).filter(([, l]) => l.length);
+    const body = S.notifLoading ? h('div', { class: 'skel-lines', style: 'padding:16px' }, [1, 2, 3, 4].map(() => h('span', { class: 'skel-line tall' })))
+      : groups.length ? groups.map(([g, l]) => h('section', {}, h('h3', { class: 'nt-group' }, g), l.map(row)))
+        : h('div', { class: 'empty' }, icon('bell', 30), h('h3', {}, f === 'unread' ? 'You are all caught up' : 'Nothing needs your attention'), h('p', { class: 'muted' }, 'Approvals, runs and audit alerts show up here.'));
+    return h('div', { class: 'scrim nt-scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
+      h('aside', { class: 'nt-panel', role: 'dialog', 'aria-label': 'Notifications' },
+        h('div', { class: 'nt-head' }, h('h2', {}, 'Notifications'), h('span', { class: 'sp' }),
+          n.unread ? btn('Mark all read', () => markRead(n.items.map((i) => i.key)), 'link') : null, btn([icon('x', 16)], close, 'ibtn nt-close', { 'aria-label': 'Close' })),
+        h('div', { class: 'nt-tabs', role: 'tablist' }, tab('all', 'All'), tab('unread', 'Unread', n.unread), tab('approval', 'Approvals')),
+        h('div', { class: 'nt-body' }, body)));
+  }
+
   function chatView() {
     const b = S.bot; if (!b) return h('div', { class: 'body' }, h('p', { class: 'empty muted' }, 'Choose an agent.'));
     const ta = h('textarea', { rows: 1, placeholder: `Message ${b.name}`, 'aria-label': `Message ${b.name}` }); ta.value = S.draft;
@@ -354,10 +342,10 @@ const overlayRoot = (() => {
       h('div', { class: 'bar' }, tile(b, 34, { float: true, thinking: S.busy }), h('h1', {}, b.name), h('span', { class: 'muted' }, b.role), b.status === 'suspended' ? h('span', { class: 'chip warn' }, 'suspended') : null, h('span', { class: 'sp' }), S.bill && S.bill.enabled && S.bill.plan === 'free' ? btn('Upgrade', () => { track('upgrade_click'); go('plans'); }, 'btn primary') : null, h('span', { class: 'chip' }, b.model),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Toggle agent details', 'aria-pressed': S.panel, onclick: () => { S.panel = !S.panel; render(); } }, icon('panel'))),
       h('div', { class: 'body', id: 'scroll', 'aria-live': 'polite' }, h('div', { class: 'col' }, checklist(), h('div', { class: 'msgs' },
-         S.msgs.length ? S.msgs.map((m,i)=>notif?notif.chatRow(b,m,S.msgs[i-1],tile):h('div',{class:'msg '+m.role},m.content))
-           : h('p', { class: 'empty muted' }, `Start a conversation with ${b.name}. Replies are scripted until a model key is set.`),
-         S.busy ? (notif?notif.chatTyping(b,tile):h('div',{class:'msg agent muted'},`${b.name} is answering…`)) : null))),
-       h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb)));
+        S.msgs.length ? S.msgs.map((m, i) => chatRow(b, m, S.msgs[i - 1]))
+          : h('p', { class: 'empty muted' }, `Start a conversation with ${b.name}. Replies are scripted until a model key is set.`),
+        S.busy ? chatTyping(b) : null))),
+      h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb)));
   }
   function passport() {
     const b = S.bot; if (!b) return null;
@@ -528,7 +516,7 @@ const overlayRoot = (() => {
     const now = Date.now(); let pulsing = false;
     for (const n of nodes) {
       for (const el of [n.el, n.halo]) { el.setAttribute('cx', n.x); el.setAttribute('cy', n.y); } n.label.setAttribute('x', n.x + n.r + 3); n.label.setAttribute('y', n.y + 4);
-      const until = S.pulse[n.id] || 0; if (until > now) { pulsing = true; n.halo.setAttribute('opacity', (((until - now) / 6000) * 0.9).toFixed(2)); n.halo.setAttribute('r', n.r + 6 + 3 * Math.sin(now / 200)); } else n.halo.setAttribute('opacity', 0);
+      const until = S.pulse[n.id] || 0; if (until > now) { pulsing = true; n.halo.setAttribute('opacity', (((until - now) / 6000) * 0.9).toFixed(2)); n.halo.setAttribute('r', n.r + 6); } else n.halo.setAttribute('opacity', 0);
     }
     sim.alpha *= 0.985; if (sim.alpha > 0.03 || sim.drag || pulsing) sim.raf = requestAnimationFrame(tick);
   }
@@ -536,12 +524,12 @@ const overlayRoot = (() => {
     const W = 860, H = 560, s = svg(W, H), deg = {}, byId = {};
     edges.forEach((e) => { deg[e.from] = (deg[e.from] || 0) + 1; deg[e.to] = (deg[e.to] || 0) + 1; });
     nodes.forEach((n, i) => { const a = (2 * Math.PI * i) / Math.max(nodes.length, 1); Object.assign(n, { x: W / 2 + Math.cos(a) * W / 3.2, y: H / 2 + Math.sin(a) * H / 3.2, vx: 0, vy: 0, r: 5 + Math.min(deg[n.id] || 0, 8) }); byId[n.id] = n; });
-    const lines = edges.map(() => sadd(s, 'line', { stroke: '#8FB1FF', 'stroke-opacity': '.28' }));
+    const lines = edges.map(() => sadd(s, 'line', { stroke: 'currentColor', 'stroke-opacity': '.22' }));
     sim = { nodes, edges, lines, byId, W, H, alpha: 1, raf: 0, drag: null };
     nodes.forEach((n) => {
-      const c = nodeColor(n); n.halo = sadd(s, 'circle', { r: n.r + 8, fill: 'none', stroke: '#7FA2FF', 'stroke-width': 2, opacity: 0 });
-      n.el = sadd(s, 'circle', { r: n.r, fill: n.status === 'verified' ? c : '#0B1A33', stroke: c, 'stroke-width': 2, style: 'cursor:pointer' }); sadd(n.el, 'title', {}, `${n.title} (${n.kind}, ${n.status}, ${n.space})`);
-      n.label = sadd(s, 'text', { 'font-size': 10, fill: '#CFE0FF', 'pointer-events': 'none' }, n.title.slice(0, 24));
+      const c = nodeColor(n); n.halo = sadd(s, 'circle', { r: n.r + 8, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2, opacity: 0 });
+      n.el = sadd(s, 'circle', { r: n.r, fill: n.status === 'verified' ? c : 'var(--surface)', stroke: c, 'stroke-width': 2, style: 'cursor:pointer' }); sadd(n.el, 'title', {}, `${n.title} (${n.kind}, ${n.status}, ${n.space})`);
+      n.label = sadd(s, 'text', { 'font-size': 10, fill: 'currentColor', 'pointer-events': 'none' }, n.title.slice(0, 24));
       n.el.addEventListener('pointerdown', (ev) => { if (!sim) return; sim.drag = n; n.moved = 0; ev.preventDefault(); sim.alpha = 0.6; kick(); });
     });
     const at = (ev) => { const r = s.getBoundingClientRect(); return [((ev.clientX - r.left) * W) / (r.width || W), ((ev.clientY - r.top) * H) / (r.height || H)]; };
@@ -622,7 +610,7 @@ const overlayRoot = (() => {
     if (S.orphans) list = list.filter((n) => !(n.links || []).length && !(n.backlinks_count || 0));
     if (S.sortBy === 'title') list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     else if (S.sortBy === 'links') list = [...list].sort((a, b) => ((b.links || []).length + (b.backlinks_count || 0)) - ((a.links || []).length + (a.backlinks_count || 0)));
-    const kindChips = ['', 'note', 'fact', 'decision', 'rule', 'hypothesis'].map((k) => btn(k || 'All', () => { S.kindFilter = k; render(); }, 'chip' + (S.kindFilter === k ? ' ok' : ''), { 'aria-pressed': (S.kindFilter || '') === k }));
+    const kindChips = h('select', { class: 'field brain-sel', 'aria-label': 'Kind filter', onchange: (e) => { S.kindFilter = e.target.value; render(); } }, [['', 'All kinds'], ...['note', 'fact', 'decision', 'rule', 'hypothesis'].map((k) => [k, k])].map(([v, l]) => h('option', { value: v, selected: (S.kindFilter || '') === v }, l)));
     const sortSel = h('select', { class: 'field', style: 'width:auto;font-size:12px', 'aria-label': 'Sort notes', onchange: (e) => { S.sortBy = e.target.value; render(); } },
       [['', 'Recently changed'], ['title', 'Title A-Z'], ['links', 'Most links']].map(([v, l]) => h('option', { value: v, selected: (S.sortBy || '') === v }, l)));
     const tree = h('div', { class: 'tree' }, [...new Set(list.map((n) => n.space))].sort().map((sp) => h('details', { open: true }, h('summary', {}, `${sp} (${list.filter((n) => n.space === sp).length})`),
@@ -634,8 +622,8 @@ const overlayRoot = (() => {
     const drop = h('div', { class: 'drop' }, icon('doc', 18), h('span', { style: 'flex:1' }, 'Drop a file or ', btn('upload', pickFile, 'link')), h('small', { class: 'muted' }, '.md .txt .csv .json .pdf'));
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); }); drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); uploadFile(e.dataTransfer.files[0]); });
-    const left = h('div', {}, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Neurons'], () => { S.graph = !S.graph; S.newNote = false; render(); })), drop,
-      h('div', { style: 'height:8px' }), q, h('div', { class: 'row2', style: 'margin:8px 0' }, ['', 'draft', 'verified'].map((f) => btn(f || 'All', () => { S.filter = f; render(); }, 'chip' + (S.filter === f ? ' ok' : ''), { 'aria-pressed': S.filter === f })), S.space ? btn(`space: ${S.space} ×`, () => { S.space = ''; render(); }, 'chip ok') : null),
+    const left = h('div', {}, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Graph'], () => { S.graph = !S.graph; S.newNote = false; render(); })), drop,
+      h('div', { style: 'height:8px' }), q, h('div', { class: 'row2', style: 'margin:8px 0' }, h('select', { class: 'field brain-sel', 'aria-label': 'Status filter', onchange: (e) => { S.filter = e.target.value; render(); } }, [['', 'All statuses'], ['draft', 'Drafts'], ['verified', 'Verified']].map(([v, l]) => h('option', { value: v, selected: (S.filter || '') === v }, l))), S.space ? btn(`space: ${S.space} ×`, () => { S.space = ''; render(); }, 'chip ok') : null),
       h('div', { class: 'row2', style: 'margin:6px 0;flex-wrap:wrap' }, kindChips, btn(S.orphans ? 'Orphans on' : 'Orphans', () => { S.orphans = !S.orphans; render(); }, 'chip' + (S.orphans ? ' ok' : ''), { 'aria-pressed': !!S.orphans }), sortSel),
       list.length ? tree : (S.notes.length ? h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'No note matches the current filters.'), btn('Reset filters', () => { S.kindFilter = ''; S.filter = ''; S.orphans = false; S.space = ''; S.q = ''; S.sortBy = ''; render(); }, 'btn')) : h('p', { class: 'muted' }, 'No notes yet.')));
     let mid; const n = S.note;
@@ -652,8 +640,8 @@ const overlayRoot = (() => {
       const spSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Space filter', onchange: (e) => { S.gSpace = e.target.value; render(); } }, [['', 'All spaces'], ...spaces.map((x) => [x, x])].map(([v, l]) => h('option', { value: v, selected: S.gSpace === v }, l)));
       const zoom = (d) => { S.gzoom = Math.max(0.5, Math.min(2, (S.gzoom || 1) + d)); render(); };
       const zbtns = h('div', { class: 'row2', style: 'width:auto' }, btn('−', () => zoom(-0.2), 'chip', { 'aria-label': 'Zoom out' }), btn('+', () => zoom(0.2), 'chip', { 'aria-label': 'Zoom in' }));
-      mid = h('div', {}, h('h2', {}, 'Live brain'), h('div', { class: 'row2', style: 'margin-bottom:8px' }, sel, stSel, spSel, zbtns, h('span', { class: 'muted', id: 'gcap' }, '')),
-        h('div', { class: 'legend' }, h('span', {}, 'Filled = verified, hollow = draft'), h('span', {}, 'Color = the agent that wrote it'), h('span', {}, 'Drag a neuron. A halo means an agent just read or wrote it.')), bigGraph());
+      mid = h('div', {}, h('h2', {}, 'Brain'), h('div', { class: 'row2', style: 'margin-bottom:8px' }, sel, stSel, spSel, zbtns, h('span', { class: 'muted', id: 'gcap' }, '')),
+        h('div', { class: 'legend' }, h('span', {}, 'Filled = verified · hollow = draft'), h('span', {}, 'Ring = an agent just read or wrote it')), bigGraph());
     } else if (n) {
       const flagged = n.flags.includes('instruction_like') && !n.flags.includes('acknowledged'), ta = h('textarea', { class: 'field', rows: 10 }); ta.value = n.body;
       const reload = async () => { S.versions = await api(`/api/brain/notes/${n.id}/versions`); await loadNotes(); };
@@ -1942,8 +1930,8 @@ const overlayRoot = (() => {
     S.modal = 'apps'; S.appOpen = null; S.appTab = 'catalog'; S.appQ = ''; S.appCat = 'All';
     S.menu = false; S.drawer = false; S.err = ''; S.mcpNote = ''; S.mcpBusy = null;
     S.appsLoading = !(S.apps && S.apps.length);
-    render();
-    await run(async () => { try { await Promise.all([loadApps(), loadBots()]); } finally { S.appsLoading = false; syncOverlays(true); } });
+    syncOverlays(true);
+    try { await Promise.all([loadApps(), loadBots()]); } catch (e) { S.err = e.message; } finally { S.appsLoading = false; syncOverlays(true); }
   }
   async function openAgent() { S.modal = 'agent'; S.menu = false; render(); await run(async () => { const t = await api('/api/templates'); S.tmpl = t.filter((x) => x.id); S.caps = (t.find((x) => x.capabilities) || {}).capabilities || []; }); }
   const close = () => { S.modal = null; render(); };
@@ -2566,6 +2554,28 @@ const overlayRoot = (() => {
   function agxModelSection(b, st) {
     return agxCard('Model', modelEditor(b));
   }
+  // Customise the figure of one agent: pixel symbol, body colour and figure shape. Saved through PUT /api/bots/{id}/look.
+  function agxLookCard(b, st) {
+    const base = lookOf(b);
+    const cur = st.look || (st.look = { icon: base.sym, color: base.body, figure: base.figure });
+    const dirty = cur.icon !== base.sym || cur.color.toLowerCase() !== base.body.toLowerCase() || cur.figure !== base.figure;
+    const set = (k, v) => { cur[k] = v; syncOverlays(true); };
+    const pick = (label, pressed, onclick, kids, cls, style) => h('button', { type: 'button', class: 'look-opt ' + (cls || ''), style: style || false, 'aria-label': label, title: label, 'aria-pressed': pressed ? 'true' : 'false', onclick }, kids);
+    const custom = h('input', { type: 'color', class: 'look-color', value: cur.color, 'aria-label': 'Custom colour' });
+    custom.addEventListener('change', () => set('color', custom.value));
+    const save = btn(st.busy === 'look' ? 'Saving…' : 'Save figure', () => agxAct('look', async () => {
+      await api(`/api/bots/${b.id}/look`, { method: 'PUT', body: { icon: cur.icon, color: cur.color, figure: cur.figure } });
+      st.look = null; await loadBots(); render(); return 'Figure updated.'; }), 'btn primary', { disabled: !!st.busy || !dirty });
+    return agxCard('Figure', [
+      h('div', { class: 'look' },
+        h('div', { class: 'look-preview' }, tile(Object.assign({}, b, { icon: cur.icon, color: cur.color, figure: cur.figure }), 96, { float: true })),
+        h('div', { class: 'look-controls' },
+          h('div', { class: 'look-group' }, h('span', { class: 'look-label' }, 'Symbol'), h('div', { class: 'look-grid' }, SYMBOLS.map((s) => pick(s, cur.icon === s, () => set('icon', s), symbolSvg(s, 22))))),
+          h('div', { class: 'look-group' }, h('span', { class: 'look-label' }, 'Colour'), h('div', { class: 'look-grid' }, AV_COLORS.map((c) => pick(c, cur.color.toLowerCase() === c.toLowerCase(), () => set('color', c), null, 'look-sw', 'background:' + c)), custom)),
+          h('div', { class: 'look-group' }, h('span', { class: 'look-label' }, 'Figure'), h('div', { class: 'look-grid' }, FIGURES.map((f) => pick(FIGURE_LABEL[f], cur.figure === f, () => set('figure', f), FIGURE_LABEL[f], 'look-fig')))),
+          h('div', { class: 'row2' }, save, dirty ? btn('Reset', () => { st.look = null; syncOverlays(true); }, 'btn') : null))),
+    ]);
+  }
   function agxGeneralSection(b, st) {
     const name = h('input', { class: 'field agx-nameinput', maxlength: 40, value: st.name || b.name, 'aria-label': 'Agent name', style: 'flex:1;min-width:180px' });
     const rename = () => {
@@ -2593,8 +2603,8 @@ const overlayRoot = (() => {
         agxRow('Name', h('div', { class: 'row2' }, name, renameBtn)),
         agxRow('Role', h('span', {}, b.role), 'Roles come from the agent template and do not change after the agent is created.'),
         agxRow('Team', h('span', {}, b.team || 'General'), 'The team is set when the agent is created.'),
-        agxRow('Icon & colour', h('span', { class: 'row2' }, tile(b, 26), h('span', { class: 'mono' }, b.color || '—')), 'The face is drawn from the agent name; the icon and colour are set at creation.'),
       ]),
+      agxLookCard(b, st),
       agxModelSection(b, st),
       agxCard('Criticality', [
         agxRow('Criticality', h('div', { class: 'row2' }, crit, metaBtn), 'How much review this agent needs before it acts: low, medium or high.'),
@@ -3268,6 +3278,7 @@ const overlayRoot = (() => {
     return h('div', { class: 'scrim set2-scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) closeS(); } },
       h('div', { class: 'modal set2-modal', role: 'dialog', 'aria-label': 'Settings' },
         h('div', { class: 'set2-head' },
+          h('img', { class: 'set2-logo', src: '/static/icon.png', alt: '', width: 36, height: 36 }),
           h('div', { class: 'set2-headtext' }, h('h2', { class: 'set2-title' }, 'Settings'), h('p', { class: 'set2-sub' }, 'Workspace configuration for models, search, access and data.')),
           h('div', { class: 'set2-headbtns' }, btn('Reload', settingsForm(() => loadSettingsData()), 'chip', { 'aria-label': 'Reload settings data' }), btn([icon('x', 16)], closeS, 'chip set2-close', { 'aria-label': 'Close settings' }))),
         h('div', { class: 'set2-body' }, nav,
@@ -3382,7 +3393,7 @@ const overlayRoot = (() => {
 
   // ---------- organisation ----------
   async function loadOrg() {
-    S.org = { members: [], invitations: [], revenue: null, announcements: [], metrics: null };
+    S.org = Object.assign({ members: [], invitations: [], revenue: null, announcements: [], metrics: null, invoices: null }, S.org && S.orgKeep ? { invoices: S.org.invoices } : {});
     try {
       const m = await api('/api/org/members');
       S.org.members = (m && m.members) || [];
@@ -3391,95 +3402,92 @@ const overlayRoot = (() => {
     try { S.org.revenue = await api('/api/org/revenue'); } catch {}
     try { S.org.announcements = ((await api('/api/announcements')).announcements) || []; } catch {}
     try { S.org.metrics = await api('/api/admin/metrics'); } catch {}
+    S.orgKeep = true;
     render();
   }
+  async function loadOrgInvoices() {
+    S.org.invoices = 'loading'; render();
+    try { S.org.invoices = (await api('/api/billing/invoices')).invoices || []; } catch (e) { S.org.invoices = []; S.org.invErr = e.message; }
+    render();
+  }
+  // Organisation: a calm workspace page (left section list, one section at a time). Flat, no hero gradient.
   function orgView() {
     const o = S.org || { members: [], invitations: [], revenue: null, announcements: [], metrics: null };
     const me = S.me || {}, role = me.role || '', meId = me.user ? me.user.id : '';
-    const canAdmin = ['owner', 'admin', 'super_admin'].indexOf(role) >= 0;
+    const canAdmin = ['owner', 'admin', 'super_admin'].indexOf(role) >= 0, isOwner = role === 'owner';
     const ROLES = ['viewer', 'developer', 'security_manager', 'admin', 'owner'];
-    const memberCard = (u) => {
-      const sel = h('select', { class: 'field', style: 'max-width:170px;font-size:12px', 'aria-label': 'Role of ' + (u.name || u.email) },
-        ROLES.map((r) => h('option', { value: r, selected: u.role === r }, r)));
-      sel.addEventListener('change', () => run(async () => {
-        await api(`/api/org/members/${u.id}`, { method: 'PATCH', body: { role: sel.value } });
-        S.info = 'Role of ' + (u.name || u.email) + ' changed to ' + sel.value + '.';
-        await loadOrg();
-      }));
-      const remove = (u.id !== meId && u.role !== 'owner') ? btn('Remove', () => run(async () => {
-        await api(`/api/org/members/${u.id}`, { method: 'DELETE' });
-        await loadOrg();
-      }), 'link') : null;
-      return h('div', { class: 'card', style: 'padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
-        h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
-        h('div', { style: 'flex:1;min-width:160px' }, h('b', {}, u.name || u.email), h('div', { class: 'muted', style: 'font-size:12px' }, u.email + (u.id === meId ? ' · that is you' : ''))),
-        canAdmin ? sel : h('span', { class: 'chip' }, u.role), remove);
-    };
-    const inviteInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'colleague@company.example', style: 'flex:1' });
-    const inviteBtn = canAdmin ? h('div', { style: 'display:flex;gap:8px;margin:10px 0;align-items:center' }, inviteInp,
-      btn('Invite', () => run(async () => {
-        const email = (document.getElementById('inv-email') || {}).value || '';
-        const r = await api('/api/org/invitations', { method: 'POST', body: { email: email, role: 'developer' } });
-        S.info = r && r.token ? 'Invitation created. Token (dev): ' + r.token : 'Invitation sent to ' + email + '.';
-        await loadOrg();
-      }), 'btn primary')) : h('p', { class: 'muted' }, 'Only owners and admins can invite members.');
-    const rev = o.revenue;
-    const money = rev ? h('div', { style: 'margin-bottom:14px' }, h('div', { class: 'cards' },
-      ['plan', 'mrr_eur', 'arr_eur', 'seats'].map((k) => h('div', { class: 'card stat' },
-        h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / month', arr_eur: 'ARR / year', seats: 'Seats' })[k]),
-        h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))),
-      h('div', { class: 'row2', style: 'margin-top:8px' },
-        h('span', { class: 'chip ' + (rev.status === 'active' ? 'ok' : 'warn') }, rev.status === 'active' ? 'Active' : rev.status === 'demo' ? 'Demo' : String(rev.status || 'n/a')),
-        rev.customer_since ? h('span', { class: 'muted', style: 'font-size:12px' }, 'Customer since ' + when(rev.customer_since)) : null),
-      h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0 0' }, rev.note || 'MRR = plan price x paid seats (not an accounting ledger).'),
-      rev.status === 'demo' ? h('div', { style: 'margin-top:10px' }, btn('Create a workspace for real revenue', () => { S.auth = true; S.setup = true; render(); }, 'btn primary')) : null) : emptyState('coins', 'No revenue data yet', 'As soon as an organisation exists this block shows plan, MRR, ARR and seats.');
-    const anIn = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Title, e.g. Maintenance window Sunday 02:00', maxlength: 120 }), body: h('input', { class: 'field', id: 'an-body', placeholder: 'Message to your team', maxlength: 500 }) };
-    const annCard = canAdmin ? h('div', { class: 'card', style: 'padding:12px;margin-bottom:10px' },
-      h('b', {}, 'Message to the team'), h('div', { style: 'height:6px' }), anIn.title, h('div', { style: 'height:6px' }), anIn.body,
-      h('div', { style: 'margin-top:8px' }, btn('Publish', () => run(async () => {
-        await api('/api/announcements', { method: 'POST', body: { title: anIn.title.value.trim(), body: anIn.body.value.trim(), level: 'info', audience: 'all' } });
-        anIn.title.value = ''; anIn.body.value = ''; await loadOrg();
-      }), 'btn'))) : null;
-    const notices = o.announcements.map((a) => h('div', { class: 'card', style: 'padding:10px;margin-bottom:6px' },
-      h('div', { class: 'row2' }, h('b', {}, a.title), h('span', { class: 'chip' }, a.level)),
-      h('p', { class: 'muted', style: 'margin:6px 0 0' }, a.body),
-      h('div', { class: 'muted', style: 'font-size:11px' }, a.published_at ? when(a.published_at) : '')));
-    const met = o.metrics;
-    const danger = role === 'owner' ? h('details', { style: 'margin-top:22px' },
-      h('summary', { class: 'muted' }, 'Danger zone: delete organisation'),
-      h('div', { class: 'card', style: 'padding:12px;margin-top:8px' },
-        h('p', { class: 'muted' }, 'Deletes every agent, note, call, audit event and member of this organisation. This cannot be undone.'),
+    const tab = S.orgTab || 'overview', rev = o.revenue, met = o.metrics;
+    const sections = [['overview', 'Overview', 'grid'], ['members', 'Members', 'user'], ['announcements', 'Announcements', 'chat'], ['billing', 'Billing', 'coins'], ['data', 'Data', 'doc']].concat(isOwner ? [['danger', 'Danger zone', 'shield']] : []);
+    const openTab = (id) => { S.orgTab = id; if (id === 'billing' && canAdmin && o.invoices == null) loadOrgInvoices(); else render(); };
+    const nav = h('nav', { class: 'org2-nav', 'aria-label': 'Organisation sections' },
+      h('div', { class: 'org2-ws' }, h('span', { class: 'org2-mark' }, ((me.org && me.org.name) || 'W').slice(0, 1).toUpperCase()),
+        h('div', { class: 'org2-wsname' }, h('b', {}, me.org ? me.org.name : 'Workspace'), h('small', {}, (rev ? rev.plan_name + ' plan · ' : '') + (role || 'open mode')))),
+      sections.map(([id, label, ic]) => h('button', { type: 'button', class: 'org2-navbtn', 'aria-current': tab === id ? 'true' : 'false', onclick: () => openTab(id) }, icon(ic, 16), label)));
+    const stat = (k, v, s) => h('div', { class: 'org2-stat' }, h('span', { class: 'muted' }, k), h('b', {}, String(v)), s ? h('small', { class: 'muted' }, s) : null);
+    const eur = (v) => (v == null ? '—' : new Intl.NumberFormat('en', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v));
+    const head = (title, sub, act) => h('div', { class: 'org2-head' }, h('div', {}, h('h2', {}, title), sub ? h('p', { class: 'muted' }, sub) : null), act || null);
+    const revStats = () => rev ? h('div', { class: 'org2-stats' }, stat('Plan', rev.plan_name || rev.plan, rev.status === 'active' ? 'Active' : String(rev.status || '')), stat('MRR', eur(rev.mrr_eur), 'per month'), stat('ARR', eur(rev.arr_eur), 'per year'), stat('Seats', rev.seats)) : null;
+
+    // Overview
+    const overview = [head('Overview', 'How your workspace is doing right now.'),
+      h('div', { class: 'org2-stats' }, stat('Members', o.members.length), stat('Agents', met ? met.counts.agents : '—'), stat('Notes', met ? met.counts.notes : '—'), stat('Open approvals', met ? met.counts.approvals_pending : '—')),
+      rev ? [h('h3', { class: 'org2-h3' }, 'Revenue'), revStats()] : null,
+      h('h3', { class: 'org2-h3' }, 'Latest announcement'),
+      o.announcements.length ? h('div', { class: 'org2-card' }, h('b', {}, o.announcements[0].title), h('p', { class: 'muted' }, o.announcements[0].body)) : h('p', { class: 'muted' }, 'No announcements yet.')];
+
+    // Members
+    const sel = (u) => { const s = h('select', { class: 'field org2-role', 'aria-label': 'Role of ' + (u.name || u.email) }, ROLES.map((r) => h('option', { value: r, selected: u.role === r }, r === 'owner' ? 'owner (co-owner)' : r)));
+      s.addEventListener('change', () => run(async () => { await api(`/api/org/members/${u.id}`, { method: 'PATCH', body: { role: s.value } }); S.info = (u.name || u.email) + ' is now ' + s.value + '.'; await loadOrg(); })); return s; };
+    const owners = o.members.filter((u) => u.role === 'owner').length;
+    const memberRow = (u) => h('div', { class: 'org2-row' },
+      h('span', { class: 'org2-initial' }, (u.name || u.email || '?').slice(0, 1).toUpperCase()),
+      h('div', { class: 'org2-who' }, h('b', {}, u.name || u.email), h('small', { class: 'muted' }, u.email + (u.id === meId ? ' · you' : ''))),
+      canAdmin ? sel(u) : h('span', { class: 'chip' }, u.role),
+      canAdmin && u.id !== meId && u.role !== 'owner' ? btn('Remove', () => run(async () => { await api(`/api/org/members/${u.id}`, { method: 'DELETE' }); await loadOrg(); }), 'link mcp3-danger') : h('span', { class: 'org2-gap' }));
+    const inv = { email: h('input', { class: 'field', id: 'inv-email', placeholder: 'colleague@company.example', type: 'email', style: 'flex:1;min-width:200px' }),
+      role: h('select', { class: 'field', id: 'inv-role', 'aria-label': 'Role for the invitation' }, ROLES.filter((r) => isOwner || r !== 'owner').map((r) => h('option', { value: r, selected: r === 'developer' }, r))) };
+    const members = [head('Members', `${o.members.length} in this workspace · ${owners} owner${owners === 1 ? '' : 's'}. At least one owner always stays.`),
+      canAdmin ? h('div', { class: 'org2-invite' }, inv.email, inv.role, btn('Invite', () => run(async () => {
+        const email = (inv.email.value || '').trim(); const r = await api('/api/org/invitations', { method: 'POST', body: { email, role: inv.role.value } });
+        S.info = r && r.token ? 'Invitation created. Token (dev): ' + r.token : 'Invitation sent to ' + email + '.'; await loadOrg(); }), 'btn primary')) : h('p', { class: 'muted' }, 'Only owners and admins can invite members.'),
+      h('div', { class: 'org2-list' }, o.members.map(memberRow)),
+      o.invitations.length ? [h('h3', { class: 'org2-h3' }, 'Pending invitations'), h('div', { class: 'org2-list' }, o.invitations.map((i) => h('div', { class: 'org2-row' }, h('span', { class: 'org2-initial' }, '…'), h('div', { class: 'org2-who' }, h('b', {}, i.email), h('small', { class: 'muted' }, 'invited as ' + i.role)), h('span', { class: 'chip' }, 'pending'))))] : null];
+
+    // Announcements
+    const an = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Title, e.g. Maintenance window Sunday 02:00', maxlength: 120 }), body: h('textarea', { class: 'field', id: 'an-body', rows: 3, placeholder: 'Message to your team', maxlength: 500 }) };
+    const announcements = [head('Announcements', 'Messages that reach everyone inside the platform.'),
+      canAdmin ? h('div', { class: 'org2-card' }, an.title, h('div', { style: 'height:8px' }), an.body, h('div', { style: 'margin-top:10px' }, btn('Publish', () => run(async () => {
+        await api('/api/announcements', { method: 'POST', body: { title: an.title.value.trim(), body: an.body.value.trim(), level: 'info', audience: 'all' } }); S.info = 'Announcement published.'; await loadOrg(); }), 'btn primary'))) : null,
+      o.announcements.length ? h('div', { class: 'org2-list' }, o.announcements.map((a) => h('div', { class: 'org2-card' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, a.title), h('span', { class: 'muted mono' }, a.published_at ? when(a.published_at) : '')), h('p', { class: 'muted' }, a.body)))) : emptyState('chat', 'No announcements', 'Post the first message to your team.')];
+
+    // Billing (Stripe)
+    const money = (n, c) => (n == null ? '—' : new Intl.NumberFormat('en', { style: 'currency', currency: (c || 'eur').toUpperCase() }).format(n / 100));
+    const invs = o.invoices;
+    const billing = [head('Billing', 'Plan, revenue and invoices. Payments run through Stripe per organisation.', h('div', { class: 'row2' }, btn('Change plan', () => go('plans'), 'btn'), btn('Manage in Stripe', () => run(async () => { const r = await api('/api/billing/portal', { method: 'POST' }); location.href = r.url; }), 'btn primary'))),
+      revStats() || emptyState('coins', 'No revenue data yet', 'Revenue appears as soon as the organisation has a plan.'),
+      rev ? h('p', { class: 'muted org2-note' }, rev.note || 'MRR = plan price × paid seats (not an accounting ledger).') : null,
+      h('h3', { class: 'org2-h3' }, 'Invoices'),
+      invs === 'loading' ? h('div', { class: 'skel-lines' }, [1, 2, 3].map(() => h('span', { class: 'skel-line tall' })))
+        : invs && invs.length ? h('div', { class: 'org2-list' }, invs.map((i) => h('div', { class: 'org2-row' }, h('div', { class: 'org2-who' }, h('b', {}, i.number || i.id), h('small', { class: 'muted' }, i.created ? when(i.created) : '')),
+          h('b', {}, money(i.amount_due, i.currency)), h('span', { class: 'chip' }, i.status || ''), i.hosted_invoice_url ? h('a', { class: 'link', href: i.hosted_invoice_url, target: '_blank', rel: 'noopener' }, 'View') : h('span', { class: 'org2-gap' }))))
+          : h('p', { class: 'muted' }, o.invErr || 'No invoices yet. They appear here once Stripe has billed this organisation.')];
+
+    // Data
+    const data = [head('Data & export', 'Everything this organisation holds. Secrets are never included.'),
+      h('div', { class: 'org2-card' }, h('p', { class: 'muted' }, S.xsum ? (S.xsum.rows + ' rows across ' + S.xsum.tables + ' tables are exportable.') : 'Full JSON export of agents, notes, calls and the audit log.'),
+        h('div', { class: 'row2' }, btn('Download full export', () => { dl('/api/org/export', 'org-export.json'); }, 'btn primary'),
+          btn('What is included?', () => run(async () => { S.xsum = await api('/api/org/export/summary'); S.info = S.xsum.note; }), 'btn')))];
+
+    // Danger
+    const danger = [head('Danger zone', 'Deleting the organisation cannot be undone.'),
+      h('div', { class: 'org2-card' }, h('p', { class: 'muted' }, 'Deletes every agent, note, call, audit event and member of this organisation.'),
         btn('Delete organisation', () => {
-          const slug = (me.org && me.org.slug) || '';
-          const typed = window.prompt('Type the slug to delete: ' + slug) || '';
-          if (typed.trim().toLowerCase() === slug) run(async () => {
-            await api('/api/org?confirm=' + encodeURIComponent(slug), { method: 'DELETE' });
-            location.reload();
-          });
-          else if (typed) S.info = 'Cancelled: slug does not match.';
-          else S.info = 'Cancelled.';
-        }, 'btn')) ) : null;
-    return h('div', { class: 'body' }, h('div', { class: 'wide' },
-      h('div', { class: 'card hero', style: 'padding:18px;margin-bottom:14px' },
-        h('div', { class: 'row2' }, h('div', {}, h('h2', { style: 'margin:0' }, me.org ? me.org.name : 'Organisation'), h('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Your workspace: members, roles, revenue and announcements.')),
-          h('span', { class: 'chip ok' }, role || '–')),
-        met ? h('p', { class: 'muted', style: 'font-size:12px' }, 'Agents ' + met.counts.agents + ' · Notes ' + met.counts.notes + ' · Calls ' + met.counts.calls + ' · open approvals ' + met.counts.approvals_pending + ' · audit events ' + met.counts.audit_events) : null),
-      h('div', { class: 'org-grid' },
-        h('div', { class: 'org-col' },
-          h('h3', {}, 'Members (' + o.members.length + ')'),
-          o.members.map(memberCard), inviteBtn,
-          o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Open invitations: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
-          h('h3', { style: 'margin-top:18px' }, 'Announcements'),
-          annCard, notices.length ? notices : emptyState('chat', 'No announcements', 'Announcements reach your engineering team right inside the platform.')),
-        h('div', { class: 'org-col' },
-          h('h3', {}, 'Billing & revenue'),
-          money,
-          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Stripe'), h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, 'Checkout, customer portal and invoices run through Stripe per organisation. No shared customer.'), btn('Plans & upgrade', () => go('plans'), 'btn primary')),
-          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Data & privacy'),
-            h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, (S.xsum ? (S.xsum.rows + ' rows across ' + S.xsum.tables + ' tables are exportable.') : 'Full JSON export of everything this organisation holds. Secrets are never included.')),
-            h('div', { class: 'row2', style: 'flex-wrap:wrap' }, btn('Download full export', () => { dl('/api/org/export', 'org-export.json'); }, 'btn primary'),
-              btn('What is included?', () => run(async () => { S.xsum = await api('/api/org/export/summary'); S.info = S.xsum.note; render(); }), 'btn'))),
-          danger))));
+          const slug = (me.org && me.org.slug) || ''; const typed = window.prompt('Type the slug to delete: ' + slug) || '';
+          if (typed.trim().toLowerCase() === slug) run(async () => { await api('/api/org?confirm=' + encodeURIComponent(slug), { method: 'DELETE' }); location.reload(); });
+          else S.info = typed ? 'Cancelled: slug does not match.' : 'Cancelled.'; render(); }, 'btn mcp3-danger'))];
+
+    const content = { overview, members, announcements, billing, data, danger }[tab] || overview;
+    return h('div', { class: 'body org2' }, h('div', { class: 'org2-shell' }, nav, h('div', { class: 'org2-content' }, content)));
   }
 
   function syncOverlays(force) {
@@ -3510,26 +3518,8 @@ const overlayRoot = (() => {
     try { S.notifs = await api('/api/notifications'); } catch {}
   }
   async function openNotifs() {
-    S.modal = 'notif'; syncOverlays(true);
-    await run(async () => { await loadNotifs(); render(); });
-  }
-  function notifModal() {
-    const n = S.notifs || { items: [], unread: 0 };
-    const close = () => { S.modal = null; syncOverlays(true); };
-    const markAll = () => run(async () => {
-      await api('/api/notifications/read', { method: 'POST', body: { keys: n.items.map((i) => i.key) } });
-      await loadNotifs(); syncOverlays(true);
-    });
-    return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
-      h('div', { class: 'modal', role: 'dialog', 'aria-label': 'Notifications', style: 'max-width:560px' },
-        h('div', { class: 'row2' }, h('h2', { style: 'margin:0;flex:1' }, 'Notifications'),
-          n.unread ? h('span', { class: 'chip warn' }, n.unread + ' unread') : h('span', { class: 'chip ok' }, 'all read'),
-          btn('Mark all read', markAll, 'chip'), btn([icon('x', 16)], close, 'chip', { 'aria-label': 'Close' })),
-        n.items.length ? h('div', { style: 'margin-top:10px' }, n.items.map((i) => h('button', { type: 'button', class: 'notif-item' + (i.read ? ' read' : ''),
-          onclick: () => { S.modal = null; syncOverlays(true); go(i.view || 'control'); } },
-          h('span', { class: 'chip ' + (i.kind === 'approval' ? 'warn' : i.kind === 'run' ? 'warn' : 'ok') }, i.kind),
-          h('span', { style: 'flex:1;min-width:0' }, h('b', {}, i.title), h('div', { class: 'muted', style: 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, String(i.detail || ''))),
-          h('span', { class: 'muted mono', style: 'font-size:11px' }, when(i.ts))))) : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Nothing needs your attention right now.'))));
+    S.modal = 'notif'; S.notifLoading = !S.notifs; syncOverlays(true);
+    try { await loadNotifs(); } finally { S.notifLoading = false; syncOverlays(true); }
   }
   function closeCtx() { S.ctx = null; syncOverlays(true); }
   function agentCtx() {
@@ -3674,10 +3664,11 @@ const overlayRoot = (() => {
           h('span', { class: 'av3-acctchip', title: hd.build ? 'build ' + hd.build : '' }, `v${hd.version || '?'}`),
           h('span', { class: 'av3-acctchev' }, icon('up', 14)))));
     if (!S.notifs && !S._notifsAsked) { S._notifsAsked = true; loadNotifs().then(() => { if (S.notifs && S.notifs.unread) syncOverlays(); }); }
+    if (!S.info) S._toasted = ''; else if (S._toasted !== S.info) { S._toasted = S.info; toast(S.info); }
     const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
-      h('main', { class: 'main', style: viewChanged ? 'animation:cfaFade .22s ease' : '' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,
+      h('main', { class: 'main' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null,
         warn ? h('div', { class: 'banner', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
       );
     restoreScrollState(scrollMem);
