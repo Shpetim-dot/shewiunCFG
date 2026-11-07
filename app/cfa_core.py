@@ -674,8 +674,18 @@ def note_out(con, r, full: bool = False) -> dict[str, Any]:
     d["links"] = sorted(set(WIKI.findall(r["body"])))
     if full:
         d["body"] = r["body"]
-        d["backlinks"] = [x["title"] for x in con.execute("SELECT title FROM notes WHERE body LIKE ? AND id<>? AND org_id=?",
-                                                         (f"%[[{r['title']}]]%", r["id"], org()))]
+        rows = con.execute("SELECT title, body FROM notes WHERE body LIKE ? AND id<>? AND org_id=?",
+                           (f"%[[{r['title']}]]%", r["id"], org())).fetchall()
+        d["backlinks"] = [x["title"] for x in rows]
+        details = []
+        for x in rows:
+            mark = f"[[{r['title']}]]"
+            body = x["body"] or ""
+            pos = body.find(mark)
+            start = max(0, pos - 60) if pos >= 0 else 0
+            snippet = body[start:start + 160].replace("\n", " ")
+            details.append({"title": x["title"], "snippet": snippet})
+        d["backlink_details"] = details
     return d
 
 

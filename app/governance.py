@@ -655,16 +655,32 @@ async def market_import(item: ImportIn, request: Request) -> dict[str, Any]:
 
 # ---------- audit export, brain activity ----------
 @router.get("/api/security/audit/export")
-def audit_export(request: Request):
+def audit_export(request: Request, since: str = "", until: str = "", actor: str = "", event_type: str = "", limit: int = 0):
+    """NDJSON export of the organisation's audit chain, optionally filtered for SIEM ingestion."""
     pf.need_admin(request)
     from fastapi.responses import StreamingResponse
     m = pf._m()
+    sql = "SELECT * FROM audit_events WHERE org_id=?"
+    args: list[Any] = [pf.org()]
+    if since:
+        sql += " AND created_at >= ?"; args.append(since)
+    if until:
+        sql += " AND created_at <= ?"; args.append(until)
+    if actor:
+        sql += " AND actor LIKE ?"; args.append(f"%{actor}%")
+    if event_type:
+        sql += " AND event_type LIKE ?"; args.append(f"{event_type}%")
+    sql += " ORDER BY seq ASC"
+    if limit:
+        sql += " LIMIT ?"; args.append(max(1, min(limit, 100000)))
 
     def rows():
         with m.connect() as db:
-            for r in db.execute("SELECT * FROM audit_events WHERE org_id=? ORDER BY seq ASC", (pf.org(),)):
+            for r in db.execute(sql, args):
                 yield json.dumps(dict(r)) + "\n"
-    return StreamingResponse(rows(), media_type="application/x-ndjson", headers={"Content-Disposition": "attachment; filename=audit-export.ndjson"})
+    stamp = (since or "all").replace(":", "").replace("-", "")[:12]
+    return StreamingResponse(rows(), media_type="application/x-ndjson",
+                             headers={"Content-Disposition": f"attachment; filename=audit-{stamp}.ndjson"})
 
 
 @router.get("/api/brain/activity")

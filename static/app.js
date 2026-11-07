@@ -416,7 +416,13 @@
   function brainView() {
     const q = h('input', { class: 'field', placeholder: 'Search notes', value: S.q, 'aria-label': 'Search notes' });
     q.addEventListener('input', () => { S.q = q.value; const pos = q.selectionStart; render(); const el = document.querySelector('input[aria-label="Search notes"]'); if (el) { el.focus(); el.setSelectionRange(pos, pos); } });
-    const list = S.notes.filter((n) => (!S.q || (n.title + n.preview).toLowerCase().includes(S.q.toLowerCase())) && (!S.filter || n.status === S.filter) && (!S.space || n.space === S.space));
+    let list = S.notes.filter((n) => (!S.q || (n.title + n.preview).toLowerCase().includes(S.q.toLowerCase())) && (!S.filter || n.status === S.filter) && (!S.space || n.space === S.space) && (!S.kindFilter || n.kind === S.kindFilter));
+    if (S.orphans) list = list.filter((n) => !(n.links || []).length && !(n.backlinks_count || 0));
+    if (S.sortBy === 'title') list = [...list].sort((a, b) => a.title.localeCompare(b.title));
+    else if (S.sortBy === 'links') list = [...list].sort((a, b) => ((b.links || []).length + (b.backlinks_count || 0)) - ((a.links || []).length + (a.backlinks_count || 0)));
+    const kindChips = ['', 'note', 'fact', 'decision', 'rule', 'hypothesis'].map((k) => btn(k || 'Alle', () => { S.kindFilter = k; render(); }, 'chip' + (S.kindFilter === k ? ' ok' : ''), { 'aria-pressed': (S.kindFilter || '') === k }));
+    const sortSel = h('select', { class: 'field', style: 'width:auto;font-size:12px', 'aria-label': 'Sort notes', onchange: (e) => { S.sortBy = e.target.value; render(); } },
+      [['', 'Zuletzt geaendert'], ['title', 'Titel A-Z'], ['links', 'Meiste Links']].map(([v, l]) => h('option', { value: v, selected: (S.sortBy || '') === v }, l)));
     const tree = h('div', { class: 'tree' }, [...new Set(list.map((n) => n.space))].sort().map((sp) => h('details', { open: true }, h('summary', {}, `${sp} (${list.filter((n) => n.space === sp).length})`),
       list.filter((n) => n.space === sp).map((n) => { const lc = (n.links || []).length + (n.backlinks_count || 0);
         return h('button', { type: 'button', class: 'it', 'aria-current': S.note && S.note.id === n.id ? 'true' : false, onclick: () => (S.graph ? selectNode(n.id) : openNote(n.id)) },
@@ -428,6 +434,7 @@
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); uploadFile(e.dataTransfer.files[0]); });
     const left = h('div', {}, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Neurons'], () => { S.graph = !S.graph; S.newNote = false; render(); })), drop,
       h('div', { style: 'height:8px' }), q, h('div', { class: 'row2', style: 'margin:8px 0' }, ['', 'draft', 'verified'].map((f) => btn(f || 'All', () => { S.filter = f; render(); }, 'chip' + (S.filter === f ? ' ok' : ''), { 'aria-pressed': S.filter === f })), S.space ? btn(`space: ${S.space} ×`, () => { S.space = ''; render(); }, 'chip ok') : null),
+      h('div', { class: 'row2', style: 'margin:6px 0;flex-wrap:wrap' }, kindChips, btn(S.orphans ? 'Orphans an' : 'Orphans', () => { S.orphans = !S.orphans; render(); }, 'chip' + (S.orphans ? ' ok' : ''), { 'aria-pressed': !!S.orphans }), sortSel),
       list.length ? tree : h('p', { class: 'muted' }, S.notes.length ? 'No match.' : 'No notes yet.'));
     let mid; const n = S.note;
     if (!S.notes.length && !S.newNote) {
@@ -459,6 +466,7 @@
           h('span', { class: 'chip', style: 'background:' + (KIND_COLOR[n.kind] || '#2F5BD3') + ';color:#fff' }, n.kind),
           (n.links || []).map((l) => { const x = S.notes.find((y) => y.title === l); return x ? btn('-> ' + l, () => openNote(x.id), 'chip') : h('span', { class: 'chip muted' }, '-> ' + l + ' (missing)'); }),
           (n.backlinks || []).map((l) => { const x = S.notes.find((y) => y.title === l); return x ? btn('<- ' + l, () => openNote(x.id), 'chip') : h('span', { class: 'chip muted' }, '<- ' + l); })),
+        ...((n.backlink_details || []).length ? [h('b', {}, 'Backlinks mit Kontext')].concat(n.backlink_details.map((b) => h('div', { class: 'card', style: 'padding:10px;margin:6px 0' }, h('b', {}, b.title), h('p', { class: 'muted', style: 'margin:4px 0 0;font-size:12px' }, '...' + b.snippet + '...')))) : []),
         h('details', { style: 'margin-top:20px' }, h('summary', { class: 'muted' }, `Version history (${S.versions.length})`), S.versions.map((v) => h('div', { class: 'card', style: 'margin:8px 0' }, h('span', { class: 'mono' }, `v${v.version} · ${when(v.created_at)} · ${v.actor} · ${v.reason} · ${v.status}`), h('div', { class: 'muted' }, v.body.slice(0, 120)),
           btn('Roll back to this version', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/rollback`, { method: 'POST', body: { version: v.version } }); await reload(); }), 'link')))));
     } else mid = S.notes.length ? h('p', { class: 'muted' }, 'Select a note.') : emptyState('graph', 'Dein Brain ist leer', 'Erstelle Notizen oder lade die Demo-Workspace, um das Gedaechtnis der Agenten zu sehen.', btn([icon('plus', 16), 'New note'], () => { S.newNote = true; render(); }, 'btn primary'));
@@ -669,6 +677,7 @@
   }
 
   // ---------- control ----------
+  const fA = (k, ph) => { const i = h('input', { class: 'field', placeholder: ph, value: (S.afilter || {})[k] || '', 'aria-label': ph }); i.addEventListener('input', () => { S.afilter = S.afilter || {}; S.afilter[k] = i.value; }); return i; };
   function controlView() {
     const pend = S.approvals.filter((a) => a.status === 'pending'), tcOf = (id) => S.toolCalls.find((t) => t.approval_id === id);
     const sumCards = h('div', { class: 'cards', style: 'margin-bottom:16px' }, [['Agents', S.sum.agents], ['Suspended', S.sum.suspended], ['Pending approvals', S.sum.pending_approvals], ['Memory drafts', S.sum.drafts], ['Apps connected', S.sum.apps]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l), h('b', { style: 'font-size:22px' }, String(v ?? 0)))));
@@ -692,7 +701,12 @@
       h('h2', {}, 'Policies'), h('table', {}, h('tbody', {}, (S.policies || []).map((p) => h('tr', {}, h('td', { class: 'mono' }, p.action_type), h('td', {}, p.decision))))),
       S.funnel ? [h('h2', {}, 'Pipeline'), h('div', { class: 'cards' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l + ' (30 days)'), h('b', { style: 'font-size:22px' }, String(v || 0))))),
         S.leads.length ? h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60)))))) : h('p', { class: 'muted' }, 'No leads yet. The public page /welcome has the pilot form.')] : null,
-      h('h2', {}, 'Audit log'), h('div', { class: 'row2' }, btn('Verify integrity', () => run(async () => { const v = await api('/api/security/audit/verify'); S.verify = v.valid ? `Chain intact (${v.checked} events). It detects edits; it is not an external signature.` : 'Chain broken: ' + JSON.stringify(v); })), btn('Export for SIEM (NDJSON)', () => run(async () => { await dl('/api/security/audit/export', 'audit-export.ndjson'); }))),
+      h('h2', {}, 'Audit log'), h('p', { class: 'muted' }, 'Kette pro Organisation, hash-verkettet. Der Export ist NDJSON fuer SIEM (Splunk, Datadog, Elastic) und laesst sich nach Zeitraum, Akteur und Event-Typ filtern.'),
+      h('div', { class: 'rbox' }, fA('since', 'Ab Datum (2026-01-01)'), fA('until', 'Bis Datum (2026-12-31)'), fA('actor', 'Akteur enthaelt...'), fA('event_type', 'Event-Typ beginnt mit...')),
+      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Verify integrity', () => run(async () => { const v = await api('/api/security/audit/verify'); S.verify = v.valid ? `Chain intact (${v.checked} events). It detects edits; it is not an external signature.` : 'Chain broken: ' + JSON.stringify(v); })), btn('Export for SIEM (NDJSON)', () => {
+        const q = ['since', 'until', 'actor', 'event_type'].map((k) => (S.afilter || {})[k] ? `${k}=${encodeURIComponent(S.afilter[k])}` : '').filter(Boolean).join('&');
+        dl('/api/security/audit/export' + (q ? '?' + q : ''), 'audit-export.ndjson');
+      }, 'btn primary')),
       S.verify ? h('p', { class: 'muted' }, S.verify) : null, h('table', {}, h('tbody', {}, (S.audit || []).map((e) => h('tr', {}, h('td', { class: 'mono' }, when(e.created_at)), h('td', {}, e.event_type), h('td', {}, e.actor)))))));
   }
 
