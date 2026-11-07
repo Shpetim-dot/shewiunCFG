@@ -781,60 +781,178 @@ const overlayRoot = (() => {
       S.teams.length ? h('div', { class: 'cards tm-cards' }, S.teams.map(teamCard)) : emptyState('teams', 'No teams yet', 'A team is a unit with its own memory. Create one or load the demo workspace.', h('div', { class: 'row2', style: 'justify-content:center' }, btn([icon('plus', 16), 'New team'], () => openTeamModal(null), 'btn primary'), btn('Load demo workspace', loadDemo, 'btn')))));
   }
   function usageView() {
-    const u = S.usage, money = (v, c) => (v == null ? 'unknown' : `${v.toFixed(4)} ${c || ''}`), inp = (o, k, ph, type = 'text') => { const i = h('input', { class: 'field', type, placeholder: ph, 'aria-label': ph, value: o[k] || '', autocomplete: 'off' }); i.addEventListener('input', () => { o[k] = i.value; }); return i; };
+    const u = S.usage, budget = u.budget || {}, cap = budget.monthly_cap;
+    const num = (n) => Number(n || 0).toLocaleString();
+    const money = (v, c) => (v == null ? 'unknown' : `${v.toFixed(4)}${c ? ' ' + c : ''}`);
+    const fmt = (n) => (n >= 100000 ? 'unlimited' : Number(n || 0).toLocaleString());
+    const inp = (o, k, ph, type = 'text') => { const i = h('input', { class: 'field', type, placeholder: ph, 'aria-label': ph, value: o[k] || '', autocomplete: 'off' }); i.addEventListener('input', () => { o[k] = i.value; }); return i; };
     const reload = async () => { [S.usage, S.provs, S.prices] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices')]); };
-    const cap = u.budget.monthly_cap;
-    const uBars = () => {
-      const d = u.daily || [], W = 720, H = 190, pad = 26;
-      const max = Math.max(1, ...d.map((x) => x.calls || 0));
-      const s = svg(W, H), bw = (W - pad * 2) / Math.max(d.length, 1);
-      d.forEach((x, i) => {
-        const hh = ((x.calls || 0) / max) * (H - pad * 2);
-        sadd(s, 'rect', { x: pad + i * bw + 2, y: H - pad - hh, width: Math.max(2, bw - 4), height: hh, rx: 3, fill: '#2F5BD3', opacity: '.85' });
+    // Plan limits live only on this screen, so billing is fetched lazily here instead of in the shared go() loader.
+    if (!S.bill && !S.useBillLoading && !S.useBillErr) {
+      S.useBillLoading = true;
+      run(async () => {
+        try { S.bill = await api('/api/billing'); }
+        catch (e) { S.useBillErr = e.message || 'Plan limits could not be loaded.'; throw e; }
+        finally { S.useBillLoading = false; }
       });
-      sadd(s, 'line', { x1: pad, y1: H - pad, x2: W - pad, y2: H - pad, stroke: 'currentColor', 'stroke-opacity': '.25' });
-      sadd(s, 'text', { x: pad, y: H - 8, 'font-size': 9, fill: 'currentColor' }, d.length ? `Calls per day, last ${d.length} days (max ${max})` : 'No calls in this period yet.');
+    }
+    const models = u.models || [], kinds = Object.entries(u.by_kind || {}), daily = u.daily || [];
+    const sum = (f) => models.reduce((a, m) => a + (f(m) || 0), 0);
+    const totalCalls = sum((m) => m.calls), totalErrors = sum((m) => m.errors), tokensIn = sum((m) => m.tokens_in), tokensOut = sum((m) => m.tokens_out);
+    const fallbacks = sum((m) => m.fallback_calls), unpriced = sum((m) => m.calls_with_unknown_cost);
+    const latCalls = models.reduce((a, m) => a + (m.avg_latency_ms ? m.calls : 0), 0);
+    const avgLatency = latCalls ? Math.round(models.reduce((a, m) => a + (m.avg_latency_ms || 0) * m.calls, 0) / latCalls) : 0;
+    const priced = models.filter((m) => m.cost != null), currencies = [...new Set(priced.map((m) => m.currency || ''))];
+    const knownCost = priced.reduce((a, m) => a + m.cost, 0);
+    const costLabel = !priced.length ? 'unknown' : currencies.length > 1 ? 'mixed currencies' : `${knownCost.toFixed(4)}${currencies[0] ? ' ' + currencies[0] : ''}`;
+    // The API's daily series only lists days that had calls; every other day in the window had none.
+    const windowDays = u.days || 30, nowMs = Date.now(), byDay = {};
+    daily.forEach((d) => { byDay[d.day] = d; });
+    const series = [];
+    for (let i = windowDays - 1; i >= 0; i -= 1) { const day = new Date(nowMs - i * 86400000).toISOString().slice(0, 10); series.push({ day, calls: byDay[day] ? byDay[day].calls : 0 }); }
+    const peak = series.reduce((a, d) => (d.calls > a.calls ? d : a), { day: '', calls: 0 });
+    const kindTotal = kinds.reduce((a, [, n]) => a + (n || 0), 0);
+    const KIND_COLOR = { chat: '#2F5BD3', research: '#B5543C', channel: '#1B7F79', call: '#7A4E9C', council: '#B7791F', computer: '#1F6F8B' };
+    const kindColor = (k) => KIND_COLOR[k] || '#7C8BA5';
+    const tile = (k, v, s, warn) => h('div', { class: 'use-tile' + (warn ? ' warn' : '') }, h('span', { class: 'use-tile-k' }, k), h('span', { class: 'use-tile-v' }, v), s ? h('span', { class: 'use-tile-s' }, s) : null);
+    const cardHead = (title, right) => h('div', { class: 'use-card-head' }, h('b', {}, title), right ? h('span', { class: 'muted use-small' }, right) : null);
+    const uBars = () => {
+      const W = 720, H = 210, L = 44, R = 10, T = 16, B = 34, plotW = W - L - R, plotH = H - T - B;
+      const max = Math.max(1, peak.calls), s = svg(W, H), step = plotW / Math.max(series.length, 1);
+      s.setAttribute('role', 'img');
+      s.setAttribute('aria-label', `Calls per day over the last ${windowDays} days. ${num(totalCalls)} calls in total${peak.calls ? `, peak ${peak.calls} on ${peak.day}` : ''}.`);
+      [0, 0.5, 1].forEach((f) => {
+        const y = T + plotH - plotH * f;
+        sadd(s, 'line', { x1: L, y1: y, x2: W - R, y2: y, stroke: 'currentColor', 'stroke-opacity': f === 0 ? '.32' : '.1' });
+        if (peak.calls || f === 0) sadd(s, 'text', { x: L - 6, y: y + 3, 'text-anchor': 'end', 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.65' }, String(Math.round(peak.calls * f)));
+      });
+      series.forEach((d, i) => {
+        if (!d.calls) return;
+        const hh = (d.calls / max) * plotH, gap = Math.min(4, step * 0.36);
+        sadd(s, 'rect', { x: (L + i * step + gap / 2).toFixed(2), y: (T + plotH - hh).toFixed(2), width: Math.max(2, step - gap).toFixed(2), height: hh.toFixed(2), rx: Math.min(3, step / 3).toFixed(2), fill: '#2F5BD3', opacity: '.82' });
+      });
+      if (!peak.calls) sadd(s, 'text', { x: L + plotW / 2, y: T + plotH / 2, 'text-anchor': 'middle', 'font-size': 12, fill: 'currentColor', 'fill-opacity': '.6' }, 'No calls in this period yet.');
+      sadd(s, 'text', { x: L, y: H - 10, 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.65' }, series[0] ? series[0].day : '');
+      sadd(s, 'text', { x: W - R, y: H - 10, 'text-anchor': 'end', 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.65' }, series.length ? series[series.length - 1].day : '');
       return s;
     };
     const uDonut = () => {
-      const K = { chat: '#2F5BD3', research: '#B5543C', channel: '#1B7F79', call: '#7A4E9C', council: '#B7791F', computer: '#1F6F8B' };
-      const entries = Object.entries(u.by_kind || {});
-      const tot = entries.reduce((a, [, n]) => a + n, 0) || 1, s = svg(140, 140), cx = 70, cy = 70, r = 56;
-      let ang = -Math.PI / 2;
-      entries.forEach(([k, n]) => {
-        const a = (n / tot) * 2 * Math.PI;
-        const x1 = cx + r * Math.cos(ang), y1 = cy + r * Math.sin(ang);
-        const x2 = cx + r * Math.cos(ang + a), y2 = cy + r * Math.sin(ang + a);
-        sadd(s, 'path', { d: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${a > Math.PI ? 1 : 0} 1 ${x2} ${y2} Z`, fill: K[k] || '#7C8BA5' });
-        ang += a;
-      });
-      sadd(s, 'circle', { cx: cx, cy: cy, r: r * 0.55, fill: 'var(--panel, #fff)' });
-      sadd(s, 'text', { x: cx, y: cy + 4, 'text-anchor': 'middle', 'font-size': 12, fill: 'currentColor' }, String(tot));
+      const s = svg(168, 168), cx = 84, cy = 84, r = 68, positive = kinds.filter(([, n]) => n > 0);
+      s.setAttribute('role', 'img');
+      s.setAttribute('aria-label', `Distribution of ${num(kindTotal)} calls by type.`);
+      if (!kindTotal) sadd(s, 'circle', { cx: cx, cy: cy, r: r - 6, fill: 'none', stroke: 'var(--line)', 'stroke-width': 12 });
+      else if (positive.length === 1) sadd(s, 'circle', { cx: cx, cy: cy, r: r, fill: kindColor(positive[0][0]) });
+      else {
+        let ang = -Math.PI / 2;
+        kinds.forEach(([k, n]) => {
+          if (!n) return;
+          const a = (n / kindTotal) * 2 * Math.PI, x1 = cx + r * Math.cos(ang), y1 = cy + r * Math.sin(ang), x2 = cx + r * Math.cos(ang + a), y2 = cy + r * Math.sin(ang + a);
+          sadd(s, 'path', { d: `M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${a > Math.PI ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`, fill: kindColor(k), stroke: 'var(--surface)', 'stroke-width': 1 });
+          ang += a;
+        });
+      }
+      sadd(s, 'circle', { cx: cx, cy: cy, r: r * 0.56, fill: 'var(--surface)' });
+      sadd(s, 'text', { x: cx, y: cy + 2, 'text-anchor': 'middle', 'font-size': 16, 'font-weight': 600, fill: 'currentColor' }, num(kindTotal));
+      sadd(s, 'text', { x: cx, y: cy + 17, 'text-anchor': 'middle', 'font-size': 9, fill: 'currentColor', 'fill-opacity': '.6' }, 'calls');
       return s;
     };
-    const uChart = h('div', { class: 'cards', style: 'margin:10px 0' },
-      h('div', { class: 'card', style: 'padding:10px;min-width:0' }, h('b', {}, 'Calls per day'), h('div', { class: 'gwrap', style: 'overflow:auto' }, uBars())),
-      h('div', { class: 'card', style: 'padding:10px' }, h('b', {}, 'Distribution by type'), h('div', { class: 'row2', style: 'align-items:center' }, uDonut(), h('div', {}, Object.entries(u.by_kind || {}).map(([k, n]) => h('div', { class: 'muted', style: 'font-size:12px' }, `${k}: ${n}`))))));
-    return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Models & usage'), uChart,
-      h('p', { class: 'muted' }, u.note + (u.cost_is_partial ? ' Some calls have no price record, so the cost total is partial.' : '')),
-      h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Model', 'Provider', 'Calls', 'Errors', 'Tokens in / out', 'Avg latency', 'Cost', 'Fallbacks'].map((c) => h('th', {}, c)))),
-        h('tbody', {}, u.models.length ? u.models.map((m) => h('tr', {}, h('td', { class: 'mono' }, m.model), h('td', {}, m.provider), h('td', {}, m.calls), h('td', {}, m.errors), h('td', { class: 'mono' }, `${m.tokens_in} / ${m.tokens_out}`), h('td', {}, m.avg_latency_ms + ' ms'), h('td', {}, money(m.cost, m.currency) + (m.calls_with_unknown_cost && m.cost != null ? ' + unpriced calls' : '')), h('td', {}, m.fallback_calls))) : h('tr', {}, h('td', { colspan: 8, class: 'muted' }, 'No model calls in this period. Demo replies make no model calls.'))))),
-      h('div', { class: 'row2', style: 'margin:8px 0;flex-wrap:wrap' }, Object.entries(u.by_kind).map(([k, n]) => h('span', { class: 'chip' }, `${k}: ${n}`))),
-      h('h3', {}, 'Monthly budget'), h('p', { class: 'muted' }, cap ? `Cap ${cap.amount} ${cap.currency}. Spent this month (priced calls only): ${u.budget.spent_this_month_known_cost}. Calls stop when the cap is reached.` : 'No cap set. Calls are never stopped by cost.'),
-      h('div', { class: 'row2' }, inp(S, 'cap', 'Amount, for example 20', 'number'), btn('Set cap', () => run(async () => { await api('/api/usage/budget', { method: 'PUT', body: { amount: S.cap ? Number(S.cap) : null, currency: (cap && cap.currency) || 'USD' } }); await reload(); }), 'btn')),
-      h('h3', {}, 'Providers'), h('p', { class: 'muted' }, 'Add any OpenAI-compatible provider. Keys are stored encrypted and never shown again. Use a model as provider-id:model-name in an agent\'s model field.'),
-      S.provs.length ? h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Provider', 'Base URL', 'Status', 'Test with model', ''].map((c) => h('th', {}, c)))), h('tbody', {}, S.provs.map((p) => { const tm = h('input', { class: 'field', placeholder: 'model name', 'aria-label': 'Test model ' + p.id, value: S.ptest[p.id] || '' }); tm.addEventListener('input', () => { S.ptest[p.id] = tm.value; });
-        return h('tr', {}, h('td', {}, h('b', {}, p.id)), h('td', { class: 'mono' }, p.base_url), h('td', {}, h('span', { class: 'chip ' + (p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'warn' : '') }, p.status)), h('td', {}, tm),
-          h('td', {}, h('span', { class: 'row2' }, btn('Test', () => run(async () => { const r = await api(`/api/providers/${p.id}/test`, { method: 'POST', body: { model: S.ptest[p.id] || '' } }); S.info = r.status === 'ok' ? `${p.id} answered.` : `${p.id} failed: ${r.detail}`; await reload(); }), 'link'), btn('Remove', () => run(async () => { await api('/api/providers/' + p.id, { method: 'DELETE' }); await reload(); }), 'link')))); })))) : h('p', { class: 'muted' }, 'No custom providers yet.'),
-      h('div', { class: 'rbox', style: 'margin-top:8px' }, inp(S.pnew, 'id', 'Provider id, for example mistral'), inp(S.pnew, 'base_url', 'Base URL, for example https://api.mistral.ai/v1'), inp(S.pnew, 'api_key', 'API key', 'password')),
-      h('div', { style: 'margin-top:8px' }, btn('Add provider', () => run(async () => { await api('/api/providers', { method: 'POST', body: S.pnew }); S.pnew = { id: '', base_url: '', api_key: '' }; await reload(); }), 'btn primary')),
-      h('h3', {}, 'Fallback models'), h('p', { class: 'muted' }, 'Used only after a provider failure (credits, rate limit, outage). Every use is recorded above. Up to 3, comma separated.'),
-      h('div', { class: 'row2' }, inp(S, 'fb', (u.fallback_models || []).join(', ') || 'for example provider:model'), btn('Save', () => run(async () => { await api('/api/fallbacks', { method: 'PUT', body: { models: S.fb.split(',').map((x) => x.trim()).filter(Boolean) } }); await reload(); }), 'btn')),
-      h('h3', {}, 'Prices'), h('p', { class: 'muted' }, 'Costs are calculated only from price records you add, each with a source. Prices per million tokens.'),
-      S.prices.length ? h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Provider', 'Model', 'Input', 'Output', 'Currency', 'From', 'Source'].map((c) => h('th', {}, c)))), h('tbody', {}, S.prices.map((p) => h('tr', {}, h('td', {}, p.provider), h('td', { class: 'mono' }, p.model), h('td', {}, p.input_per_mtok), h('td', {}, p.output_per_mtok), h('td', {}, p.currency), h('td', { class: 'mono' }, when(p.effective_from)), h('td', {}, p.source)))))) : h('p', { class: 'muted' }, 'No prices yet, so every cost shows as unknown.'),
+    const legend = kinds.map(([k, n]) => {
+      const pct = kindTotal ? (n / kindTotal) * 100 : 0;
+      return h('div', { class: 'use-leg-row' }, h('i', { class: 'use-leg-dot', style: 'background:' + kindColor(k) }), h('span', { class: 'use-leg-k' }, k), h('span', { class: 'use-leg-n mono' }, num(n)), h('span', { class: 'use-leg-p' }, n && pct < 1 ? '<1%' : `${Math.round(pct)}%`));
+    });
+    const barsBox = h('div', { class: 'use-bars' }, uBars());
+    // On narrow screens the bar chart scrolls; start at the most recent days instead of the oldest.
+    requestAnimationFrame(() => { if (barsBox.scrollWidth - barsBox.clientWidth > 4) barsBox.scrollLeft = barsBox.scrollWidth; });
+    const uChart = h('div', { class: 'use-charts' },
+      h('div', { class: 'card use-chart-card' }, cardHead('Calls per day', `Last ${windowDays} days${series.length ? ` · ${series[0].day} → ${series[series.length - 1].day}` : ''}`),
+        barsBox, h('div', { class: 'use-chart-foot muted' }, totalCalls ? `${num(totalCalls)} calls in this period.` : 'No calls recorded in this period yet.')),
+      h('div', { class: 'card use-chart-card' }, cardHead('Usage by type', 'Calls by kind'),
+        kinds.length ? h('div', { class: 'use-donut-wrap' }, uDonut(), h('div', { class: 'use-legend' },
+          h('div', { class: 'use-leg-row use-leg-head' }, h('i', { class: 'use-leg-dot' }), h('span', {}, 'Type'), h('span', { class: 'use-leg-n' }, 'Calls'), h('span', { class: 'use-leg-p' }, 'Share')), legend)) : h('p', { class: 'muted use-empty-chart' }, 'No calls in this period yet.')));
+    const tiles = h('div', { class: 'use-totals' },
+      tile('Total calls', num(totalCalls)),
+      tile('Errors', num(totalErrors), totalErrors ? 'failed calls' : 'no failed calls', totalErrors > 0),
+      tile('Input tokens', num(tokensIn)),
+      tile('Output tokens', num(tokensOut)),
+      tile('Known cost', costLabel, totalCalls ? `${num(unpriced)} calls unpriced` : 'no calls yet'),
+      tile('Avg latency', avgLatency ? `${num(avgLatency)} ms` : '—', avgLatency ? 'weighted by calls' : 'no timing recorded'),
+      tile('Fallback calls', num(fallbacks)));
+    const bill = S.bill, planEntry = bill && bill.plans ? bill.plans.find((p) => p.id === bill.plan) : null;
+    const planPrice = (p) => (p == null || p.price_eur == null ? 'Custom' : p.price_eur === 0 ? '€0' : `€${p.price_eur} / month`);
+    const limitOrder = ['seats', 'agents', 'messages', 'calls', 'research', 'api_calls', 'uploads', 'mcp_servers', 'storage_mb'];
+    const planBody = () => {
+      if (!bill) return S.useBillErr ? h('div', {}, h('p', { class: 'warn-text' }, S.useBillErr), h('div', { style: 'margin-top:8px' }, btn('Retry', () => { S.useBillErr = ''; render(); }, 'btn'))) : h('p', { class: 'muted' }, 'Loading plan limits…');
+      if (!bill.enabled) return h('div', {}, h('p', { class: 'use-off' }, 'Billing is off on this deployment — no plan limits are enforced.'), h('p', { class: 'muted use-small' }, 'Self-hosted workspaces have no plan, seat or usage caps. Set CFA_BILLING=on to enforce plans.'));
+      const usage = bill.usage || {}, limits = bill.limits || {}, labels = bill.labels || {};
+      return h('div', {},
+        h('div', { class: 'use-plan-name' }, h('b', {}, bill.plan_name || bill.plan || 'Unknown plan'), h('span', { class: 'muted' }, planPrice(planEntry))),
+        planEntry && planEntry.tagline ? h('p', { class: 'muted use-small use-plan-tag' }, planEntry.tagline) : null,
+        h('div', { class: 'use-limits' }, limitOrder.filter((k) => labels[k] && limits[k] != null).map((k) => {
+          const used = Number(usage[k] || 0), lim = Number(limits[k] || 0), unlimited = lim >= 100000, pct = unlimited ? 2 : Math.min(100, Math.round((used / Math.max(lim, 1)) * 100)), unit = k === 'storage_mb' ? ' MB' : '';
+          return h('div', { class: 'use-limit' }, h('div', { class: 'row2' }, h('span', { class: 'use-limit-k' }, labels[k]), h('span', { class: 'muted mono' }, `${num(used)} / ${fmt(lim)}${unit}`)), h('div', { class: 'progress' + (pct >= 90 ? ' hot' : '') }, h('i', { style: `width:${pct}%` })));
+        })),
+        h('p', { class: 'muted use-small' }, 'Monthly limits reset on the first of the month. Seats, agents, MCP servers and storage show current totals.'),
+        h('div', { class: 'use-plan-cta' }, btn('Upgrade / manage plan', () => go('plans'), 'link')));
+    };
+    const planCard = h('div', { class: 'card use-plan' },
+      h('div', { class: 'use-card-head' }, h('b', {}, 'Plan limits'), bill && bill.enabled ? h('span', { class: 'chip ' + (bill.status === 'active' || bill.status === 'trialing' ? 'ok' : 'warn') }, bill.status || 'unknown') : null), planBody());
+    const modelRows = models.length ? models.map((m) => h('tr', {},
+      h('td', { class: 'mono' }, m.model), h('td', {}, m.provider), h('td', {}, num(m.calls)), h('td', { class: m.errors ? 'use-err' : '' }, num(m.errors)),
+      h('td', { class: 'mono' }, num(m.tokens_in)), h('td', { class: 'mono' }, num(m.tokens_out)), h('td', {}, m.avg_latency_ms ? `${num(m.avg_latency_ms)} ms` : '—'),
+      h('td', {}, money(m.cost, m.currency), m.calls_with_unknown_cost ? h('span', { class: 'muted use-small' }, ` · ${num(m.calls_with_unknown_cost)} unpriced calls`) : null),
+      h('td', {}, num(m.fallback_calls)))) : h('tr', {}, h('td', { colspan: 9, class: 'muted' }, 'No model calls in this period. Demo replies make no model calls.'));
+    const modelsTable = h('div', { class: 'card use-table-card' }, h('div', { class: 'tbl-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Model', 'Provider', 'Calls', 'Errors', 'Input tokens', 'Output tokens', 'Avg latency', 'Known cost', 'Fallbacks'].map((c) => h('th', {}, c)))), h('tbody', {}, modelRows))));
+    const budgetCard = h('div', { class: 'card use-section' },
+      h('p', { class: 'muted', style: 'margin-top:0' }, cap ? `Cap ${cap.amount} ${cap.currency}. Spent this month on priced calls: ${budget.spent_this_month_known_cost} ${cap.currency}. Calls stop when the cap is reached.` : 'No cap set. Calls are never stopped by cost.'),
+      cap ? h('div', { class: 'progress' + (budget.spent_this_month_known_cost >= cap.amount ? ' hot' : '') }, h('i', { style: `width:${Math.min(100, Math.round((budget.spent_this_month_known_cost / Math.max(cap.amount, 1)) * 100))}%` })) : null,
+      cap ? h('p', { class: 'muted use-small', style: 'margin-top:4px' }, 'Only priced calls count against the cap; unpriced calls are not included.') : null,
+      h('div', { class: 'row2', style: 'margin-top:8px' }, inp(S, 'cap', 'Amount, for example 20', 'number'), btn('Set cap', () => run(async () => { await api('/api/usage/budget', { method: 'PUT', body: { amount: S.cap ? Number(S.cap) : null, currency: (cap && cap.currency) || 'USD' } }); await reload(); }), 'btn')),
+      h('p', { class: 'muted use-small' }, 'An empty or zero amount clears the cap; the server never stores a zero budget.'));
+    const provChip = (p) => h('span', { class: 'chip ' + (p.status === 'ok' ? 'ok' : p.status === 'failed' ? 'warn' : '') }, p.status || 'untested');
+    const provCard = (p) => {
+      const mi = h('input', { class: 'field', placeholder: 'Model to test, for example llama-3.1-8b', 'aria-label': 'Test model for ' + p.id, value: S.ptest[p.id] || '' });
+      mi.addEventListener('input', () => { S.ptest[p.id] = mi.value; });
+      return h('div', { class: 'card use-prov' },
+        h('div', { class: 'use-prov-head' }, h('b', {}, p.id), provChip(p)),
+        p.name && p.name !== p.id ? h('div', { class: 'muted use-small' }, p.name) : null,
+        h('div', { class: 'mono use-prov-url', title: p.base_url }, p.base_url),
+        h('div', { class: 'row2 use-prov-meta' }, h('span', { class: 'chip ' + (p.has_key ? 'ok' : ''), title: 'The API key is stored encrypted and never returned by the API.' }, p.has_key ? 'Key set' : 'No key'), h('span', { class: 'muted use-small' }, p.last_test ? 'Last test ' + when(p.last_test) : 'Not tested yet')),
+        h('div', { class: 'use-prov-test' }, mi, btn('Test', () => { const model = (S.ptest[p.id] || '').trim(); if (!model) { S.err = `Enter a model name to test ${p.id}.`; render(); return; } run(async () => { const r = await api(`/api/providers/${p.id}/test`, { method: 'POST', body: { model } }); S.info = r.status === 'ok' ? `${p.id} answered.` : `${p.id} failed: ${r.detail || 'no detail returned'}`; await reload(); }); }, 'btn')),
+        h('div', { class: 'row2 use-prov-actions' }, btn('Remove', () => run(async () => { await api('/api/providers/' + p.id, { method: 'DELETE' }); S.info = `Provider ${p.id} removed.`; await reload(); }), 'link')));
+    };
+    const addProvider = h('div', { class: 'card use-prov use-add' },
+      h('b', {}, 'Add provider'),
+      h('p', { class: 'muted use-small' }, 'Any OpenAI-compatible provider. The key is encrypted at rest and never returned. Adding requires CFA_SECRET_KEY on the host; without it the server refuses the request and its error appears at the top of this screen.'),
+      h('div', { class: 'rbox' }, inp(S.pnew, 'id', 'Provider id, for example mistral'), inp(S.pnew, 'base_url', 'Base URL, for example https://api.mistral.ai/v1'), inp(S.pnew, 'api_key', 'API key', 'password')),
+      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Add provider', () => run(async () => { const id = S.pnew.id; await api('/api/providers', { method: 'POST', body: S.pnew }); S.info = `Provider ${id} added.`; S.pnew = { id: '', base_url: '', api_key: '' }; await reload(); }), 'btn primary')),
+      h('p', { class: 'muted use-small' }, 'Ids hf, openai and default are reserved. Use model ids as provider-id:model-name in an agent\'s model field.'));
+    const providers = h('div', {}, S.provs.length ? null : h('p', { class: 'muted' }, 'No custom providers yet.'), h('div', { class: 'use-prov-grid' }, S.provs.map(provCard), addProvider));
+    const fallbackCard = h('div', { class: 'card use-section' },
+      h('p', { class: 'muted', style: 'margin-top:0' }, 'Used only after a provider failure (credits, rate limit, outage). Every use is recorded in the fallback column above. Up to 3 models, comma separated.'),
+      h('div', { class: 'row2' }, (u.fallback_models || []).length ? u.fallback_models.map((m) => h('span', { class: 'chip' }, m)) : h('span', { class: 'muted' }, 'No fallback models configured.')),
+      h('div', { class: 'row2', style: 'margin-top:8px' }, inp(S, 'fb', (u.fallback_models || []).join(', ') || 'for example provider:model'), btn('Save', () => run(async () => { await api('/api/fallbacks', { method: 'PUT', body: { models: S.fb.split(',').map((x) => x.trim()).filter(Boolean) } }); await reload(); }), 'btn')));
+    const priceRows = S.prices.map((p) => h('tr', {}, h('td', {}, p.provider), h('td', { class: 'mono' }, p.model), h('td', {}, p.input_per_mtok), h('td', {}, p.output_per_mtok), h('td', {}, p.currency), h('td', { class: 'mono' }, when(p.effective_from)), h('td', {}, p.source)));
+    const priceCard = h('div', { class: 'card use-section' }, h('b', {}, 'Add price'),
       h('div', { class: 'rbox', style: 'margin-top:8px' }, inp(S.pr, 'provider', 'Provider id (default for the main key)'), inp(S.pr, 'model', 'Model name'), inp(S.pr, 'input_per_mtok', 'Input price per 1M tokens', 'number'), inp(S.pr, 'output_per_mtok', 'Output price per 1M tokens', 'number'), inp(S.pr, 'source', 'Source, for example the provider pricing page URL')),
-      h('div', { style: 'margin-top:8px' }, btn('Add price', () => run(async () => { await api('/api/prices', { method: 'PUT', body: { ...S.pr, input_per_mtok: Number(S.pr.input_per_mtok), output_per_mtok: Number(S.pr.output_per_mtok) } }); S.pr = { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }; await reload(); }), 'btn')),
-      h('h3', {}, 'Computer use'), h('p', { class: 'muted' }, S.cu.note), h('div', { class: 'row2', style: 'flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.cu.status === 'ready' ? 'ok' : 'warn') }, S.cu.status), S.cu.problems.map((x) => h('span', { class: 'muted' }, x)))));
+      h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Add price', () => run(async () => { await api('/api/prices', { method: 'PUT', body: { ...S.pr, input_per_mtok: Number(S.pr.input_per_mtok), output_per_mtok: Number(S.pr.output_per_mtok) } }); S.pr = { provider: '', model: '', input_per_mtok: '', output_per_mtok: '', source: '' }; await reload(); }), 'btn primary')));
+    const cuCard = h('div', { class: 'card use-section' }, h('p', { class: 'muted', style: 'margin-top:0' }, S.cu.note), h('div', { class: 'row2' }, h('span', { class: 'chip ' + (S.cu.status === 'ready' ? 'ok' : 'warn') }, S.cu.status || 'unknown'), (S.cu.problems || []).map((x) => h('span', { class: 'muted use-small' }, x))));
+    return h('div', { class: 'body' }, h('div', { class: 'wide' },
+      h('h2', {}, 'Models & usage'),
+      h('p', { class: 'muted use-note' }, u.note + (u.cost_is_partial ? ' Some calls have no price record, so the cost total is partial.' : '')),
+      h('div', { class: 'use-hero' }, h('div', { class: 'use-hero-main' }, tiles, uChart), planCard),
+      h('h3', {}, 'Models'),
+      h('p', { class: 'muted' }, `Calls in the last ${windowDays} days, grouped by provider and model and sorted by calls. Token counts come from the provider usage data.`),
+      modelsTable,
+      h('p', { class: 'muted use-small' }, 'Known cost = input tokens times the price record input rate plus output tokens times its output rate, using the price effective at call time. Calls without a matching price record are unpriced and shown as unknown, never as zero.'),
+      h('h3', {}, 'Monthly budget'), budgetCard,
+      h('h3', {}, 'Providers'), h('p', { class: 'muted' }, 'Keys are stored encrypted and never returned; the API only reports whether a key is set. Use provider-id:model-name in an agent\'s model field.'),
+      providers,
+      h('h3', {}, 'Fallback models'), fallbackCard,
+      h('h3', {}, 'Prices'), h('p', { class: 'muted' }, 'Costs are calculated only from price records you add, each with a source. Prices are per million tokens and apply from their effective date.'),
+      S.prices.length ? h('div', { class: 'card use-table-card' }, h('div', { class: 'tbl-wrap' }, h('table', {}, h('thead', {}, h('tr', {}, ['Provider', 'Model', 'Input', 'Output', 'Currency', 'From', 'Source'].map((c) => h('th', {}, c)))), h('tbody', {}, priceRows)))) : h('p', { class: 'muted' }, 'No prices yet, so every cost shows as unknown.'),
+      priceCard,
+      h('h3', {}, 'Computer use'), cuCard));
   }
   // ---------- inventory: derived trust ring, rights panel, bulk actions ----------
   // The trust score is derived only from fields the API returns; the formula is shown verbatim in the view.
