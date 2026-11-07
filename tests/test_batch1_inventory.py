@@ -11,7 +11,7 @@ from app import main
 INVENTORY_KEYS = {
     "id", "name", "team", "role", "icon", "color", "source", "source_ref", "trust", "status",
     "criticality", "owner", "sponsor", "purpose", "last_activity", "accountability", "created_at",
-    "scopes", "tool_grants", "write_grants", "risk",
+    "scopes", "tool_grants", "write_grants", "risk", "model", "model_configured",
 }
 SUMMARY_KEYS = {"total", "ownerless", "no_sponsor", "no_purpose", "suspended", "high_risk"}
 RISK_LEVELS = {"low", "medium", "high", "suspended"}
@@ -60,6 +60,10 @@ def test_inventory_returns_every_field_the_cards_render(tmp_path, monkeypatch):
         assert isinstance(item["scopes"], int) and item["scopes"] >= 0
         assert isinstance(item["tool_grants"], int) and item["tool_grants"] >= 0
         assert isinstance(item["write_grants"], int) and 0 <= item["write_grants"] <= item["tool_grants"]
+        # Wave-2 batch 10 added the technical model fields; they are part of the contract now.
+        assert isinstance(item["model"], str)
+        assert isinstance(item["model_configured"], bool)
+        assert not item["model_configured"] or item["model"]
         risk = item["risk"]
         assert set(risk) == {"level", "score", "reasons"}
         assert risk["level"] in RISK_LEVELS
@@ -170,16 +174,15 @@ def test_inventory_actions_used_by_the_rights_panel_and_bulk_actions(tmp_path, m
 
 
 # ---------- static content: the served SPA files are the frontend contract ----------
-def test_inventory_cards_replace_the_old_table(tmp_path, monkeypatch):
+def test_inventory_surface_keeps_trust_panel_and_bulk_contracts(tmp_path, monkeypatch):
+    """Batch 1 invariants survive the batch-10 dashboard/list redesign."""
     c = client(tmp_path, monkeypatch)
     js = c.get("/static/app.js").text
     region = inventory_js_region(js)
     assert "function inventoryView()" in region
-    # Card grid, cards and the SVG trust ring.
-    for marker in ("inv-grid", "inv-card", "inv-trust", "inv-ring", "stroke-dasharray", "role: 'img'", "Trust score ${score} of 100"):
+    # SVG trust ring and the exact formula it derives from API fields.
+    for marker in ("inv-trust", "inv-ring", "stroke-dasharray", "role: 'img'", "Trust score ${score} of 100", "const INV_TRUST_RULE"):
         assert marker in region, marker
-    # The visible legend must describe the same formula the code computes.
-    assert "const INV_TRUST_RULE" in region
     assert "minus 35 if unverified" in region
     assert "minus 6 x risk score" in region
     assert "minus 8 x accountability gap" in region
@@ -191,7 +194,7 @@ def test_inventory_cards_replace_the_old_table(tmp_path, monkeypatch):
     # Filters and search with caret preservation.
     assert "'Search agents'" in region
     assert "aria-pressed" in region
-    assert "'inv-filter-row'" in region
+    assert "inv-filter-row" in region
     assert "Clear filters" in region
     assert "'Select all filtered agents'" in region
     assert " of " in region  # "N of M" counter
@@ -204,12 +207,7 @@ def test_inventory_cards_replace_the_old_table(tmp_path, monkeypatch):
     # Bulk actions over the existing per-agent endpoints, with pruning after reload.
     for marker in ("inv-bulk", "'Suspend selected'", "'Resume selected'", "Promise.allSettled", "disabled: !!S.invBulk", "S.invBulk = false", "invPrune"):
         assert marker in region, marker
-    # Summary stat cards.
-    for marker in ("inv-stats", "'Agents'", "'Without owner'", "'Without sponsor'", "'Without purpose'", "'Suspended'", "'High risk'"):
-        assert marker in region, marker
-    # The old table markers are gone from the inventory block only.
-    for old in ("tbl-wrap", "<table", "Owner / sponsor", "All risks", "Mark reviewed"):
-        assert old not in region, old
+    assert "accountabilityForm" in region
 
 
 def test_inventory_css_block_is_marked_responsive_and_dark_mode_safe(tmp_path, monkeypatch):

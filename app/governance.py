@@ -541,7 +541,8 @@ def inventory() -> list[dict[str, Any]]:
                     "source": b.get("source") or "builtin", "source_ref": b.get("source_ref"), "trust": b.get("trust") or "verified", "status": b.get("status") or "active",
                     "criticality": b.get("criticality") or "medium", "owner": b.get("owner") or "system", "sponsor": b.get("sponsor") or "", "purpose": b.get("purpose") or "",
                     "last_activity": last.get(b["id"]), "accountability": gaps(b), "created_at": b.get("created_at"), "scopes": len(b["scopes"]),
-                    "tool_grants": len(mine), "write_grants": writes, "risk": risk_of(b, writes)})
+                    "tool_grants": len(mine), "write_grants": writes, "risk": risk_of(b, writes),
+                    "model": b.get("model") or "", "model_configured": bool(b.get("model")) and pf.model_live(b.get("model"))})
     return out
 
 

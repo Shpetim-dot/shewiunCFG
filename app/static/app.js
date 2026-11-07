@@ -1118,6 +1118,127 @@ const overlayRoot = (() => {
       } finally { S.invBulk = false; }
     });
   };
+  // ---------- inventory v2: dashboard with real SVG charts + model technical data ----------
+  const INV2_RISK = { low: '#1B7F79', medium: '#B7791F', high: 'var(--bad)', suspended: 'var(--muted)' };
+  const INV2_OK = '#3D7A4F', INV2_ACCENT = '#2F5BD3', INV2_WARN = '#B7791F';
+  const inv2Pct = (v, total) => (total > 0 ? Math.round((v / total) * 100) : 0);
+  const inv2MiniBar = (value, total, color) => {
+    const W = 108, H = 6, s = svg(W, H);
+    sadd(s, 'rect', { x: 0, y: 0, width: W, height: H, rx: 3, fill: 'var(--line)' });
+    if (total > 0 && value > 0) sadd(s, 'rect', { x: 0, y: 0, width: Math.max(3, Math.round((W * value) / total)), height: H, rx: 3, fill: color });
+    s.setAttribute('class', 'inv2-mini');
+    s.setAttribute('aria-hidden', 'true');
+    return s;
+  };
+  const inv2StackBar = (parts, total) => {
+    const W = 108, H = 8, s = svg(W, H);
+    sadd(s, 'rect', { x: 0, y: 0, width: W, height: H, rx: 4, fill: 'var(--line)' });
+    let x = 0;
+    for (const p of parts) {
+      if (!p.value || total <= 0) continue;
+      const w = Math.min(W - x, Math.round((W * p.value) / total));
+      if (w <= 0) continue;
+      sadd(s, 'rect', { x, y: 0, width: w, height: H, rx: 4, fill: p.color });
+      x += w;
+    }
+    s.setAttribute('class', 'inv2-mini');
+    s.setAttribute('aria-hidden', 'true');
+    s.setAttribute('title', parts.map((p) => `${p.label || ''} ${p.value}`).join(', '));
+    return s;
+  };
+  const inv2Bars = (items, opts = {}) => {
+    const W = opts.width || 260, labelW = opts.labelW || 86, valueW = 28, rowH = 24, H = Math.max(1, items.length) * rowH + 4;
+    const total = opts.total || items.reduce((a, b) => a + (b.value || 0), 0) || 1;
+    const trackW = W - labelW - valueW;
+    const s = svg(W, H);
+    s.setAttribute('class', 'inv2-svg inv2-bars');
+    s.setAttribute('role', 'img');
+    s.setAttribute('aria-label', opts.aria || 'Distribution');
+    items.forEach((it, i) => {
+      const y = i * rowH + 4, short = it.label.length > 15 ? it.label.slice(0, 14) + '…' : it.label;
+      sadd(s, 'text', { x: 2, y: y + 12, 'font-size': 11, fill: 'currentColor', 'fill-opacity': .72 }, short);
+      sadd(s, 'rect', { x: labelW, y: y + 3, width: trackW, height: 12, rx: 6, fill: 'var(--line)' });
+      const w = it.value ? Math.max(6, Math.round((trackW * it.value) / total)) : 0;
+      if (w > 0) sadd(s, 'rect', { x: labelW, y: y + 3, width: w, height: 12, rx: 6, fill: it.color });
+      sadd(s, 'text', { x: W, y: y + 12, 'text-anchor': 'end', 'font-size': 11, 'font-weight': 600, fill: 'currentColor' }, String(it.value));
+    });
+    return s;
+  };
+  const inv2Donut = (segments, total, center, sub, aria) => {
+    const SZ = 140, R = 54, C = 2 * Math.PI * R, s = svg(SZ, SZ);
+    s.setAttribute('class', 'inv2-svg inv2-donut');
+    s.setAttribute('role', 'img');
+    s.setAttribute('aria-label', aria || 'Distribution');
+    sadd(s, 'circle', { cx: 70, cy: 70, r: R, fill: 'none', stroke: 'var(--line)', 'stroke-width': 14 });
+    let off = 0;
+    for (const seg of segments) {
+      if (!seg.value || total <= 0) continue;
+      const len = (C * seg.value) / total;
+      sadd(s, 'circle', { cx: 70, cy: 70, r: R, fill: 'none', stroke: seg.color, 'stroke-width': 14, 'stroke-dasharray': `${len.toFixed(2)} ${(C - len).toFixed(2)}`, 'stroke-dashoffset': (-off).toFixed(2), transform: 'rotate(-90 70 70)' });
+      off += len;
+    }
+    sadd(s, 'text', { x: 70, y: 69, 'text-anchor': 'middle', 'font-size': 17, 'font-weight': 700, fill: 'currentColor' }, String(center));
+    sadd(s, 'text', { x: 70, y: 86, 'text-anchor': 'middle', 'font-size': 10, fill: 'currentColor', 'fill-opacity': .6 }, sub);
+    return s;
+  };
+  const inv2Legend = (rows) => h('div', { class: 'inv2-legend' }, rows.map((r) => h('div', { class: 'inv2-leg' }, h('span', { class: 'inv2-dot', style: 'background:' + r.color }), h('span', { class: 'inv2-leg-label' }, r.label), h('b', {}, String(r.value)))));
+  const inv2Chart = (title, sub, body) => h('div', { class: 'card inv2-chart' },
+    h('div', { class: 'inv2-chart-head' }, h('b', {}, title), h('span', { class: 'muted inv2-chart-sub' }, sub)),
+    h('div', { class: 'inv2-chart-body' }, body));
+  const inv2Kpi = (label, value, caption, chart) => h('div', { class: 'card inv2-kpi' },
+    h('div', { class: 'muted inv2-kpi-label' }, label), h('div', { class: 'inv2-kpi-value' }, String(value)),
+    caption ? h('div', { class: 'muted inv2-kpi-cap' }, caption) : null, chart || null);
+  const inv2Channel = (m) => {
+    if (m.startsWith('hf:')) return 'Hugging Face';
+    if (m.startsWith('openai:')) return 'OpenAI';
+    if (m.startsWith('anthropic:') || /^claude/i.test(m)) return 'Anthropic';
+    if (m.startsWith('gemini:') || /^gemini/i.test(m)) return 'Google';
+    const i = m.indexOf(':');
+    return i > 0 ? m.slice(0, i) : 'Default endpoint';
+  };
+  const inv2ModelCell = (a) => {
+    if (!a.model) return h('div', { class: 'inv2-model inv2-model-empty', title: 'No model is set for this agent. Model must be configured in the agent settings.' }, h('span', { class: 'muted inv2-model-missing' }, 'Model must be configured'));
+    return h('div', { class: 'inv2-model', title: a.model },
+      h('div', { class: 'inv2-model-id mono' }, a.model),
+      h('div', { class: 'row2 inv2-model-meta' }, h('span', { class: 'muted inv2-model-ch' }, inv2Channel(a.model)),
+        a.model_configured ? h('span', { class: 'chip ok inv2-model-state' }, 'ready') : h('span', { class: 'chip warn inv2-model-state', title: 'The model is set but no API key is available for its provider.' }, 'no API key')),
+      a.model_configured ? null : h('div', { class: 'muted inv2-model-missing' }, 'Model must be configured'));
+  };
+  const inv2CoverageRow = (label, value, total) => h('div', { class: 'inv2-cov-row' }, h('span', { class: 'inv2-cov-label' }, label), inv2MiniBar(value, total, INV2_WARN), h('b', { class: 'inv2-cov-n' }, String(value)));
+  const inv2Dashboard = (rows, sum) => {
+    const total = rows.length;
+    const risk = ['low', 'medium', 'high', 'suspended'].map((lvl) => ({ label: lvl, value: rows.filter((a) => a.risk.level === lvl).length, color: INV2_RISK[lvl] }));
+    const suspended = sum.suspended, highRisk = sum.high_risk;
+    const verified = rows.filter((a) => a.trust === 'verified').length, unverified = total - verified;
+    const configured = rows.filter((a) => a.model_configured).length, notConfigured = total - configured;
+    const teams = {};
+    rows.forEach((a) => { teams[a.team] = (teams[a.team] || 0) + 1; });
+    const teamRows = Object.entries(teams).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).map(([label, value]) => ({ label, value, color: INV2_ACCENT }));
+    const emptyChart = () => h('p', { class: 'muted inv2-chart-empty' }, 'No agents yet.');
+    const kpis = h('div', { class: 'inv2-kpis' },
+      inv2Kpi('Agents', sum.total, `${sum.total - suspended} active · ${suspended} suspended`, inv2StackBar(risk, total)),
+      inv2Kpi('High risk', highRisk, `${inv2Pct(highRisk, total)}% of agents`, inv2MiniBar(highRisk, total, 'var(--bad)')),
+      inv2Kpi('Suspended', suspended, `${inv2Pct(suspended, total)}% of agents`, inv2MiniBar(suspended, total, 'var(--muted)')),
+      inv2Kpi('Unverified', unverified, `${inv2Pct(unverified, total)}% of agents`, inv2MiniBar(unverified, total, INV2_WARN)));
+    const coverage = h('div', { class: 'inv2-coverage' },
+      h('div', { class: 'card inv2-cov' }, h('div', { class: 'inv2-cov-head' }, h('b', {}, 'Accountability'), h('span', { class: 'muted' }, `${sum.ownerless + sum.no_sponsor + sum.no_purpose} open gap(s)`)),
+        h('div', { class: 'inv2-cov-rows' }, inv2CoverageRow('Without owner', sum.ownerless, total), inv2CoverageRow('Without sponsor', sum.no_sponsor, total), inv2CoverageRow('Without purpose', sum.no_purpose, total))),
+      h('div', { class: 'card inv2-cov' }, h('div', { class: 'inv2-cov-head' }, h('b', {}, 'Model coverage'), h('span', { class: 'muted' }, `${configured} of ${total} configured`)),
+        h('div', { class: 'inv2-cov-model' }, inv2MiniBar(configured, total, INV2_ACCENT)),
+        inv2Legend([{ label: 'Configured', value: configured, color: INV2_ACCENT }, { label: 'Not configured', value: notConfigured, color: INV2_WARN }]),
+        h('p', { class: 'muted inv2-cov-note' }, 'Agents without a model show "Model must be configured".')));
+    const charts = h('div', { class: 'inv2-charts' },
+      inv2Chart('Risk distribution', `${total} agent(s)`, total ? inv2Bars(risk, { total, aria: `Risk distribution: ${risk.map((r) => `${r.value} ${r.label}`).join(', ')}` }) : emptyChart()),
+      inv2Chart('Trust mix', `${verified} verified · ${unverified} unverified`, total ? h('div', { class: 'inv2-donut-wrap' },
+        inv2Donut([{ value: verified, color: INV2_OK }, { value: unverified, color: INV2_WARN }], total, total, 'agents', `Trust mix: ${verified} verified, ${unverified} unverified`),
+        inv2Legend([{ label: 'Verified', value: verified, color: INV2_OK }, { label: 'Unverified', value: unverified, color: INV2_WARN }])) : emptyChart()),
+      inv2Chart('Team distribution', `${teamRows.length} team(s)`, teamRows.length ? h('div', { class: 'inv2-bars-scroll' },
+        inv2Bars(teamRows, { total, aria: `Team distribution: ${teamRows.map((t) => `${t.label} ${t.value}`).join(', ')}` })) : emptyChart()),
+      inv2Chart('Model coverage', `${configured} of ${total} configured`, total ? h('div', { class: 'inv2-donut-wrap' },
+        inv2Donut([{ value: configured, color: INV2_ACCENT }, { value: notConfigured, color: INV2_WARN }], total, `${configured}/${total}`, 'configured', `Model coverage: ${configured} of ${total} agents configured`),
+        inv2Legend([{ label: 'Configured', value: configured, color: INV2_ACCENT }, { label: 'Not configured', value: notConfigured, color: INV2_WARN }])) : emptyChart()));
+    return h('section', { class: 'inv2-dash', 'aria-label': 'Inventory overview' }, kpis, coverage, charts);
+  };
   function accountabilityForm() {
     const e = S.invEdit, f = (k, ph, max) => { const i = h('input', { class: 'field', placeholder: ph, maxlength: max, value: e[k] || '', 'aria-label': ph }); i.addEventListener('input', () => { e[k] = i.value; }); return i; };
     return h('div', { class: 'card inv-edit' }, h('b', {}, `Who is accountable for ${e.name}?`), h('p', { class: 'muted', style: 'margin:4px 0 8px' }, 'Owner runs it day to day, sponsor approves that it should exist, purpose says what it is for. Admin only.'),
@@ -1154,11 +1275,17 @@ const overlayRoot = (() => {
       });
     }
     const loading = !S.invSum && !S.inv.length;
-    if (loading) return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Agent inventory'), h('p', { class: 'muted' }, 'Loading agents…')));
-    const q = h('input', { class: 'field inv-search', placeholder: 'Search agents', value: S.invQ, 'aria-label': 'Search agents' }); q.addEventListener('input', () => { S.invQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
+    if (loading) return h('div', { class: 'body' }, h('div', { class: 'wide inv2-view' }, h('h2', {}, 'Agent inventory'), h('p', { class: 'muted' }, 'Loading agents…')));
+    const all = S.inv;
+    const sum = S.invSum || {
+      total: all.length, suspended: all.filter((a) => a.status === 'suspended').length, high_risk: all.filter((a) => a.risk.level === 'high').length,
+      ownerless: all.filter((a) => a.accountability.includes('no_owner')).length, no_sponsor: all.filter((a) => a.accountability.includes('no_sponsor')).length,
+      no_purpose: all.filter((a) => a.accountability.includes('no_purpose')).length,
+    };
+    const q = h('input', { class: 'field inv-search inv2-search', placeholder: 'Search agents', value: S.invQ, 'aria-label': 'Search agents' }); q.addEventListener('input', () => { S.invQ = q.value; const p = q.selectionStart; render(); const e = document.querySelector('input[aria-label="Search agents"]'); if (e) { e.focus(); e.setSelectionRange(p, p); } });
     const needle = S.invQ.trim().toLowerCase();
-    const rows = S.inv.filter((a) => {
-      if (needle && ![a.name, a.team, a.source, a.owner, a.sponsor, a.purpose].join(' ').toLowerCase().includes(needle)) return false;
+    const rows = all.filter((a) => {
+      if (needle && ![a.name, a.team, a.source, a.owner, a.sponsor, a.purpose, a.model, a.role].join(' ').toLowerCase().includes(needle)) return false;
       if (S.invRisk && a.risk.level !== S.invRisk) return false;
       if (S.invTrust && a.trust !== S.invTrust) return false;
       if (S.invStatus && a.status !== S.invStatus) return false;
@@ -1166,35 +1293,38 @@ const overlayRoot = (() => {
     });
     const filtered = !!(needle || S.invRisk || S.invTrust || S.invStatus);
     const clearFilters = () => { S.invQ = ''; S.invRisk = ''; S.invTrust = ''; S.invStatus = ''; render(); };
-    const chipRow = (label, key, values) => h('div', { class: 'inv-filter-row' }, h('span', { class: 'muted inv-filter-label' }, label),
+    const chipRow = (label, key, values) => h('div', { class: 'inv-filter-row inv2-filter-row' }, h('span', { class: 'muted inv-filter-label' }, label),
       h('div', { class: 'row2' }, [''].concat(values).map((v) => btn(v ? v : 'All', () => { S[key] = v; render(); }, 'chip' + (S[key] === v ? ' ok' : ''), { 'aria-pressed': S[key] === v ? 'true' : 'false' }))));
     const filteredIds = rows.map((a) => a.id);
     const allSelected = filteredIds.length > 0 && filteredIds.every((id) => S.invSel.has(id));
     const master = h('input', { type: 'checkbox', class: 'inv-master-check', checked: allSelected, disabled: !filteredIds.length, 'aria-label': 'Select all filtered agents' });
     master.addEventListener('click', (e) => { e.stopPropagation(); const on = e.target.checked; filteredIds.forEach((id) => (on ? S.invSel.add(id) : S.invSel.delete(id))); render(); });
-    const stats = S.invSum ? h('div', { class: 'inv-stats' }, [['Agents', S.invSum.total, ''], ['Without owner', S.invSum.ownerless, 'warn'], ['Without sponsor', S.invSum.no_sponsor, 'warn'], ['Without purpose', S.invSum.no_purpose, 'warn'], ['Suspended', S.invSum.suspended, 'warn'], ['High risk', S.invSum.high_risk, 'warn']].map(([label, value, cls]) => h('div', { class: 'inv-stat' + (cls && value ? ' ' + cls : '') }, h('span', { class: 'muted' }, label), h('b', {}, String(value == null ? 0 : value))))) : null;
     const openRights = (a) => { if (S.invEdit && S.invEdit.id !== a.id) S.invEdit = null; S.invPick = S.invPick === a.id ? null : a.id; S.invRights = null; render(); };
     const editFor = (a) => { S.invPick = a.id; S.invEdit = { id: a.id, name: a.name, owner: a.owner === 'system' ? '' : a.owner, sponsor: a.sponsor || '', purpose: a.purpose || '' }; render(); };
     const closePanel = () => { S.invPick = null; S.invRights = null; S.invEdit = null; render(); };
     const toggle = (e, id) => { e.stopPropagation(); if (e.target.checked) S.invSel.add(id); else S.invSel.delete(id); render(); };
-    const card = (a) => h('div', { class: 'card inv-card' + (S.invPick === a.id ? ' pick' : ''), onclick: () => openRights(a) },
-      h('div', { class: 'inv-head' }, h('input', { type: 'checkbox', class: 'inv-check', checked: S.invSel.has(a.id), 'aria-label': 'Select ' + a.name, onclick: (e) => toggle(e, a.id) }),
-        tile(a, 40), h('div', { class: 'inv-title' }, h('b', {}, a.name), h('div', { class: 'muted inv-sub' }, `${a.role || 'Agent'} · ${a.team}`)), invTrust(a)),
-      h('div', { class: 'row2 inv-chips' },
-        h('span', { class: 'chip', title: a.source_ref ? `Source reference: ${a.source_ref}` : 'No source reference recorded.' }, a.source),
-        h('span', { class: 'chip ' + (a.status === 'suspended' ? 'warn' : 'ok') }, a.status),
-        h('span', { class: 'chip' + (a.criticality === 'high' ? ' warn' : '') }, `criticality ${a.criticality}`),
-        h('span', { class: 'chip risk-' + a.risk.level, title: (a.risk.reasons || []).length ? a.risk.reasons.join('; ') : 'No risk reasons recorded.' }, `risk ${a.risk.level} · ${a.risk.score}`)),
-      invFacts(a), invGapChips(a),
-      h('div', { class: 'inv-foot' }, h('span', { class: 'muted mono', style: 'font-size:11px' }, 'last active ' + (a.last_activity ? when(a.last_activity) : 'never')),
-        h('span', { class: 'sp' }),
-        h('span', { class: 'row2' },
-          btn('Rights', (e) => { e.stopPropagation(); openRights(a); }, 'link'),
-          btn(a.status === 'suspended' ? 'Resume' : 'Suspend', (e) => { e.stopPropagation(); invAct(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory' }); }, 'link'),
-          btn('Edit accountability', (e) => { e.stopPropagation(); editFor(a); }, 'link'))));
+    const row = (a) => h('tr', { class: 'inv2-row' + (S.invPick === a.id ? ' pick' : ''), onclick: () => openRights(a) },
+      h('td', { class: 'inv2-c-check' }, h('input', { type: 'checkbox', class: 'inv-check', checked: S.invSel.has(a.id), 'aria-label': 'Select ' + a.name, onclick: (e) => toggle(e, a.id) })),
+      h('td', { class: 'inv2-c-agent', 'data-label': 'Agent' }, h('div', { class: 'row2 inv2-agent' }, tile(a, 32), h('div', { class: 'inv2-agent-txt' }, h('b', { class: 'inv2-name' }, a.name), h('span', { class: 'muted inv2-role' }, a.role || 'Agent')))),
+      h('td', { class: 'inv2-c-team', 'data-label': 'Team' }, h('span', { class: 'inv2-team' }, a.team)),
+      h('td', { class: 'inv2-c-owner', 'data-label': 'Owner' }, h('div', {}, h('div', { class: a.owner === 'system' ? 'muted' : 'inv2-owner' }, a.owner === 'system' ? 'unassigned' : a.owner),
+        a.accountability.length ? h('div', { class: 'muted inv2-gap', title: 'Missing: ' + a.accountability.map((g) => INV_GAP_TEXT[g] || g).join(', ') }, `${a.accountability.length} gap${a.accountability.length === 1 ? '' : 's'}`) : h('div', { class: 'muted inv2-gap' }, 'accountable'))),
+      h('td', { class: 'inv2-c-trust', 'data-label': 'Trust' }, invTrust(a)),
+      h('td', { class: 'inv2-c-risk', 'data-label': 'Risk' }, h('span', { class: 'chip risk-' + a.risk.level, title: (a.risk.reasons || []).length ? a.risk.reasons.join('; ') : 'No risk reasons recorded.' }, `${a.risk.level} · ${a.risk.score}`)),
+      h('td', { class: 'inv2-c-model', 'data-label': 'Model' }, inv2ModelCell(a)),
+      h('td', { class: 'inv2-c-last', 'data-label': 'Last active' }, h('span', { class: 'muted mono inv2-last' }, a.last_activity ? when(a.last_activity) : 'never')),
+      h('td', { class: 'inv2-c-status', 'data-label': 'Status' }, h('span', { class: 'chip ' + (a.status === 'suspended' ? 'warn' : 'ok') }, a.status)),
+      h('td', { class: 'inv2-c-actions', 'data-label': 'Actions' }, h('span', { class: 'row2 inv2-actions' },
+        btn('Rights', (e) => { e.stopPropagation(); openRights(a); }, 'link'),
+        btn(a.status === 'suspended' ? 'Resume' : 'Suspend', (e) => { e.stopPropagation(); invAct(a, `/api/bots/${a.id}/status`, { status: a.status === 'suspended' ? 'active' : 'suspended', reason: 'inventory' }); }, 'link'),
+        btn('Edit', (e) => { e.stopPropagation(); editFor(a); }, 'link', { 'aria-label': `Edit accountability for ${a.name}` }))));
+    const table = (list) => h('div', { class: 'card inv2-table-card' }, h('div', { class: 'tbl-wrap inv2-table-wrap' },
+      h('table', { class: 'inv2-table' },
+        h('thead', {}, h('tr', {}, ['', 'Agent', 'Team', 'Owner', 'Trust', 'Risk', 'Model', 'Last active', 'Status', 'Actions'].map((c, i) => h('th', { scope: 'col', class: 'inv2-th-' + i }, c)))),
+        h('tbody', {}, list.map(row)))));
     const rightsPanel = (a) => {
       const r = S.invRights || { loading: true };
-      const head = h('div', { class: 'inv-panel-head' }, tile(a, 40), h('div', { class: 'inv-title' }, h('b', {}, a.name), h('div', { class: 'muted inv-sub' }, a.role || 'Agent')),
+      const head = h('div', { class: 'inv-panel-head inv2-panel-head' }, tile(a, 40), h('div', { class: 'inv-title' }, h('b', {}, a.name), h('div', { class: 'muted inv-sub' }, a.role || 'Agent')),
         btn(icon('x', 16), closePanel, 'link', { 'aria-label': 'Close rights panel' }));
       let body;
       if (r.loading) body = h('p', { class: 'muted inv-note' }, 'Loading rights…');
@@ -1219,6 +1349,8 @@ const overlayRoot = (() => {
           h('h3', {}, 'Risk and trust'),
           h('p', { class: 'muted inv-note' }, `Risk score ${a.risk.score} of 10, level ${a.risk.level}. Trust ${a.trust}, status ${a.status}, criticality ${a.criticality}.`),
           (a.risk.reasons || []).length ? h('ul', { class: 'inv-reasons' }, a.risk.reasons.map((x) => h('li', {}, x))) : h('p', { class: 'muted inv-note' }, 'No risk reasons recorded.'),
+          h('h3', {}, 'Model'),
+          inv2ModelCell(a),
           h('h3', {}, 'Last activity'), h('p', { class: 'muted inv-note mono' }, a.last_activity ? when(a.last_activity) : 'Never active.'),
           h('h3', {}, 'Actions'),
           h('div', { class: 'row2' },
@@ -1230,29 +1362,31 @@ const overlayRoot = (() => {
           h('div', { class: 'row2', style: 'margin-top:10px' }, btn('Close', closePanel, 'link')),
         ];
       }
-      return h('aside', { class: 'inv-aside', role: 'complementary', 'aria-label': `Rights panel for ${a.name}` }, head,
+      return h('aside', { class: 'inv-aside inv2-aside', role: 'complementary', 'aria-label': `Rights panel for ${a.name}` }, head,
         h('div', { class: 'row2 inv-panel-chips' }, h('span', { class: 'chip ' + (a.trust === 'unverified' ? 'warn' : 'ok') }, a.trust), h('span', { class: 'chip ' + (a.status === 'suspended' ? 'warn' : 'ok') }, a.status), h('span', { class: 'chip' }, `criticality ${a.criticality}`), h('span', { class: 'chip risk-' + a.risk.level, title: (a.risk.reasons || []).length ? a.risk.reasons.join('; ') : 'No risk reasons recorded.' }, `risk ${a.risk.level} · ${a.risk.score}`)),
         body);
     };
     const nSel = S.invSel.size;
-    const bulk = nSel ? h('div', { class: 'inv-bulk', role: 'toolbar', 'aria-label': 'Bulk actions' }, h('b', {}, `${nSel} selected`),
+    const bulk = nSel ? h('div', { class: 'inv-bulk inv2-bulk', role: 'toolbar', 'aria-label': 'Bulk actions' }, h('b', {}, `${nSel} selected`),
       btn('Suspend selected', () => invBulk('suspend'), 'btn', { disabled: !!S.invBulk }), btn('Resume selected', () => invBulk('resume'), 'btn', { disabled: !!S.invBulk }), btn('Mark verified', () => invBulk('verify'), 'btn', { disabled: !!S.invBulk }),
       h('span', { class: 'sp' }), btn('Clear', () => { S.invSel.clear(); render(); }, 'link')) : null;
-    const legend = h('p', { class: 'inv-legend' }, INV_TRUST_RULE);
-    const grid = S.inv.length === 0
-      ? emptyState('table', 'No agents yet', 'This workspace has no agents. Create one to give it an owner, a sponsor and a purpose.', btn([icon('plus', 16), 'New agent'], openAgent, 'btn primary'))
-      : rows.length ? h('div', { class: 'inv-grid' }, rows.map(card))
-        : emptyState('lens', 'No agents match', 'No agent matches the current search and filters.', btn('Clear filters', clearFilters, 'btn'));
-    return h('div', { class: 'body' }, h('div', { class: 'wide inv-view' }, h('h2', {}, 'Agent inventory'),
-      h('p', { class: 'muted' }, 'Every agent in this workspace with its source, owner, trust and risk. Open a card for its real permissions. Suspending an agent switches off all of its capabilities at once.'),
-      stats,
+    const legend = h('p', { class: 'inv-legend inv2-trust-rule' }, INV_TRUST_RULE);
+    const listBody = all.length === 0
+      ? h('div', { class: 'card inv2-empty' }, emptyState('table', 'No agents yet', 'This workspace has no agents. Create one to give it an owner, a sponsor, a purpose and a model.', btn([icon('plus', 16), 'New agent'], openAgent, 'btn primary')))
+      : rows.length ? table(rows)
+        : h('div', { class: 'card inv2-empty' }, emptyState('lens', 'No agents match', 'No agent matches the current search and filters.', btn('Clear filters', clearFilters, 'btn')));
+    return h('div', { class: 'body' }, h('div', { class: 'wide inv2-view' },
+      h('div', { class: 'row2 inv2-head' }, h('div', { class: 'inv2-head-txt' }, h('h2', {}, 'Agent inventory'), h('p', { class: 'muted' }, 'Every agent with its owner, trust, risk and model. Open a row for its real permissions.')),
+        btn([icon('plus', 16), 'New agent'], openAgent, 'btn primary inv2-newagent')),
+      inv2Dashboard(all, sum),
+      h('h3', { class: 'inv2-list-title' }, 'Agents'),
       h('div', { class: 'inv-layout' + (picked ? '' : ' inv-layout-full') }, h('div', { class: 'inv-main' },
         S.invEdit && !(picked && S.invEdit.id === picked.id) ? accountabilityForm() : null,
-        h('div', { class: 'inv-filters' },
-          h('div', { class: 'row2 inv-search-row' }, q, h('span', { class: 'sp' }), h('span', { class: 'muted', 'aria-live': 'polite' }, `${rows.length} of ${S.inv.length}`), filtered ? btn('Clear filters', clearFilters, 'link') : null),
-          chipRow('Risk', 'invRisk', ['low', 'medium', 'high', 'suspended']), chipRow('Trust', 'invTrust', ['verified', 'unverified']), chipRow('Status', 'invStatus', ['active', 'suspended']),
-          h('div', { class: 'row2 inv-masterrow' }, h('label', { class: 'inv-master' }, master, h('span', { class: 'muted' }, 'Select all filtered')))),
-        bulk, legend, grid),
+        h('div', { class: 'card inv2-toolbar' },
+          h('div', { class: 'row2 inv2-toolbar-row' }, q, h('span', { class: 'sp' }), h('span', { class: 'muted inv2-count', 'aria-live': 'polite' }, `${rows.length} of ${all.length}`), filtered ? btn('Clear filters', clearFilters, 'link') : null),
+          h('div', { class: 'inv2-filters' }, chipRow('Risk', 'invRisk', ['low', 'medium', 'high', 'suspended']), chipRow('Trust', 'invTrust', ['verified', 'unverified']), chipRow('Status', 'invStatus', ['active', 'suspended'])),
+          h('div', { class: 'row2 inv2-toolrow' }, h('label', { class: 'inv-master' }, master, h('span', { class: 'muted' }, 'Select all filtered')))),
+        bulk, legend, listBody),
         picked ? rightsPanel(picked) : null)));
   }
   const importAgent = (body, label) => run(async () => { const r = await api('/api/marketplace/import', { method: 'POST', body }); await loadBots(); S.info = `${label} added as "${r.name}".` + (r.note ? ' ' + r.note : ''); });
