@@ -165,7 +165,7 @@ const overlayRoot = (() => {
       if (view === 'org') { await loadOrg(); if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; } }
       if (view === 'teams') { await Promise.all([loadTeams(), loadBots()]); await loadChannelIndex(); } else if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; }
       if (view === 'plans') S.bill = await api('/api/billing');
-      if (view === 'settings') { for (const [k, u] of [['models', '/api/models'], ['keys', '/api/admin/keys'], ['backups', '/api/admin/backups']]) { try { S[k] = await api(u); } catch (e) { S.err = e.message; } } try { S.ready = await (await fetch('/api/health/ready')).json(); } catch {} }
+      if (view === 'settings') { for (const [k, u] of [['models', '/api/models'], ['keys', '/api/admin/keys'], ['backups', '/api/admin/backups']]) { try { S[k] = await api(u); } catch (e) { S.err = e.message; } } try { S.ready = await (await fetch('/api/health/ready')).json(); } catch {} try { S.ssearch = await api('/api/search/status'); } catch {} }
       if (view === 'control') { try { S.leads = await api('/api/leads'); S.funnel = await api('/api/events/summary'); } catch {} }
       if (view === 'inventory') { S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }
       if (view === 'usage') { [S.usage, S.provs, S.prices, S.cu] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices'), api('/api/computer-use/status')]); }
@@ -996,6 +996,15 @@ const overlayRoot = (() => {
         h('div', { class: 'muted', style: 'margin-top:8px' }, 'Open models to try (click to fill):'), m ? h('div', { class: 'row2' }, m.suggested.map((x) => btn(x.name, () => { mt.model = x.id; render(); }, 'chip', { title: x.note }))) : null,
         h('div', { class: 'row2', style: 'margin-top:10px' }, mi, btn('Test connection', () => run(async () => { const r = await api('/api/models/test', { method: 'POST', body: { model: mt.model || null } }); mt.out = r.ok ? `OK: ${r.provider} / ${r.model} answered in ${r.ms} ms` : `Not working: ${r.message}`; }), 'btn primary')), mt.out ? h('div', { class: 'pre' }, mt.out) : null,
         h('p', { class: 'muted', style: 'font-size:12px' }, 'Set the model per agent in the agent panel. Default: CFA_MODEL_BASE_URL, CFA_MODEL_API_KEY, CFA_MODEL_NAME. Hugging Face: HF_TOKEN.')),
+      h('div', { class: 'card', style: 'margin-bottom:14px' }, h('b', {}, 'Web search'),
+        h('p', { class: 'muted' }, 'Deep research can cite live web pages. The provider and key are environment variables (CFA_SEARCH_PROVIDER, CFA_SEARCH_API_KEY); Google also needs CFA_SEARCH_CX.'),
+        S.ssearch ? h('div', { class: 'row2', style: 'flex-wrap:wrap' }, h('span', { class: 'chip ' + (S.ssearch.configured ? 'ok' : 'warn') }, S.ssearch.provider + (S.ssearch.configured ? ' - key set' : ' - no key')),
+          S.ssearch.provider === 'google' ? h('span', { class: 'chip ' + (S.ssearch.google_cx_set ? 'ok' : 'warn') }, 'CX ' + (S.ssearch.google_cx_set ? 'set' : 'missing')) : null) : null,
+        h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Check configuration', () => run(async () => { S.ssearch = await api('/api/search/status'); S.stest = null; render(); }), 'btn'),
+          btn('Test key', () => run(async () => { S.stest = await api('/api/search/test', { method: 'POST' }); render(); }), 'btn primary')),
+        S.stest ? h('div', { style: 'margin-top:10px' }, h('span', { class: 'chip ' + (S.stest.ok ? 'ok' : 'warn') }, S.stest.ok ? 'search works' : 'problem'),
+          h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:12px' }, S.stest.detail + (S.stest.hint ? ' ' + S.stest.hint : '') + (S.stest.results ? ' (' + S.stest.results + ' results in ' + S.stest.ms + ' ms)' : '')),
+          (S.stest.sample || []).length ? h('ul', { class: 'muted', style: 'font-size:12px;margin:6px 0 0;padding-left:18px' }, S.stest.sample.map((x) => h('li', {}, x.title))) : null) : null),
       h('div', { class: 'card', id: 'set-keys', style: 'margin-bottom:14px' }, h('b', {}, 'Access keys'), h('p', { class: 'muted' }, 'Keys are stored as a hash. A new token is shown once.'),
         S.newKey ? h('div', { class: 'pre' }, `New token for ${S.newKey.name} (${S.newKey.role}): ${S.newKey.token}\nCopy it now. It cannot be shown again.`) : null,
         k ? h('table', {}, h('tbody', {}, k.keys.map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.role), h('td', { class: 'mono' }, 'used ' + (when(x.last_used) || 'never')), h('td', {}, x.revoked ? h('span', { class: 'chip warn' }, 'revoked') : btn('Revoke', () => run(async () => { await api('/api/admin/keys/' + x.id, { method: 'DELETE' }); S.keys = await api('/api/admin/keys'); }), 'link')))))) : null, k && k.env_keys ? h('p', { class: 'muted' }, `${k.env_keys} key(s) come from the environment.`) : null,

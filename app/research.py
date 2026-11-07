@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import os
 import re
 from typing import Any
@@ -85,52 +86,91 @@ def _clean(text: Any, limit: int) -> str:
     return re.sub(r"<[^>]+>", "", str(text or ""))[:limit].strip()
 
 
-async def web_search(q: str, k: int) -> list[dict[str, Any]]:
-    """Web search through Brave (default), Tavily or Google custom search.
+def search_provider() -> str:
+    return (os.getenv("CFA_SEARCH_PROVIDER") or "brave").strip().lower()
 
-    Provider is chosen with CFA_SEARCH_PROVIDER=brave|tavily|google and needs CFA_SEARCH_API_KEY;
-    Google additionally needs CFA_SEARCH_CX. A provider error is not an exception for the caller:
-    the research run simply continues with Brain sources only.
-    """
+
+async def _search_raw(q: str, k: int) -> tuple[int, list[dict[str, Any]], str]:
+    """One search request. Returns (http_status, results, detail) so callers can diagnose errors."""
     key = (os.getenv("CFA_SEARCH_API_KEY") or "").strip()
     if not key:
-        return []
-    provider = (os.getenv("CFA_SEARCH_PROVIDER") or "brave").strip().lower()
-    out: list[dict[str, Any]] = []
+        return 0, [], "no search key configured"
+    provider = search_provider()
     try:
         if provider == "tavily":
             async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=20) as c:
                 r = await c.post("https://api.tavily.com/search",
                                  json={"api_key": key, "query": q, "max_results": k, "search_depth": "basic"})
-                r.raise_for_status()
-                for x in (r.json().get("results") or []):
-                    url = str(x.get("url") or "")
-                    if url.startswith(("https://", "http://")):
-                        out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
-                                    "snippet": _clean(x.get("content"), 240)})
+                if r.status_code != 200:
+                    return r.status_code, [], r.text[:200]
+                rows = (r.json().get("results") or [])
+                out = [{"kind": "web", "ref": str(x.get("url") or ""), "title": _clean(x.get("title"), 120),
+                        "snippet": _clean(x.get("content"), 240)} for x in rows]
         elif provider == "google":
             async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=15) as c:
                 r = await c.get("https://www.googleapis.com/customsearch/v1",
                                 params={"key": key, "cx": os.getenv("CFA_SEARCH_CX", ""), "q": q, "num": min(k, 10)})
-                r.raise_for_status()
-                for x in (r.json().get("items") or []):
-                    url = str(x.get("link") or "")
-                    if url.startswith(("https://", "http://")):
-                        out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
-                                    "snippet": _clean(x.get("snippet"), 240)})
-        else:  # brave
+                if r.status_code != 200:
+                    return r.status_code, [], r.text[:200]
+                rows = (r.json().get("items") or [])
+                out = [{"kind": "web", "ref": str(x.get("link") or ""), "title": _clean(x.get("title"), 120),
+                        "snippet": _clean(x.get("snippet"), 240)} for x in rows]
+        else:
             async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=15) as c:
                 r = await c.get("https://api.search.brave.com/res/v1/web/search", params={"q": q, "count": k},
                                 headers={"X-Subscription-Token": key, "Accept": "application/json"})
-                r.raise_for_status()
-                for x in ((r.json().get("web") or {}).get("results") or []):
-                    url = str(x.get("url") or "")
-                    if url.startswith(("https://", "http://")):
-                        out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
-                                    "snippet": _clean(x.get("description"), 240)})
-    except (httpx.HTTPError, ValueError, KeyError):
-        return []
-    return out[:k]
+                if r.status_code != 200:
+                    return r.status_code, [], r.text[:200]
+                rows = ((r.json().get("web") or {}).get("results") or [])
+                out = [{"kind": "web", "ref": str(x.get("url") or ""), "title": _clean(x.get("title"), 120),
+                        "snippet": _clean(x.get("description"), 240)} for x in rows]
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return 0, [], f"network error: {exc}"[:200]
+    return 200, [x for x in out if x["ref"].startswith(("https://", "http://"))][:k], ""
+
+
+async def web_search(q: str, k: int) -> list[dict[str, Any]]:
+    """Web search for a research run. A provider failure just means fewer sources, never a crash."""
+    status, results, _detail = await _search_raw(q, k)
+    return results if status == 200 else []
+
+
+DIAGNOSIS = {
+    0: "The provider could not be reached from this host (network or missing key).",
+    401: "The API key was rejected - check that the key is complete and belongs to this provider.",
+    403: "The key has no active subscription/plan for this API - enable the free plan in the provider dashboard.",
+    404: "The provider endpoint answered 404 - usually a wrong plan or product (for Brave use the Search API).",
+    422: "The provider rejected the request - for Google check that CFA_SEARCH_CX is set.",
+    429: "Rate limit reached - the free plan allows few requests per second/minute. Try again in a minute.",
+}
+
+
+@router.get("/api/search/status")
+def search_status() -> dict[str, Any]:
+    """Which provider is configured and whether a key is present (never returns the key)."""
+    return {"provider": search_provider(),
+            "configured": bool((os.getenv("CFA_SEARCH_API_KEY") or "").strip()),
+            "google_cx_set": bool(os.getenv("CFA_SEARCH_CX")),
+            "providers": ["brave", "tavily", "google"],
+            "note": "Set CFA_SEARCH_PROVIDER and CFA_SEARCH_API_KEY as environment variables."}
+
+
+@router.post("/api/search/test")
+async def search_test(request: Request) -> dict[str, Any]:
+    """Live probe of the configured search key with a human readable diagnosis."""
+    pf.need_admin(request)
+    started = time.time()
+    status, results, detail = await _search_raw("shewiun cfa agent governance", 3)
+    ms = int((time.time() - started) * 1000)
+    if status == 200 and results:
+        return {"ok": True, "provider": search_provider(), "status": status, "results": len(results), "ms": ms,
+                "detail": "Search works.", "sample": [{"title": r["title"], "ref": r["ref"]} for r in results[:2]]}
+    if status == 200:
+        return {"ok": False, "provider": search_provider(), "status": status, "results": 0, "ms": ms,
+                "detail": "The provider answered but returned no results for the test query."}
+    return {"ok": False, "provider": search_provider(), "status": status, "results": 0, "ms": ms,
+            "detail": detail or DIAGNOSIS.get(status, "Unknown provider answer."),
+            "hint": DIAGNOSIS.get(status, "")}
 
 
 def valid_chart(c: Any) -> dict[str, Any] | None:
