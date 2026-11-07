@@ -1221,6 +1221,10 @@ const overlayRoot = (() => {
           h('h3', {}, 'Billing & revenue'),
           money,
           h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Stripe'), h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, 'Checkout, customer portal and invoices run through Stripe per organisation. No shared customer.'), btn('Plans & upgrade', () => go('plans'), 'btn primary')),
+          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Data & privacy'),
+            h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, (S.xsum ? (S.xsum.rows + ' rows across ' + S.xsum.tables + ' tables are exportable.') : 'Full JSON export of everything this organisation holds. Secrets are never included.')),
+            h('div', { class: 'row2', style: 'flex-wrap:wrap' }, btn('Download full export', () => { dl('/api/org/export', 'org-export.json'); }, 'btn primary'),
+              btn('What is included?', () => run(async () => { S.xsum = await api('/api/org/export/summary'); S.info = S.xsum.note; render(); }), 'btn'))),
           danger))));
   }
 
