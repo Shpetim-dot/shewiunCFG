@@ -558,6 +558,11 @@ const overlayRoot = (() => {
     catch (e) { S.err = e.message; }
     if (S.rs) S.rs.running = false; try { S.rlist = await api('/api/research'); } catch {} render();
   }
+  const applyMode = (m, subject) => {
+    const s = (subject || '').trim();
+    if (!s) return m.q.replace(/<[^>]+>/g, '');
+    return m.q.replace(/<[^>]+>/g, s);
+  };
   const RESEARCH_MODES = [
     { id: 'company', title: 'Company research', icon: 'compass', depth: 'standard', desc: 'News, launches, hires and funding for one company',
       q: 'Research the latest news about <company>: product launches, new hires and funding deals in the last 12 months. Focus on facts with dates and sources.' },
@@ -616,6 +621,20 @@ const overlayRoot = (() => {
         h('div', { class: 'browser-page' }, s ? [h('b', {}, s.title), h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:12px' }, String(s.snippet || '').slice(0, 260)),
           h('p', { class: 'muted', style: 'margin:6px 0 0;font-size:11px' }, 'kind: ' + s.kind + (s.kind === 'web' ? ' · live page' : ' · from your Brain'))] : h('p', { class: 'muted' }, 'The browser opens as soon as the agent reads the first source.')));
     };
+    const sourceCard = (s) => h('div', { class: 'card', style: 'margin:6px 0;font-size:13px' },
+      h('span', { class: 'chip' }, '[' + s.n + '] ' + s.kind), ' ',
+      (s.kind === 'web' && /^https?:\/\//.test(s.ref))
+        ? h('a', { class: 'link', href: s.ref, target: '_blank', rel: 'noopener noreferrer' }, s.title)
+        : btn(s.title, () => openNote(s.ref), 'link'),
+      h('div', { class: 'muted' }, String(s.snippet || '').slice(0, 120)),
+      (s.kind === 'web' && /^https?:\/\//.test(s.ref))
+        ? h('div', { style: 'margin-top:6px' }, btn('Snapshot (Internet Archive)', () => run(async () => {
+            const snap = await api('/api/research/snapshot?url=' + encodeURIComponent(s.ref));
+            S.info = snap.available ? 'Archive snapshot from ' + when(snap.timestamp) : snap.detail;
+            if (snap.available && snap.snapshot) window.open(snap.snapshot, '_blank', 'noopener');
+            render();
+          }), 'link'))
+        : null);
     const reportText = () => rep ? ('# ' + S.rq + '\n\n' + rep.markdown + '\n\n## Sources\n' + (rep.sources || []).map((s) => '[' + s.n + '] ' + s.title + ' - ' + s.ref).join('\n')) : '';
     const copyReport = () => { if (navigator.clipboard) navigator.clipboard.writeText(reportText()).then(() => { S.info = 'Report copied to the clipboard.'; render(); }); };
     const exportReport = () => { const b = new Blob([reportText()], { type: 'text/markdown' }); const a = h('a', { href: URL.createObjectURL(b), download: 'research-report.md' }); document.body.append(a); a.click(); a.remove(); };
@@ -626,16 +645,29 @@ const overlayRoot = (() => {
       startResearch();
     }, 'btn primary', { disabled: !!(r && r.running), title: 'Plans sub-questions and writes a cited report' });
     const qhint = h('div', { class: 'muted', style: 'font-size:11px;margin-top:4px' }, (S.rq || '').trim().length + ' / 1000 characters - at least 3 needed to start');
+    requestAnimationFrame(() => {
+      const sub = document.getElementById('rsub');
+      if (sub && !sub._bound) {
+        sub._bound = true;
+        sub.addEventListener('input', () => {
+          S.rsub = sub.value;
+          const m = RESEARCH_MODES.find((x) => x.id === S.rmode);
+          if (m) { S.rq = applyMode(m, sub.value); q.value = S.rq; qhint.textContent = S.rq.trim().length + ' / 1000 characters - at least 3 needed to start'; }
+        });
+      }
+    });
     q.addEventListener('input', () => { S.rq = q.value; rbtn.disabled = !!(S.rs && S.rs.running); qhint.textContent = q.value.trim().length + ' / 1000 characters - at least 3 needed to start'; });
     const cite = (t) => t.split(/(\[\d+\])/).map((p) => { const m = p.match(/^\[(\d+)\]$/); if (!m) return p; const s = (rep ? rep.sources : r.sources).find((x) => x.n === +m[1]); return !s ? p : s.kind === 'brain' ? btn(p, () => openNote(s.ref), 'wl') : /^https?:\/\//.test(s.ref) ? h('a', { class: 'wl', href: s.ref, target: '_blank', rel: 'noopener noreferrer' }, p) : p; });
     return h('div', { class: 'body' }, h('div', { class: 'wide' }, h('h2', {}, 'Deep research'),
       h('p', { class: 'muted' }, 'Plans sub-questions, searches your Brain' + (S.health.search_configured ? ' and the web' : '') + ', and writes a report with numbered citations and a chart. Without a model the report is extractive: it quotes sources and adds no generated claims.'),
       h('div', { class: 'mode-grid' }, RESEARCH_MODES.map((m) => h('button', {
           type: 'button', class: 'mode-card' + (S.rmode === m.id ? ' on' : ''), 'aria-pressed': S.rmode === m.id,
-          onclick: () => { S.rmode = m.id; S.rq = m.q; S.rdepth = m.depth || S.rdepth; render(); },
+          onclick: () => { S.rmode = m.id; S.rsub = ''; S.rq = applyMode(m, ''); S.rdepth = m.depth || S.rdepth; render(); },
         }, h('span', { class: 'row2' }, icon(m.icon, 16), h('b', {}, m.title)), h('span', { class: 'muted' }, m.desc)))),
-      S.rmode ? h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0 0' }, 'Template applied - replace the <...> parts with your company or topic. ',
-        btn('Clear template', () => { S.rmode = null; S.rq = ''; render(); }, 'link')) : null,
+      S.rmode ? h('div', { class: 'row2', style: 'margin:6px 0 0;flex-wrap:wrap' },
+        h('input', { class: 'field', id: 'rsub', style: 'max-width:320px', placeholder: 'Subject: company, segment or product',
+          value: S.rsub || '', 'aria-label': 'Template subject' }),
+        btn('Clear template', () => { S.rmode = null; S.rsub = ''; S.rq = ''; render(); }, 'link')) : null,
       h('div', { class: 'rbox' }, q, qhint, cx), h('div', { class: 'row2', style: 'margin:10px 0;flex-wrap:wrap' }, depthChips,
         chip((S.rweb && webReady ? 'Web: on - ' + (S.ssearch ? S.ssearch.provider : 'search') : 'Web: off'), S.rweb && webReady, () => { if (!webReady) { go('settings'); return; } S.rweb = !S.rweb; render(); }, false),
         webReady ? null : h('span', { class: 'muted', style: 'font-size:12px' }, 'No search key in this running instance - set CFA_SEARCH_API_KEY and redeploy, then check Settings > Web search > Test key. ',
@@ -661,7 +693,7 @@ const overlayRoot = (() => {
           h('div', { class: 'row2', style: 'margin-top:12px;flex-wrap:wrap' }, btn('Save to Brain as draft', () => run(async () => { const d = await api(`/api/research/${r.id}/save`, { method: 'POST' }); S.info = `Saved as draft: ${d.title}`; }), 'btn primary'),
             btn('Copy report', copyReport, 'btn'), btn('Export .md', exportReport, 'btn'))] : null),
         h('div', {}, researchMonitor(r, rep), h('h2', {}, `Sources (${(rep ? rep.sources : r.sources).length})`),
-          (rep ? rep.sources : r.sources).map((s) => h('div', { class: 'card', style: 'margin:6px 0;font-size:13px' }, h('span', { class: 'chip' }, `[${s.n}] ${s.kind}`), ' ', s.kind === 'web' && /^https?:\/\//.test(s.ref) ? h('a', { class: 'link', href: s.ref, target: '_blank', rel: 'noopener noreferrer' }, s.title) : btn(s.title, () => openNote(s.ref), 'link'), h('div', { class: 'muted' }, s.snippet.slice(0, 120)))))) : null,
+          (rep ? rep.sources : r.sources).map(sourceCard))) : null,
       S.rlist.length && !r ? [h('h2', {}, 'Previous research'), S.rlist.map((x) => h('div', {}, btn(x.question, () => run(async () => { const d = await api('/api/research/' + x.id); S.rs = { activity: [], sources: d.sources, questions: d.questions, report: d, running: false, done: d.questions.map((_, i) => i), id: d.id }; }), 'link'), h('span', { class: 'muted mono' }, ` ${when(x.created_at)} ${x.mode}`)))] : null));
   }
 

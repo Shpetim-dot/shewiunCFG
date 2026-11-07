@@ -168,6 +168,19 @@ async def _search_raw(q: str, k: int) -> tuple[int, list[dict[str, Any]], str]:
                 rows = (r.json().get("results") or [])
                 out = [{"kind": "web", "ref": str(x.get("url") or ""), "title": _clean(x.get("title"), 120),
                         "snippet": _clean(x.get("content"), 240)} for x in rows]
+        elif provider == "exa":
+            async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=20) as c:
+                r = await c.post("https://api.exa.ai/search",
+                                 headers={"x-api-key": key, "Content-Type": "application/json"},
+                                 json={"query": q, "numResults": k, "contents": {"text": {"maxCharacters": 400}}})
+                if r.status_code != 200:
+                    return r.status_code, [], r.text[:200]
+                out = []
+                for x in (r.json().get("results") or []):
+                    url = str(x.get("url") or "")
+                    if url.startswith(("https://", "http://")):
+                        out.append({"kind": "web", "ref": url, "title": _clean(x.get("title"), 120),
+                                    "snippet": _clean(x.get("text") or "", 240)})
         elif provider == "google":
             async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=15) as c:
                 r = await c.get("https://www.googleapis.com/customsearch/v1",
@@ -207,13 +220,31 @@ DIAGNOSIS = {
 }
 
 
+@router.get("/api/research/snapshot")
+async def research_snapshot(url: str) -> dict[str, Any]:
+    """Closest Internet Archive snapshot of a web source, for provenance ("seen on date X")."""
+    if not url.startswith(("https://", "http://")):
+        raise HTTPException(422, "only http(s) urls can be archived")
+    try:
+        async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=12) as c:
+            r = await c.get("https://archive.org/wayback/available", params={"url": url})
+            data = r.json() if r.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        return {"available": False, "url": url, "detail": "the archive could not be reached"}
+    snap = ((data or {}).get("archived_snapshots") or {}).get("closest") or {}
+    if not snap.get("available"):
+        return {"available": False, "url": url, "detail": "no archived snapshot for this page yet"}
+    return {"available": True, "url": url, "snapshot": snap.get("url"), "timestamp": snap.get("timestamp"),
+            "status": snap.get("status"), "note": "Snapshot from the Internet Archive; the live page may differ."}
+
+
 @router.get("/api/search/status")
 def search_status() -> dict[str, Any]:
     """Which provider is configured and whether a key is present (never returns the key)."""
     source = key_source()
     return {"provider": search_provider(), "configured": source != "none", "key_source": source,
             "google_cx_set": bool(os.getenv("CFA_SEARCH_CX")),
-            "providers": ["brave", "tavily", "google"],
+            "providers": ["brave", "tavily", "google", "exa"],
             "note": "A key from the environment wins; otherwise the encrypted value saved here is used."}
 
 
@@ -227,8 +258,8 @@ def set_search_config(item: SearchConfigIn, request: Request) -> dict[str, Any]:
     """Save the web search provider and key per organisation (encrypted with CFA_SECRET_KEY)."""
     p = pf.need_admin(request)
     provider = (item.provider or "").strip().lower()
-    if provider and provider not in ("brave", "tavily", "google"):
-        raise HTTPException(422, "provider must be brave, tavily or google")
+    if provider and provider not in ("brave", "tavily", "google", "exa"):
+        raise HTTPException(422, "provider must be brave, tavily, google or exa")
     from app import mcp_apps
     with pf.db() as con:
         if provider:
@@ -272,6 +303,37 @@ async def search_test(request: Request) -> dict[str, Any]:
     return {"ok": False, "provider": search_provider(), "status": status, "results": 0, "ms": ms,
             "detail": detail or DIAGNOSIS.get(status, "Unknown provider answer."),
             "hint": DIAGNOSIS.get(status, "")}
+
+
+def extract_text(html_text: str) -> str:
+    """Readable text from an HTML page. Uses Trafilatura when installed, otherwise a small fallback."""
+    if not html_text:
+        return ""
+    try:
+        import trafilatura  # optional dependency
+        got = trafilatura.extract(html_text, include_comments=False, include_tables=True) or ""
+        if got.strip():
+            return got.strip()
+    except Exception:
+        pass
+    body = re.sub(r"(?is)<(script|style|noscript|header|footer|nav)[^>]*>.*?</\1>", " ", html_text)
+    body = re.sub(r"(?s)<[^>]+>", " ", body)
+    body = re.sub(r"&nbsp;", " ", body)
+    body = re.sub(r"\s+", " ", body)
+    return body.strip()
+
+
+async def read_page(url: str, max_chars: int = 1200) -> str:
+    """Fetch one page and return its readable text (empty string on any error)."""
+    try:
+        async with httpx.AsyncClient(transport=SEARCH_TRANSPORT, timeout=12, follow_redirects=True,
+                                     headers={"User-Agent": "ShewiunResearch/1.0"}) as c:
+            r = await c.get(url)
+            if r.status_code != 200 or "text/html" not in r.headers.get("content-type", ""):
+                return ""
+            return extract_text(r.text)[:max_chars]
+    except (httpx.HTTPError, ValueError):
+        return ""
 
 
 def valid_chart(c: Any) -> dict[str, Any] | None:
