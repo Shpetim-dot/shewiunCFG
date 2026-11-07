@@ -49,101 +49,127 @@ const overlayRoot = (() => {
   const col = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : '#12294F');
   let gid = 0;
   const mix = (hex, a) => { const n = parseInt(col(hex).slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(a < 0 ? v * (1 + a) : v + (255 - v) * a)); return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''); };
-  // ---------- face avatars: flat, hand-built SVG. Every agent gets its own colours, ring pattern and face. ----------
-  const INK = '#1B2433';
-  const hsl = (hex) => { const n = parseInt(col(hex).slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, bl = (n & 255) / 255, mx = Math.max(r, g, bl), mn = Math.min(r, g, bl), l = (mx + mn) / 2; let hh = 0, sa = 0;
-    if (mx !== mn) { const d = mx - mn; sa = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); hh = mx === r ? (g - bl) / d + (g < bl ? 6 : 0) : mx === g ? (bl - r) / d + 2 : (r - g) / d + 4; hh *= 60; } return [hh, sa, l]; };
-  const fromHsl = (hh, sa, l) => { const k = sa * Math.min(l, 1 - l), f = (n) => { const q = (n + hh / 30) % 12; return Math.round(255 * (l - k * Math.max(-1, Math.min(q - 3, 9 - q, 1)))); }; return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join(''); };
-  const EYES = {
-    dot: '<circle cx="18" cy="22" r="2.5"/><circle cx="30" cy="22" r="2.5"/>',
-    wide: '<circle cx="18" cy="22" r="3.3"/><circle cx="30" cy="22" r="3.3"/><circle cx="19" cy="21" r="1" fill="#FBFAF4"/><circle cx="31" cy="21" r="1" fill="#FBFAF4"/>',
-    tall: '<ellipse cx="18" cy="22" rx="2.1" ry="3.4"/><ellipse cx="30" cy="22" rx="2.1" ry="3.4"/>',
-    happy: '<path d="M15 23.5q3-4 6 0M27 23.5q3-4 6 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-    calm: '<path d="M15.5 22.5h5M27.5 22.5h5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
-    wink: '<circle cx="18" cy="22" r="2.6"/><path d="M27 23.5q3-4 6 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-  };
-  // Specular catch-lights for the open eye styles. They live inside the gaze/blink groups, so they
-  // follow the cursor and close with the lids. Closed eyes (happy/calm/wink) never get a fake pupil.
-  const EYE_SPEC = {
-    dot: '<circle class="av3-spec" cx="17.05" cy="21.05" r=".95"/><circle class="av3-spec" cx="29.05" cy="21.05" r=".95"/>',
-    wide: '',
-    tall: '<circle class="av3-spec" cx="17.2" cy="20.7" r=".85"/><circle class="av3-spec" cx="29.2" cy="20.7" r=".85"/>',
-    happy: '', calm: '', wink: '<circle class="av3-spec" cx="17.05" cy="21.05" r=".95"/>',
-  };
-  const BROWS = {
-    none: '', raise: '<path d="M14.5 16q3.5-3 7-.5M27 17.2h6.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
-    slant: '<path d="M14.5 16.5l6.5 2.2M33.5 16.5l-6.5 2.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
-    soft: '<path d="M14.5 17.5q3.5-2.5 7 0M26.5 17.5q3.5-2.5 7 0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
-  };
-  const MOUTHS = {
-    smile: '<path d="M19 29.5q5 4.5 10 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-    flat: '<path d="M20 31h8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-    smirk: '<path d="M19.5 31q5 2.6 9.5-2.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-    open: '<ellipse cx="24" cy="31" rx="2.7" ry="2.3"/>',
-    dot: '<circle cx="24" cy="30.5" r="2.1"/>',
-    grin: '<path d="M18.5 29q5.5 8 11 0z"/>',
-  };
-  const ARCS = [['t'], ['t', 'b'], ['l', 'r'], ['t', 'l'], ['r', 'b'], ['t', 'r']];
-  const ARC_ANGLES = { t: [238, 302], r: [-38, 38], b: [58, 122], l: [142, 218] };
-  const CORE_FACE = {
-    strategist: { ring: ['#3B6FE0', '#F2A93B'], arcs: 0, eyes: 'dot', brow: 'none', mouth: 'smile' },
-    skeptic: { ring: ['#E5484D', '#2B3A67'], arcs: 2, eyes: 'dot', brow: 'raise', mouth: 'flat' },
-    builder: { ring: ['#16A37F', '#F2A93B'], arcs: 3, eyes: 'wide', brow: 'slant', mouth: 'smirk' },
-    chair: { ring: ['#7A4E9C', '#3B6FE0'], arcs: 0, eyes: 'dot', brow: 'none', mouth: 'dot' },
-  };
-  const hashOf = (str) => { let x = 7; for (const ch of String(str)) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
-  const pickKey = (o, n) => { const k = Object.keys(o); return k[n % k.length]; };
-  function faceOf(b) {
-    const key = (b && (b.id || b.name)) || 'x', core = CORE_FACE[key]; if (core) return core;
-    const x = hashOf(key), [hh, sa] = hsl(b && b.color), hue = (hh + 120 + (x % 90)) % 360;
-    return { ring: [fromHsl(hh, Math.max(0.55, Math.min(sa, 0.8)), 0.55), fromHsl(hue, 0.6, 0.5)], arcs: x % ARCS.length, eyes: pickKey(EYES, x >> 3), brow: pickKey(BROWS, x >> 6), mouth: pickKey(MOUTHS, x >> 9) };
-  }
-  const arcPath = (n, r = 18) => { const [a0, a1] = ARC_ANGLES[n], pt = (a) => `${(24 + r * Math.cos((a * Math.PI) / 180)).toFixed(2)} ${(24 + r * Math.sin((a * Math.PI) / 180)).toFixed(2)}`; return `M${pt(a0)}A${r} ${r} 0 0 1 ${pt(a1)}`; };
-  // A tiny custom mark for "pinned": the G icon map is shared and must not grow for one sidebar state.
-  const av3Pin = (s = 12) => {
-    const v = document.createElementNS(NS, 'svg');
-    for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true' })) v.setAttribute(k, x);
-    v.innerHTML = '<path fill-rule="evenodd" d="M12 2.5a6.5 6.5 0 0 1 6.5 6.4c0 4.6-6.5 12-6.5 12S5.5 13.5 5.5 8.9A6.5 6.5 0 0 1 12 2.5zm0 4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z"/>';
-    return v;
-  };
-  // state: o.thinking = the agent is working or answering (eyes look around, mouth talks, ring turns); idle faces blink now and then.
-  // Each agent is a small 3-D figure filled with its own colours: a radial body gradient in the primary
-  // ring colour, a secondary-colour glow, a rim light, a contact shadow and a gloss arc. The colours come
-  // from faceOf(), so identity, light/dark mode and every size stay data-driven with zero per-frame JS.
-  function tile(b, s = 40, o = {}) {
-    const f = faceOf(b || {}), on = ARCS[f.arcs], uid = ++gid;
-    const c0 = f.ring[0], c1 = f.ring[1];
-    const bodyHi = mix(c0, .55), bodyMid = mix(c0, .18), bodyLo = mix(c0, -.38), arcC = mix(c1, .52);
-    const ring = Object.keys(ARC_ANGLES).map((n) => {
-      const d = arcPath(n);
-      return `<path class="av3-arc-sh" d="${d}" fill="none" stroke-width="4.2" stroke-linecap="round" transform="translate(.5 .65)"/>`
-        + `<path d="${d}" fill="none" stroke="${arcC}" stroke-width="3.6" stroke-linecap="round"/>`
-        + `<path class="av3-arc-hi" d="${d}" fill="none" stroke-width="1.1" stroke-linecap="round" transform="translate(-.35 -.4)"/>`;
-    }).join('');
-    const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true');
-    v.setAttribute('class', 'av' + (o.float ? ' float' : '') + (o.thinking ? ' thinking' : ''));
-    v.style.setProperty('--bd', `-${(Math.random() * 5).toFixed(1)}s`);
-    v.innerHTML = '<defs>'
-      + `<radialGradient id="av3p${uid}" cx="30%" cy="22%" r="90%"><stop offset="0" class="av3-plate-hi"/><stop offset=".55" class="av3-plate-mid"/><stop offset="1" class="av3-plate-lo"/></radialGradient>`
-      + `<linearGradient id="av3s${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="av3-shade-hi"/><stop offset=".5" class="av3-shade-mid"/><stop offset="1" class="av3-shade-lo"/></linearGradient>`
-      + `<radialGradient id="av3d${uid}" cx="50%" cy="50%" r="50%"><stop offset="0" class="av3-drop-in"/><stop offset="1" class="av3-drop-out"/></radialGradient>`
-      + `<linearGradient id="av3r${uid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="av3-rim-hi"/><stop offset=".55" class="av3-rim-mid"/><stop offset="1" class="av3-rim-lo"/></linearGradient>`
-      + `<radialGradient id="av3c${uid}" cx="30%" cy="22%" r="95%"><stop offset="0" stop-color="${bodyHi}"/><stop offset=".52" stop-color="${bodyMid}"/><stop offset="1" stop-color="${bodyLo}"/></radialGradient>`
-      + `<radialGradient id="av3t${uid}" cx="74%" cy="84%" r="78%"><stop offset="0" stop-color="${c1}" stop-opacity=".55"/><stop offset="1" stop-color="${c1}" stop-opacity="0"/></radialGradient>`
-      + '</defs>'
-      + '<circle class="halo" cx="24" cy="24" r="22" fill="none" stroke="var(--accent)" stroke-width="2"/>'
-      + `<ellipse class="av3-drop" cx="24" cy="46.4" rx="16" ry="2.3" fill="url(#av3d${uid})"/>`
-      + '<rect class="av3-base" x="2.5" y="3.4" width="44" height="44" rx="14"/>'
-      + `<rect class="av3-body" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3c${uid})"/>`
-      + `<rect class="av3-tint" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3t${uid})"/>`
-      + `<rect class="av3-plate" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3p${uid})" opacity=".18"/>`
-      + `<rect class="av3-shade" x="2" y="2" width="44" height="44" rx="14" fill="url(#av3s${uid})"/>`
-      + `<rect class="av3-rim" x="3.1" y="3.1" width="41.8" height="41.8" rx="12.9" fill="none" stroke="url(#av3r${uid})" stroke-width="1.1"/>`
-      + '<path class="av3-gloss" d="M9.8 17.2Q9.8 9.8 17.2 9.8" fill="none" stroke-width="1.6" stroke-linecap="round"/>'
-      + `<g class="ring">${ring}</g>`
-      + `<g class="face" fill="${INK}" color="${INK}"><g class="look"><g class="blink">${EYES[f.eyes] || EYES.dot}${EYE_SPEC[f.eyes] || ''}</g></g>${BROWS[f.brow] || ''}<g class="mouth m-${f.mouth}">${MOUTHS[f.mouth] || MOUTHS.smile}</g></g>`;
-    return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
-  }
+  // ---------- voxel agents: flat isometric blocks (front, top, side) with a pixel face and a pixel symbol badge ----------
+    // No gradients and no per-agent filters: three flat tones per block give the depth. The look of one agent is
+    // three small settings (symbol, colour, figure) that the agent settings dialog can change and the API stores.
+    const INK = '#1B2433';
+    const hsl = (hex) => { const n = parseInt(col(hex).slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, bl = (n & 255) / 255, mx = Math.max(r, g, bl), mn = Math.min(r, g, bl), l = (mx + mn) / 2; let hh = 0, sa = 0;
+      if (mx !== mn) { const d = mx - mn; sa = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); hh = mx === r ? (g - bl) / d + (g < bl ? 6 : 0) : mx === g ? (bl - r) / d + 2 : (r - g) / d + 4; hh *= 60; } return [hh, sa, l]; };
+    const fromHsl = (hh, sa, l) => { const k = sa * Math.min(l, 1 - l), f = (n) => { const q = (n + hh / 30) % 12; return Math.round(255 * (l - k * Math.max(-1, Math.min(q - 3, 9 - q, 1)))); }; return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join(''); };
+    const lum = (hex) => { const n = parseInt(col(hex).slice(1), 16); return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; };
+    // 7x7 pixel symbols for the badge. '#' = filled pixel. A name that is not in this map falls back to "spark".
+    const SPRITES = {
+      spark: ['...#...', '...#...', '..###..', '#######', '..###..', '...#...', '...#...'],
+      shield: ['.#####.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
+      lens: ['.###...', '#...#..', '#...#..', '#...#..', '.###.#.', '......#', '.......'],
+      compass: ['..###..', '.#...#.', '#..#..#', '#.###.#', '#..#..#', '.#...#.', '..###..'],
+      wrench: ['##...##', '###.###', '.#####.', '..###..', '..###..', '..###..', '..###..'],
+      scales: ['...#...', '.#####.', '#..#..#', '#..#..#', '.#.#.#.', '...#...', '.#####.'],
+      coins: ['.#####.', '#.....#', '.#####.', '#.....#', '.#####.', '#.....#', '.#####.'],
+      book: ['.##.##.', '#..#..#', '#..#..#', '#..#..#', '#..#..#', '.##.##.', '.......'],
+      chat: ['.#####.', '#.....#', '#.....#', '#.....#', '.#####.', '..#....', '.#.....'],
+      pen: ['.....##', '....###', '...###.', '..###..', '.###...', '##.#...', '#......'],
+      rocket: ['...#...', '..###..', '..###..', '..###..', '.#####.', '.#.#.#.', '...#...'],
+      chart: ['.....#.', '.....#.', '...#.#.', '...#.#.', '.#.#.#.', '.#.#.#.', '#######'],
+      terminal: ['#######', '#.....#', '#.#...#', '#..#..#', '#.#.###', '#.....#', '#######'],
+      bug: ['.#...#.', '..###..', '.#####.', '#######', '.#####.', '#.###.#', '.#...#.'],
+      flask: ['..###..', '...#...', '...#...', '..###..', '.#####.', '#######', '#######'],
+      doc: ['#####..', '#...##.', '#...###', '#.....#', '#.....#', '#.....#', '#######'],
+      bolt: ['....##.', '...##..', '..##...', '.#####.', '...##..', '..##...', '.##....'],
+      heart: ['.##.##.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
+      star: ['...#...', '...#...', '#######', '.#####.', '..###..', '.##.##.', '.#...#.'],
+      eye: ['.......', '..###..', '.#...#.', '#..#..#', '.#...#.', '..###..', '.......'],
+      gem: ['.#####.', '###.###', '#######', '.#####.', '..###..', '...#...', '.......'],
+      crown: ['#..#..#', '##.#.##', '#######', '#######', '#######', '.......', '.......'],
+      bulb: ['..###..', '.#####.', '.#####.', '.#####.', '..###..', '..###..', '...#...'],
+      lock: ['..###..', '.#...#.', '.#...#.', '#######', '##...##', '##.#.##', '#######'],
+    };
+    const SYMBOLS = Object.keys(SPRITES);
+    const FIGURES = ['block', 'antenna', 'ears', 'crest'];
+    const FIGURE_LABEL = { block: 'Block', antenna: 'Antenna', ears: 'Ears', crest: 'Crest' };
+    const AV_COLORS = ['#2F5BD3', '#3B82F6', '#1B7F79', '#16A37F', '#3D7A4F', '#B7791F', '#E5484D', '#B5543C', '#7A4E9C', '#DB2777', '#5B6B88', '#0F172A'];
+    const spriteCache = {};
+    const spritePath = (name, u) => {
+      const key = name + '|' + u; if (spriteCache[key]) return spriteCache[key];
+      const rows = SPRITES[name] || SPRITES.spark, n = (v) => +v.toFixed(2); let d = '';
+      rows.forEach((row, y) => { let x = 0; while (x < 7) { if (row[x] !== '#') { x++; continue; } let e = x; while (e < 7 && row[e] === '#') e++; d += `M${n(x * u)} ${n(y * u)}h${n((e - x) * u)}v${n(u)}h-${n((e - x) * u)}z`; x = e; } });
+      return (spriteCache[key] = d);
+    };
+    // The face is drawn on a 12x12 pixel grid (one pixel = 2 units on the 48 unit canvas).
+    const R = (x, y, w = 1, t = 1) => `M${x} ${y}h${w}v${t}h-${w}z`;
+    const FACE_EYES = {
+      dot: R(3, 4, 2, 2) + R(7, 4, 2, 2),
+      wide: R(2, 3, 3, 3) + R(7, 3, 3, 3),
+      tall: R(3, 3, 2, 4) + R(7, 3, 2, 4),
+      happy: R(2, 5) + R(3, 4, 2, 1) + R(5, 5) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
+      calm: R(3, 5, 3, 1) + R(7, 5, 3, 1),
+      wink: R(3, 4, 2, 2) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
+    };
+    const EYE_SPEC = { wide: R(2, 3) + R(7, 3), tall: R(3, 3) + R(7, 3) };
+    const FACE_BROWS = {
+      none: '', raise: R(3, 2, 3, 1) + R(7, 1, 3, 1), soft: R(3, 2, 3, 1) + R(7, 2, 3, 1),
+      slant: R(2, 2, 2, 1) + R(4, 3) + R(8, 2, 2, 1) + R(7, 3),
+    };
+    const FACE_MOUTHS = {
+      smile: R(3, 8) + R(4, 9, 4, 1) + R(8, 8), flat: R(4, 9, 4, 1), smirk: R(4, 9, 4, 1) + R(8, 8),
+      open: R(5, 8, 2, 2), dot: R(5, 9, 2, 2), grin: R(3, 8, 6, 1) + R(4, 9, 4, 1),
+    };
+    const CORE_FACE = {
+      strategist: { ring: ['#3B6FE0', '#F2A93B'], eyes: 'dot', brow: 'none', mouth: 'smile' },
+      skeptic: { ring: ['#E5484D', '#2B3A67'], eyes: 'dot', brow: 'raise', mouth: 'flat' },
+      builder: { ring: ['#16A37F', '#F2A93B'], eyes: 'wide', brow: 'slant', mouth: 'smirk' },
+      chair: { ring: ['#7A4E9C', '#3B6FE0'], eyes: 'dot', brow: 'none', mouth: 'dot' },
+    };
+    const CORE_SEED = { strategist: '#2F5BD3', skeptic: '#B7791F', builder: '#1B7F79', chair: '#5B6B88' };
+    const hashOf = (str) => { let x = 7; for (const ch of String(str)) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
+    const pickKey = (o, n) => { const k = Object.keys(o); return k[n % k.length]; };
+    // Everything one figure needs, from the agent record: body colour, accent, face, figure shape and badge symbol.
+    function lookOf(b) {
+      b = b || {};
+      const key = (b.id || b.name || 'x'), core = CORE_FACE[key], x = hashOf(key);
+      let body = col(b.color);
+      if (core && (!b.color || String(b.color).toLowerCase() === CORE_SEED[key].toLowerCase())) body = core.ring[0];
+      const accent = core ? core.ring[1] : fromHsl((hsl(body)[0] + 150) % 360, 0.62, 0.55);
+      const face = core || { eyes: pickKey(FACE_EYES, x >> 3), brow: pickKey(FACE_BROWS, x >> 6), mouth: pickKey(FACE_MOUTHS, x >> 9) };
+      return { body, accent, eyes: face.eyes, brow: face.brow, mouth: face.mouth,
+        figure: FIGURES.includes(b.figure) ? b.figure : FIGURES[x % FIGURES.length], sym: SPRITES[b.icon] ? b.icon : 'spark' };
+    }
+    // A tiny custom mark for "pinned": the G icon map is shared and must not grow for one sidebar state.
+    const av3Pin = (s = 12) => {
+      const v = document.createElementNS(NS, 'svg');
+      for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true' })) v.setAttribute(k, x);
+      v.innerHTML = '<path fill-rule="evenodd" d="M12 2.5a6.5 6.5 0 0 1 6.5 6.4c0 4.6-6.5 12-6.5 12S5.5 13.5 5.5 8.9A6.5 6.5 0 0 1 12 2.5zm0 4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z"/>';
+      return v;
+    };
+    // A pixel symbol as its own small svg (used by the symbol picker).
+    const symbolSvg = (name, s = 22) => {
+      const v = document.createElementNS(NS, 'svg');
+      for (const [k, x] of Object.entries({ viewBox: '0 0 7 7', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true', 'shape-rendering': 'crispEdges' })) v.setAttribute(k, x);
+      v.innerHTML = `<path d="${spritePath(name, 1)}"/>`;
+      return v;
+    };
+    // state: o.thinking = the agent is working or answering (it hops and the mouth moves); o.float = a calm idle bob
+    // for the one hero avatar of a screen. Every other figure is static markup, so lists of agents cost nothing.
+    function tile(b, s = 40, o = {}) {
+      const L = lookOf(b), c = L.body, top = mix(c, 0.32), side = mix(c, -0.3), ink = lum(c) > 0.55 ? INK : '#F8FAFC';
+      const acc = L.accent, aTop = mix(acc, 0.3), aSide = mix(acc, -0.3);
+      const back = L.figure === 'ears' ? `<rect x="3" y="27" width="4" height="9" fill="${acc}"/><rect x="41" y="17" width="3" height="9" fill="${aSide}"/>` : '';
+      const deco = L.figure === 'antenna' ? `<rect x="23" y="5" width="2" height="9" fill="${side}"/><rect x="21" y="2" width="6" height="4" fill="${acc}"/>`
+        : L.figure === 'crest' ? `<rect x="16" y="12" width="4" height="4" fill="${aTop}"/><rect x="21" y="10" width="4" height="4" fill="${aTop}"/><rect x="26" y="12" width="4" height="4" fill="${aTop}"/>` : '';
+      const badge = s >= 28 && !o.nobadge ? `<g class="av-tag" transform="translate(31 31)"><rect class="av-tagbg" width="16" height="16" rx="2.5"/><path class="av-sym" transform="translate(2.4 2.4)" d="${spritePath(L.sym, 1.6)}"/></g>` : '';
+      const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true'); v.setAttribute('shape-rendering', 'crispEdges');
+      v.setAttribute('class', 'av' + (o.float ? ' bob' : '') + (o.thinking ? ' thinking' : ''));
+      v.style.setProperty('--bd', `-${(Math.random() * 5).toFixed(1)}s`);
+      v.innerHTML = '<ellipse class="av-ground" cx="22" cy="45.4" rx="15" ry="1.6"/>'
+        + `<g class="av-fig">${back}`
+        + `<path class="av-side" d="M31 19L41 9V33L31 43Z" fill="${side}"/>`
+        + `<path class="av-top" d="M7 19L17 9H41L31 19Z" fill="${top}"/>`
+        + `<rect class="av-front" x="7" y="19" width="24" height="24" fill="${c}"/>`
+        + `<rect x="7" y="19" width="24" height="1" fill="#FFFFFF" opacity=".28"/>${deco}`
+        + `<g transform="translate(7 19) scale(2)" fill="${ink}"><g class="look"><g class="av-eyes"><path d="${FACE_EYES[L.eyes] || FACE_EYES.dot}"/>${EYE_SPEC[L.eyes] ? `<path fill="#FFFFFF" d="${EYE_SPEC[L.eyes]}"/>` : ''}</g>`
+        + `</g><path d="${FACE_BROWS[L.brow] || ''}"/><g class="av-mouth"><path d="${FACE_MOUTHS[L.mouth] || FACE_MOUTHS.smile}"/></g></g></g>${badge}`;
+      return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
+    }
   // ---------- cursor gaze: one global pointer tracker moves the hovered avatar's eyes, never a listener per tile ----------
   const av3Reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   const av3Fine = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
