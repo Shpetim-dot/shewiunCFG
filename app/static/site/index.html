@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shewiun | AI Agent Governance: Permissions and Audit Log</title>
+<meta name="description" content="Give AI agents per-agent permissions, human approvals, quarantined memory and a tamper-evident audit log. Try the demo workspace free.">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="__SITE_URL__/">
+<meta name="theme-color" content="#2F5BD3">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/site/img/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/site/img/favicon-16.png">
+<link rel="apple-touch-icon" href="/static/site/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Shewiun">
+<meta property="og:title" content="Shewiun | AI Agent Governance: Permissions and Audit Log">
+<meta property="og:description" content="Give AI agents per-agent permissions, human approvals, quarantined memory and a tamper-evident audit log. Try the demo workspace free.">
+<meta property="og:url" content="__SITE_URL__/">
+<meta property="og:image" content="__SITE_URL__/static/site/img/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Shewiun workspace for AI agents: permissions, approvals and audit log in one place">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Shewiun | AI Agent Governance: Permissions and Audit Log">
+<meta name="twitter:description" content="Give AI agents per-agent permissions, human approvals, quarantined memory and a tamper-evident audit log. Try the demo workspace free.">
+<meta name="twitter:image" content="__SITE_URL__/static/site/img/og.jpg">
+<link rel="stylesheet" href="/static/site/site.css?v=__V__">
+<script type="application/ld+json">{{JSONLD}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is Shewiun?","acceptedAnswer":{"@type":"Answer","text":"Shewiun is a web workspace for teams that put AI agents to work. Agents get their own permissions, memory and tools. People approve consequential actions, and everything is written to a tamper-evident audit log."}},{"@type":"Question","name":"Who is it for?","acceptedAnswer":{"@type":"Answer","text":"Teams that already run or plan to run agents with write access: security and platform teams that have to sign off, and founders who want to ship agents without losing control. Financial services is our first focus."}},{"@type":"Question","name":"Does Shewiun replace my model provider?","acceptedAnswer":{"@type":"Answer","text":"No. Bring any OpenAI-compatible endpoint or open models through Hugging Face Inference Providers. Without a model key the workspace runs scripted demo answers, clearly marked as such."}},{"@type":"Question","name":"Can an agent act without approval?","acceptedAnswer":{"@type":"Answer","text":"Only if you allow it. Read access follows the permissions you set per agent. Write tools create an approval request that a person must accept, and secret-looking tools can never be granted."}},{"@type":"Question","name":"How does the audit log prove anything?","acceptedAnswer":{"@type":"Answer","text":"Every event stores the hash of the previous one. The verify function recomputes the chain, so an edited or deleted entry breaks it. This shows tampering inside the log. It does not replace your own backups."}},{"@type":"Question","name":"Is Shewiun certified, for example SOC 2?","acceptedAnswer":{"@type":"Answer","text":"Not yet. The trust page lists what is enforced today and what is not, and we can send our security questionnaire answers on request. We would rather tell you this plainly than imply a certificate."}},{"@type":"Question","name":"Where is my data stored and can I leave?","acceptedAnswer":{"@type":"Answer","text":"Each organisation is isolated in its own scope. You can export all of your organisation data as JSON at any time from the Organisation page, and delete the organisation yourself. The privacy policy lists the processors we use."}},{"@type":"Question","name":"How much does it cost and can I cancel?","acceptedAnswer":{"@type":"Answer","text":"The Free plan costs nothing. Paid plans are billed monthly through Stripe and you can cancel in the app, with changes taking effect at the end of the billing period. See the pricing section for current limits."}},{"@type":"Question","name":"How fast do you answer questions?","acceptedAnswer":{"@type":"Answer","text":"We reply to every message within 1 business day. Use the contact form or the button on this page."}}]}</script>
+</head>
+<body data-view="landing_view">
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="/" aria-label="Shewiun home"><img src="/static/site/img/favicon-32.png" srcset="/static/site/img/icon-192.png 2x" width="30" height="30" alt="Shewiun logo">Shewiun</a>
+<nav class="nav" id="nav" aria-label="Main">
+<a href="#product">Product</a><a href="#features">Features</a><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a><a href="/contact">Contact</a>
+</nav>
+<a class="btn primary small" href="/app" data-track="cta_open_app">Open the platform</a>
+<button class="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+</div>
+</header>
+<main id="main">
+<section class="hero">
+<div class="wrap">
+<div class="copy">
+<span class="eyebrow">AI agent governance workspace</span>
+<h1>AI agents your security team can sign off.</h1>
+<p class="lead">Shewiun is the workspace where AI agents debate, remember and act, with per-agent permissions, quarantined memory, human approvals and a tamper-evident audit log.</p>
+<div class="cta"><a class="btn primary" href="/app" data-track="cta_open_app">Open the workspace</a><a class="btn" href="#product" data-track="pricing_view">See the product</a></div>
+<p class="micro">Free plan, no credit card. A demo workspace with sample agents loads in one click.</p>
+<!--ADDR--><p class="local">Built in {{CITY}}, {{COUNTRY}} for teams across the EU.</p><!--/ADDR-->
+<ul class="trustrow"><li>Hash-chained audit log</li><li>Per-agent permissions</li><li>Human approval for write actions</li><li>Bring your own model</li></ul>
+</div>
+<div class="frame"><div class="bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="/static/site/img/workspace.webp" srcset="/static/site/img/workspace-640.webp 640w, /static/site/img/workspace.webp 1200w" sizes="(max-width:960px) 100vw, 760px" width="1200" height="750" alt="Shewiun workspace: a chat with the Strategist agent next to a live activity panel that shows denied tool calls and the agent permissions" fetchpriority="high"></div>
+</div>
+</section>
+
+<section id="problem">
+<div class="wrap">
+<div class="sec-head"><h2>Agents can act. Can you show what they did, and why they were allowed to?</h2>
+<p class="lead">An agent that remembers and calls tools can also be manipulated: poisoned notes, hidden instructions in tool output, rights nobody reviewed. Teams hesitate for good reasons.</p></div>
+<div class="grid g3">
+<div class="card soft"><h3>Unclear rights</h3><p>Agents inherit broad access because nobody wrote down what each one may do.</p></div>
+<div class="card soft"><h3>Memory that can be poisoned</h3><p>Whatever an agent reads or writes can end up in the next prompt without a review.</p></div>
+<div class="card soft"><h3>No proof for the auditor</h3><p>When something goes wrong there is no trustworthy record of who decided what.</p></div>
+</div>
+</div>
+</section>
+
+<section id="product">
+<div class="wrap">
+<div class="sec-head"><h2>See the real workspace</h2>
+<p class="lead">These are screenshots of the running product with demo data, not mock-ups. Pick an area.</p></div>
+<div class="tabs" role="tablist" aria-label="Product areas"><button class="tab" role="tab" id="tab-council" aria-controls="p-council" aria-selected="true" type="button">Council</button><button class="tab" role="tab" id="tab-brain" aria-controls="p-brain" aria-selected="false" type="button">Brain</button><button class="tab" role="tab" id="tab-control" aria-controls="p-control" aria-selected="false" type="button">Control</button><button class="tab" role="tab" id="tab-inventory" aria-controls="p-inventory" aria-selected="false" type="button">Inventory</button><button class="tab" role="tab" id="tab-org" aria-controls="p-org" aria-selected="false" type="button">Organisation</button></div><div class="panel" role="tabpanel" id="p-council" aria-labelledby="tab-council"><div class="why"><h3>Decisions with dissent on record</h3><p>Agents answer independently first, then respond to each other and may change position. The Chair writes the decision, a pre-mortem and a plan. Disagreement stays in the record.</p><ul><li>Independent first answers, then cross-examination</li><li>Memory drafts written to the Brain, unverified until an admin approves</li><li>Export the minutes as Markdown</li></ul></div><div class="frame"><div class="bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="/static/site/img/council.webp" srcset="/static/site/img/council-640.webp 640w, /static/site/img/council.webp 1200w" sizes="(max-width:960px) 100vw, 760px" width="1200" height="750" alt="Council call in the Shewiun demo workspace: three agents debate whether an AI agent may propose supplier payments under 5,000 euros, with the decision and plan below." loading="lazy" decoding="async"></div></div><div class="panel" role="tabpanel" id="p-brain" aria-labelledby="tab-brain"><div class="why"><h3>Memory you can trust</h3><p>Everything an agent learns arrives as a draft. Only notes an admin has verified reach a prompt. Instruction-like text is quarantined and every version is kept.</p><ul><li>Draft, verified and quarantined states</li><li>Linked notes with a live graph</li><li>Full version history for every note</li></ul></div><div class="frame"><div class="bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="/static/site/img/brain.webp" srcset="/static/site/img/brain-640.webp 640w, /static/site/img/brain.webp 1200w" sizes="(max-width:960px) 100vw, 760px" width="1200" height="750" alt="Shewiun Brain: a graph of linked notes colour-coded by space, with a list of notes and a detail panel for the selected rule." loading="lazy" decoding="async"></div></div><div class="panel" role="tabpanel" id="p-control" aria-labelledby="tab-control"><div class="why"><h3>One place for risk, approvals and audit</h3><p>Live posture for the organisation: pending approvals, risk by agent, coverage against known agentic risks and a hash-linked audit trail. An incident switch suspends every agent at once.</p><ul><li>Risk score per agent from capabilities, grants and trust</li><li>Coverage view against the OWASP agentic risk list</li><li>Suspend and resume all agents, written to the audit log</li></ul></div><div class="frame"><div class="bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="/static/site/img/control.webp" srcset="/static/site/img/control-640.webp 640w, /static/site/img/control.webp 1200w" sizes="(max-width:960px) 100vw, 760px" width="1200" height="750" alt="Shewiun Control dashboard showing pending approvals, high-risk agents, accountability gaps, coverage, risk distribution and audit volume." loading="lazy" decoding="async"></div></div><div class="panel" role="tabpanel" id="p-inventory" aria-labelledby="tab-inventory"><div class="why"><h3>Every agent, its owner and its risk</h3><p>A register of all agents with owner, sponsor, purpose, trust level and criticality, so nobody has to ask which agents exist and who is responsible for them.</p><ul><li>Owner, sponsor and purpose per agent</li><li>Imported agents start unverified and read-only</li><li>Filter by risk, team or status</li></ul></div><div class="frame"><div class="bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="/static/site/img/inventory.webp" srcset="/static/site/img/inventory-640.webp 640w, /static/site/img/inventory.webp 1200w" sizes="(max-width:960px) 100vw, 760px" width="1200" height="750" alt="Shewiun agent inventory listing agents with their owner, sponsor, risk score and verification status." loading="lazy" decoding="async"></div></div><div class="panel" role="tabpanel" id="p-org" aria-labelledby="tab-org"><div class="why"><h3>A workspace your whole team can use</h3><p>Members with five roles from viewer to owner, invitations, announcements and billing with plan, MRR and invoices through Stripe. Simple, no setup maze.</p><ul><li>Viewer, developer, security manager, admin, owner</li><li>At least one owner always remains</li><li>Billing and invoices in the same place</li></ul></div><div class="frame"><div class="bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="/static/site/img/org.webp" srcset="/static/site/img/org-640.webp 640w, /static/site/img/org.webp 1200w" sizes="(max-width:960px) 100vw, 760px" width="1200" height="750" alt="Shewiun organisation page with overview cards for members, agents, notes and open approvals." loading="lazy" decoding="async"></div></div>
+<p class="note">Screenshots show the demo workspace. Without a model key, agent statements are scripted and labelled "DEMO" in the product.</p>
+</div>
+</section>
+
+<section id="features">
+<div class="wrap">
+<div class="sec-head"><h2>Everything between "agent" and "approved"</h2>
+<p class="lead">Eight building blocks that turn a pile of agents into something a security team can review.</p></div>
+<div class="grid g4">
+<div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg></span><h3>Rights per agent</h3><p>Each agent has its own capabilities and tool grants. Write tools only create an approval request, and secret-looking tools can never be granted.</p></div><div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1z"/><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></svg></span><h3>Memory you can trust</h3><p>New knowledge arrives as a draft. Only verified notes reach a prompt, instruction-like text is quarantined and every version is kept.</p></div><div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.4"/><path d="M17 14c2.5 0 4.5 2 4.5 4.5"/></svg></span><h3>Council with dissent</h3><p>Agents answer independently, then challenge each other. The decision, the pre-mortem and the disagreement stay on record.</p></div><div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg></span><h3>Human approvals</h3><p>Consequential actions wait for a person. Approvers see who asked and what for, and every decision is logged.</p></div><div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></span><h3>Tamper-evident audit log</h3><p>Events are chained with hashes, so a changed or removed entry shows up when you verify the chain.</p></div><div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M8 15h8"/></svg></span><h3>Authorization self-test</h3><p>Synthetic probes try to cross the boundaries your workspace enforces and produce a report you can share with an auditor through a private link.</p></div><div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0V8z"/><path d="M12 16v5"/></svg></span><h3>Live apps through MCP</h3><p>Connect MCP servers and a catalog of apps. Tools stay off until you grant them to an agent, and you can revoke them in one click.</p></div><div class="card"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="9" width="8" height="11" rx="2"/><path d="M6 8h2M6 12h2M16 13h2M16 17h2"/></svg></span><h3>Teams and organisations</h3><p>Invite people with roles from viewer to owner, share team memory and channels, and keep billing in the same workspace.</p></div>
+</div>
+</div>
+</section>
+
+<section id="how">
+<div class="wrap">
+<div class="sec-head"><h2>From first agent to audit report in three steps</h2></div>
+<ol class="steps">
+<li><h3>Open a workspace</h3><p>Create your organisation in under a minute. Load the demo workspace to see agents, notes and a finance desk with realistic permissions.</p></li>
+<li><h3>Set the boundaries</h3><p>Decide per agent what it may read, write and call. Write tools route to a person for approval. Connect only the apps you want.</p></li>
+<li><h3>Run it and prove it</h3><p>Hold council calls, watch what agents do live, run the authorization self-test and verify the audit chain before you share a report.</p></li>
+</ol>
+</div>
+</section>
+
+<section id="proof">
+<div class="wrap">
+<div class="sec-head"><h2>Walkthrough: a payments agent with write access</h2>
+<p class="lead">The demo workspace ships with a finance desk. This is what it demonstrates, step by step.</p></div>
+<div class="case">
+<div class="story"><span class="tag">Demo walkthrough, not a customer story</span>
+<dl>
+<dt>The situation</dt><dd>A finance team wants an agent to propose supplier payments under 5,000 euros. A mistake or a manipulated instruction would move real money.</dd>
+<dt>What the workspace enforces</dt><dd>The Ledger agent may analyse and propose, nothing more. The Sentinel agent is read-only. Payments need a person to approve, and the approval is logged.</dd>
+<dt>What the team can show</dt><dd>A council decision with the sceptic's dissent on record, a verified audit chain and a self-test report that tried to cross these limits.</dd>
+</dl></div>
+<div><div class="frame"><div class="bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="/static/site/img/control.webp" srcset="/static/site/img/control-640.webp 640w, /static/site/img/control.webp 1200w" sizes="(max-width:960px) 100vw, 760px" width="1200" height="750" alt="Shewiun Control dashboard with risk distribution, coverage and audit volume for the finance demo" loading="lazy" decoding="async"></div></div>
+</div>
+<p class="note" style="margin-top:18px">We are looking for early teams to run a pilot with. <a href="/contact" data-track="cta_contact">Tell us about your agents</a>.</p>
+</div>
+</section>
+
+<section id="pricing">
+<div class="wrap">
+<div class="sec-head"><h2>Simple pricing, in euros</h2>
+<p class="lead">Start free. Upgrade when you need more agents, seats or longer audit history. Paid plans are billed monthly through Stripe.</p></div>
+<div class="plans">
+<div class="plan"><h3>Free</h3><div class="price">&euro;0<small> / month</small></div><p class="tag2">Try it with your own notes</p><ul><li>4 agents</li><li>3 team members</li><li>50 agent messages per month</li><li>7 days audit history</li></ul><a class="btn block" href="/app" data-track="cta_open_app">Start free</a></div>
+<div class="plan"><h3>Starter</h3><div class="price">&euro;29<small> / month</small></div><p class="tag2">For one person running real work</p><ul><li>10 agents</li><li>10 team members</li><li>1,000 agent messages per month</li><li>1 live MCP server</li><li>30 days audit history</li></ul><a class="btn block" href="/app" data-track="cta_open_app">Choose Starter</a></div>
+<div class="plan pop"><span class="badge">Most popular</span><h3>Professional</h3><div class="price">&euro;99<small> / month</small></div><p class="tag2">Team governance with live tools</p><ul><li>25 agents</li><li>25 team members</li><li>5,000 agent messages per month</li><li>5 live MCP servers</li><li>90 days audit history</li></ul><a class="btn primary block" href="/app" data-track="cta_open_app">Choose Professional</a></div>
+<div class="plan"><h3>Enterprise</h3><div class="price">Custom</div><p class="tag2">Custom limits, invoiced</p><ul><li>100 agents and 200 seats included</li><li>Higher usage limits</li><li>365 days audit history</li><li>Security questionnaire and pilot support</li></ul><a class="btn block" href="/contact" data-track="cta_contact">Talk to us</a></div>
+</div>
+<p class="note">Launch prices and limits may change. The plan you start on stays as shown in the app until you change it.</p>
+</div>
+</section>
+
+<section id="faq">
+<div class="wrap">
+<div class="sec-head"><h2>Questions we hear first</h2></div>
+<div class="faq"><details><summary>What is Shewiun?</summary><p>Shewiun is a web workspace for teams that put AI agents to work. Agents get their own permissions, memory and tools. People approve consequential actions, and everything is written to a tamper-evident audit log.</p></details><details><summary>Who is it for?</summary><p>Teams that already run or plan to run agents with write access: security and platform teams that have to sign off, and founders who want to ship agents without losing control. Financial services is our first focus.</p></details><details><summary>Does Shewiun replace my model provider?</summary><p>No. Bring any OpenAI-compatible endpoint or open models through Hugging Face Inference Providers. Without a model key the workspace runs scripted demo answers, clearly marked as such.</p></details><details><summary>Can an agent act without approval?</summary><p>Only if you allow it. Read access follows the permissions you set per agent. Write tools create an approval request that a person must accept, and secret-looking tools can never be granted.</p></details><details><summary>How does the audit log prove anything?</summary><p>Every event stores the hash of the previous one. The verify function recomputes the chain, so an edited or deleted entry breaks it. This shows tampering inside the log. It does not replace your own backups.</p></details><details><summary>Is Shewiun certified, for example SOC 2?</summary><p>Not yet. The trust page lists what is enforced today and what is not, and we can send our security questionnaire answers on request. We would rather tell you this plainly than imply a certificate.</p></details><details><summary>Where is my data stored and can I leave?</summary><p>Each organisation is isolated in its own scope. You can export all of your organisation data as JSON at any time from the Organisation page, and delete the organisation yourself. The privacy policy lists the processors we use.</p></details><details><summary>How much does it cost and can I cancel?</summary><p>The Free plan costs nothing. Paid plans are billed monthly through Stripe and you can cancel in the app, with changes taking effect at the end of the billing period. See the pricing section for current limits.</p></details><details><summary>How fast do you answer questions?</summary><p>We reply to every message within 1 business day. Use the contact form or the button on this page.</p></details></div>
+</div>
+</section>
+
+<section id="start">
+<div class="wrap">
+<div class="band"><h2>Put your agents under control today.</h2>
+<p>Open the workspace, load the demo and see permissions, approvals and the audit log working together.</p>
+<a class="btn" href="/app" data-track="cta_open_app">Open the workspace</a>
+<p style="margin:18px auto 0;font-size:14px">Questions first? <a href="/contact" style="color:inherit">Write to us</a>. We reply within 1 business day.</p></div>
+</div>
+</section>
+</main>
+<footer>
+<div class="wrap">
+<div class="fgrid">
+<div><a class="brand" href="/"><img src="/static/site/img/favicon-32.png" width="30" height="30" alt="">Shewiun</a>
+<p class="muted" style="margin-top:12px;max-width:320px;font-size:15px">A workspace where AI agents debate, remember and act, with limits your security team can verify.</p>
+<!--ADDR--><p class="muted" style="margin-top:12px;font-size:14px">{{CITY}}, {{COUNTRY}}</p><!--/ADDR--></div>
+<div><h3>Product</h3><ul><li><a href="/#product">Product tour</a></li><li><a href="/#features">Features</a></li><li><a href="/#pricing">Pricing</a></li><li><a href="/#faq">FAQ</a></li><li><a href="/app">Open the platform</a></li></ul></div>
+<div><h3>Company</h3><ul><li><a href="/contact">Contact</a></li><li><a href="/trust">Trust and security</a></li><li><a href="/welcome">Pilot programme</a></li></ul></div>
+<div><h3>Legal</h3><ul><li><a href="/privacy">Privacy policy</a></li><li><a href="/terms">Terms and conditions</a></li><li><a href="/imprint">Imprint</a></li><li><button class="linkbtn" type="button" data-open-consent>Cookie settings</button></li></ul></div>
+</div>
+<div class="fine"><span>&copy; 2026 SHEWIUN. All rights reserved.</span><span>We reply to every message within 1 business day.</span><a href="/sitemap.xml" class="muted">Sitemap</a></div>
+</div>
+</footer>
+<div class="sticky-cta"><a class="btn primary block" href="/app" data-track="cta_open_app">Open the workspace</a></div>
+<div class="consent" id="consent" role="dialog" aria-modal="false" aria-labelledby="consent-t" hidden>
+<p id="consent-t"><strong>Your privacy choice.</strong> This site sets no tracking cookies. With your consent we count page views and button clicks in anonymous daily totals, on our own server, without your IP address. <a href="/privacy#analytics">Details</a></p>
+<div class="row"><button class="btn" type="button" data-consent="essential">Essential only</button><button class="btn primary" type="button" data-consent="all">Accept analytics</button></div>
+</div>
+<script src="/static/site/site.js?v=__V__" defer></script>
+</body>
+</html>
