@@ -17,6 +17,9 @@ def client(tmp_path, monkeypatch, keys=None, **env):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setattr(site, "_hits", type(site._hits)(site._hits.default_factory))
+    # This root-level test is outside tests/conftest.py, so isolate the platform limiter here.
+    main.cfa_platform._hits.clear()
+    auth_mod.reset_throttle()
     auth_mod._ensured.clear()
     main.init_db()
     return TestClient(main.app)
