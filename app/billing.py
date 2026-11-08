@@ -15,6 +15,7 @@ import json
 import os
 import re
 import time
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -582,7 +583,11 @@ async def webhook(request: Request) -> dict[str, bool]:
 
 # ---------- leads and funnel ----------
 EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,200}\.[A-Za-z]{2,}$")
-EVENTS = ("welcome_view", "cta_pilot", "cta_demo", "cta_pricing", "trust_view", "upgrade_click", "preset_applied", "signup_started")
+EVENTS = ("welcome_view", "cta_pilot", "cta_demo", "cta_pricing", "trust_view", "upgrade_click", "preset_applied", "signup_started",
+          "landing_view", "cta_open_app", "cta_contact", "contact_sent", "pricing_view", "faq_open")  # the last six come from the landing page
+
+
+_lead_hits: dict[str, deque] = defaultdict(deque)
 
 
 class LeadIn(BaseModel):
@@ -595,11 +600,20 @@ class LeadIn(BaseModel):
 
 
 @router.post("/api/leads", status_code=201)
-async def lead(item: LeadIn) -> dict[str, bool]:
+async def lead(item: LeadIn, request: Request) -> dict[str, bool]:
     if item.website:
         return {"ok": True}  # silently drop bots
     if not EMAIL.match(item.email):
         raise HTTPException(422, "please enter a valid email address")
+    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?")).split(",")[0].strip()
+    q, t = _lead_hits[ip], time.monotonic()
+    while q and t - q[0] > 3600:
+        q.popleft()
+    if len(q) >= 10:  # per address and hour; the per-minute POST limit in cfa_core still applies on top
+        raise HTTPException(429, "too many requests, please try again later")
+    q.append(t)
+    if len(re.findall(r"https?://", item.message)) > 2:
+        raise HTTPException(422, "please remove some links from your message")
     with pf.db() as con:
         con.execute("INSERT INTO leads (id,created_at,name,email,company,message,source,org_id) VALUES (?,?,?,?,?,?,?,?)",
                     (uuid4().hex[:10], pf._m().now(), item.name.strip(), item.email.strip().lower(),

@@ -415,7 +415,7 @@ DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 def csp() -> str:
     cdn = os.getenv("CFA_LOGO_CDN", "https://cdn.simpleicons.org")  # app logos; set empty to disable
-    return f"default-src 'self'; img-src 'self' data:{(' ' + cdn) if cdn else ''}; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    return f"default-src 'self'; img-src 'self' data:{(' ' + cdn) if cdn else ''}; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'" + ("; upgrade-insecure-requests" if os.getenv("CFA_ENV") == "production" else "")
 log = logging.getLogger("cfa.access")
 
 
@@ -585,8 +585,10 @@ def install(app: FastAPI) -> None:
         for k, v in HEADERS.items():
             resp.headers.setdefault(k, v)
         resp.headers.setdefault("Content-Security-Policy", csp())
-        if request.url.path.startswith("/static/") or request.url.path in ("/", "/welcome", "/trust"):
+        if request.url.path.startswith("/static/") or request.url.path in ("/", "/app", "/welcome", "/trust", "/contact", "/privacy", "/terms", "/imprint", "/thank-you"):
             resp.headers["Cache-Control"] = "no-cache"  # always revalidate, so a new release shows up
+        if request.url.path.startswith("/static/site/img/"):
+            resp.headers["Cache-Control"] = "public, max-age=604800"  # compressed landing images: cache for a week
         if request.url.path.startswith("/api/"):
             resp.headers.setdefault("Cache-Control", "no-store")
         if os.getenv("CFA_ENV") == "production":

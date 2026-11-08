@@ -30,6 +30,7 @@ if __package__ in (None, "") and importlib.util.find_spec("app") is None:
 
 from app.agent_launch import router as agent_launch_router
 from app import cfa_core as cfa_platform
+from app import site
 
 load_dotenv()
 # Vercel bundles files attached to the Python function. Keep the UI inside the
@@ -218,12 +219,15 @@ class CouncilIn(BaseModel):
     rounds: int = Field(default=1, ge=1, le=2)
 
 
-@app.get("/")
 def home() -> HTMLResponse:
+    """The platform (single-page app). Served at /app; the public landing page lives at / (see app/site.py)."""
     if not (STATIC / "index.html").is_file():  # say what is wrong instead of failing with a bare 500
         return HTMLResponse("<h1>Shewiun CFA</h1><p>The API is running, but the <code>static</code> folder was not deployed. Upload the whole project folder (app, static, requirements.txt).</p>", status_code=503)
     # The version in the asset URLs makes browsers fetch the new files after every release.
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8").replace("__V__", cfa_platform.VERSION))
+
+
+site.install(app, home)  # landing page, legal pages, contact form, sitemap, robots, 404
 
 
 @app.get("/welcome")

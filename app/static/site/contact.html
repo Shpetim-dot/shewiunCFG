@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact Shewiun | Demo, Pilot and Security Questions</title>
+<meta name="description" content="Talk to the Shewiun team about a demo, a pilot or security questions for your AI agents. We reply within 1 business day.">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="__SITE_URL__/contact">
+<meta name="theme-color" content="#2F5BD3">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/site/img/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/site/img/favicon-16.png">
+<link rel="apple-touch-icon" href="/static/site/img/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Shewiun">
+<meta property="og:title" content="Contact Shewiun | Demo, Pilot and Security Questions">
+<meta property="og:description" content="Talk to the Shewiun team about a demo, a pilot or security questions for your AI agents. We reply within 1 business day.">
+<meta property="og:url" content="__SITE_URL__/contact">
+<meta property="og:image" content="__SITE_URL__/static/site/img/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Shewiun workspace for AI agents: permissions, approvals and audit log in one place">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Contact Shewiun | Demo, Pilot and Security Questions">
+<meta name="twitter:description" content="Talk to the Shewiun team about a demo, a pilot or security questions for your AI agents. We reply within 1 business day.">
+<meta name="twitter:image" content="__SITE_URL__/static/site/img/og.jpg">
+<link rel="stylesheet" href="/static/site/site.css?v=__V__">
+</head>
+<body data-view="contact_view">
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+<div class="wrap">
+<a class="brand" href="/" aria-label="Shewiun home"><img src="/static/site/img/favicon-32.png" srcset="/static/site/img/icon-192.png 2x" width="30" height="30" alt="Shewiun logo">Shewiun</a>
+<nav class="nav" id="nav" aria-label="Main">
+<a href="/#product">Product</a><a href="/#features">Features</a><a href="/#how">How it works</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/contact">Contact</a>
+</nav>
+<a class="btn primary small" href="/app" data-track="cta_open_app">Open the platform</a>
+<button class="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+</div>
+</header>
+<main id="main">
+<section class="hero" style="padding-bottom:72px">
+<div class="wrap">
+<div class="sec-head"><span class="eyebrow">Contact</span><h1 style="font-size:clamp(32px,5vw,48px)">Tell us about your agents.</h1>
+<p class="lead" style="margin-top:14px">Questions about the product, a pilot or security? Send a message. <strong>We reply within 1 business day.</strong></p></div>
+<div class="contact-grid">
+<form id="contact-form" method="post" action="/contact">
+<div class="form-msg" id="form-msg" role="alert" hidden></div>
+<div class="field"><label for="f-name">Your name</label><input id="f-name" name="name" type="text" autocomplete="name" required minlength="2" maxlength="80" aria-describedby="err-name"><div class="err" id="err-name" aria-live="polite"></div></div>
+<div class="field"><label for="f-email">Work e-mail</label><input id="f-email" name="email" type="email" autocomplete="email" required maxlength="254" aria-describedby="err-email"><div class="err" id="err-email" aria-live="polite"></div></div>
+<div class="field"><label for="f-company">Company <span class="opt">(optional)</span></label><input id="f-company" name="company" type="text" autocomplete="organization" maxlength="120"></div>
+<div class="field"><label for="f-topic">What is this about?</label><select id="f-topic" name="topic"><option value="demo">I would like a demo</option><option value="pilot">A pilot with my agents</option><option value="pricing">Pricing and plans</option><option value="security">Security or privacy question</option><option value="other">Something else</option></select></div>
+<div class="field"><label for="f-message">Message</label><textarea id="f-message" name="message" required minlength="10" maxlength="2000" aria-describedby="err-message"></textarea><div class="err" id="err-message" aria-live="polite"></div></div>
+<div class="hp" aria-hidden="true"><label for="f-web">Leave this field empty</label><input id="f-web" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+<input type="hidden" name="ts" value="">
+<div class="check"><input id="f-consent" name="consent" type="checkbox" required aria-describedby="err-consent"><label for="f-consent">I agree that Shewiun uses my details to answer this message. See the <a href="/privacy">privacy policy</a>.</label></div>
+<div class="err" id="err-consent" aria-live="polite" style="margin:-10px 0 14px"></div>
+<button class="btn primary block" type="submit" data-track="cta_contact">Send message</button>
+</form>
+<aside>
+<div class="side-card"><h3>What happens next</h3><ul><li>1. We read your message the same day.</li><li>2. You get a personal reply within 1 business day.</li><li>3. If it fits, we set up a short call or a demo workspace.</li></ul></div>
+<div class="side-card"><h3>Prefer to look around first?</h3><p class="muted" style="margin-bottom:14px">Open the workspace and load the demo. No credit card.</p><a class="btn block" href="/app" data-track="cta_open_app">Open the workspace</a></div>
+<div class="side-card"><h3>Reach us directly</h3><ul><!--EMAIL--><li>E-mail: <a href="mailto:{{EMAIL}}">{{EMAIL}}</a></li><!--/EMAIL--><!--ADDR--><li>{{ADDRESS}}, {{CITY}}, {{COUNTRY}}</li><li><a href="{{DIRECTIONS_URL}}" target="_blank" rel="noopener noreferrer">Get directions</a> &middot; <a href="{{OSM_URL}}" target="_blank" rel="noopener noreferrer">OpenStreetMap</a></li><!--/ADDR--><li>Reply time: within 1 business day</li></ul>
+<p class="note">Maps open in a new tab. We do not load any map on this page, so nothing is sent to a map provider unless you click.</p></div>
+</aside>
+</div>
+</div>
+</section>
+</main>
+<footer>
+<div class="wrap">
+<div class="fgrid">
+<div><a class="brand" href="/"><img src="/static/site/img/favicon-32.png" width="30" height="30" alt="">Shewiun</a>
+<p class="muted" style="margin-top:12px;max-width:320px;font-size:15px">A workspace where AI agents debate, remember and act, with limits your security team can verify.</p>
+<!--ADDR--><p class="muted" style="margin-top:12px;font-size:14px">{{CITY}}, {{COUNTRY}}</p><!--/ADDR--></div>
+<div><h3>Product</h3><ul><li><a href="/#product">Product tour</a></li><li><a href="/#features">Features</a></li><li><a href="/#pricing">Pricing</a></li><li><a href="/#faq">FAQ</a></li><li><a href="/app">Open the platform</a></li></ul></div>
+<div><h3>Company</h3><ul><li><a href="/contact">Contact</a></li><li><a href="/trust">Trust and security</a></li><li><a href="/welcome">Pilot programme</a></li></ul></div>
+<div><h3>Legal</h3><ul><li><a href="/privacy">Privacy policy</a></li><li><a href="/terms">Terms and conditions</a></li><li><a href="/imprint">Imprint</a></li><li><button class="linkbtn" type="button" data-open-consent>Cookie settings</button></li></ul></div>
+</div>
+<div class="fine"><span>&copy; 2026 SHEWIUN. All rights reserved.</span><span>We reply to every message within 1 business day.</span><a href="/sitemap.xml" class="muted">Sitemap</a></div>
+</div>
+</footer>
+<div class="sticky-cta"><a class="btn primary block" href="/app" data-track="cta_open_app">Open the workspace</a></div>
+<div class="consent" id="consent" role="dialog" aria-modal="false" aria-labelledby="consent-t" hidden>
+<p id="consent-t"><strong>Your privacy choice.</strong> This site sets no tracking cookies. With your consent we count page views and button clicks in anonymous daily totals, on our own server, without your IP address. <a href="/privacy#analytics">Details</a></p>
+<div class="row"><button class="btn" type="button" data-consent="essential">Essential only</button><button class="btn primary" type="button" data-consent="all">Accept analytics</button></div>
+</div>
+<script src="/static/site/site.js?v=__V__" defer></script>
+</body>
+</html>
