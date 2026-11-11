@@ -10,21 +10,65 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  test-sqlite:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements-dev.txt
-      - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
-      - name: Compile backend
-        run: python -m compileall -q app
-      - name: Run API and runtime tests
-        run: pytest -q
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m compileall -q app
+      - name: API, runtime and website tests (SQLite)
+        run: python -m pytest -q --ignore=test_mobile.py
+
+  test-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: cfa
+          POSTGRES_DB: cfa
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 12
+    env:
+      CFA_DATABASE_URL: postgresql://postgres:cfa@localhost:5432/cfa
+      CFA_DB_SCHEMA_FROM_PATH: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Same suite on PostgreSQL
+        run: python -m pytest -q --ignore=test_mobile.py
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements-dev.txt playwright && python -m playwright install --with-deps chromium
+      - name: Phone, tablet and desktop layouts in a real browser
+        run: python -m pytest -q test_mobile.py
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pip-audit && pip-audit -r requirements.txt
