@@ -140,6 +140,9 @@ def init_db() -> None:
             db.execute("INSERT INTO activity (id,action,detail,created_at,org_id) VALUES (?, ?, ?, ?, ?)",
                        (str(uuid4()), "Workspace initialized", "CFA local workspace is ready.", now(), cfa_platform.DEFAULT_ORG))
         cfa_platform.apply_tenancy(db)  # idempotent: also backfills rows created before v8
+    # Initialize the platform schema eagerly in the same SQLite file / PostgreSQL schema.
+    with cfa_platform.db():
+        pass
 
 
 _runtime_worker_task: asyncio.Task | None = None

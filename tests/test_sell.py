@@ -181,7 +181,7 @@ def test_presets_create_a_team_with_agents_notes_and_respect_limits(tmp_path, mo
 
 def test_static_assets_revalidate_and_logo_cdn_is_configurable(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
-    home = c.get("/")
+    home = c.get("/app")
     assert "app.js?v=0.14.0" in home.text and home.headers["cache-control"] == "no-cache"
     assert c.get("/static/app.js").headers["cache-control"] == "no-cache"
     assert "https://cdn.simpleicons.org" in c.get("/api/health").headers["content-security-policy"]

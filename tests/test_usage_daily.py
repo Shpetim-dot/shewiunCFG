@@ -1,5 +1,6 @@
 """Usage endpoint exposes a daily series for the chart."""
 import time
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -25,9 +26,9 @@ def test_usage_reports_a_daily_series(tmp_path, monkeypatch):
     c = fresh(tmp_path, monkeypatch)
     with pf.db() as con:
         for i in range(3):
-            con.execute("INSERT INTO llm_usage (ts, org_id, provider, model, kind, status, tokens_in, tokens_out, cost) "
-                        "VALUES (?,?,?,?,?,?,?,?,?)",
-                        (time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "default", "openai", "gpt-x", "chat", "ok", 10, 5, 0.0001))
+            con.execute("INSERT INTO llm_usage (id, ts, org_id, provider, model, kind, status, tokens_in, tokens_out, cost) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (str(uuid4()), time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "default", "openai", "gpt-x", "chat", "ok", 10, 5, 0.0001))
         con.commit()
     u = c.get("/api/usage").json()
     assert u["daily"], "daily series missing"

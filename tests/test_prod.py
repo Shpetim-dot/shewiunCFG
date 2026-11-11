@@ -2,9 +2,12 @@ import json
 import logging
 import sqlite3
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app import main
+from app import dbx
 
 
 def client(tmp_path, monkeypatch, keys=""):
@@ -73,6 +76,8 @@ def test_request_ids_json_logs_and_no_store(tmp_path, monkeypatch, caplog):
 
 
 def test_wal_mode_and_online_backup_restore(tmp_path, monkeypatch):
+    if dbx.is_pg():
+        pytest.skip("SQLite WAL and SQLite-file restore are not PostgreSQL backup tests")
     c = client(tmp_path, monkeypatch)
     assert main.connect().execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     c.post("/api/brain/notes", json={"title": "Keep me", "body": "important"})

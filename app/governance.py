@@ -904,7 +904,7 @@ def _screen_rows(bot_id: str, since: str) -> list[dict[str, Any]]:
     with pf.db() as con:
         o = pf.org()
         rows = con.execute("SELECT id,ts,kind,text FROM (SELECT id,ts,kind,text FROM agent_activity WHERE bot_id=? AND org_id=? UNION ALL "
-                           "SELECT e.id,e.ts,e.kind,COALESCE(n.title,'') FROM brain_events e LEFT JOIN notes n ON n.id=e.note_id AND n.org_id=? WHERE e.bot_id=? AND e.org_id=?) "
+                           "SELECT e.id,e.ts,e.kind,COALESCE(n.title,'') FROM brain_events e LEFT JOIN notes n ON n.id=e.note_id AND n.org_id=? WHERE e.bot_id=? AND e.org_id=?) AS activity_rows "
                            "WHERE ts >= ? ORDER BY ts ASC LIMIT 400", (bot_id, o, o, bot_id, o, since)).fetchall()
     return [dict(r) for r in rows]
 

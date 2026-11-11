@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app import auth as auth_mod
 from app import main
+from app import dbx
 from app import ratelimit
 
 PASS = "correct-horse-battery-staple-42"
@@ -84,9 +85,11 @@ def test_storage_limit_blocks_large_uploads(tmp_path, monkeypatch):
     register(c)
     # fill the plan budget directly (25 MB on free) so the next upload must be refused
     with main.connect() as db:
+        org_id = db.execute("SELECT id FROM orgs LIMIT 1").fetchone()[0]
         db.execute("INSERT INTO notes (id,title,body,kind,status,owner,source,created_at,updated_at,space,flags,org_id) "
-                   "VALUES ('big','big','x'||printf('%.2000000c',''),'note','verified','a','t','2026-01-01','2026-01-01','shared','[]',"
-                   "(SELECT id FROM orgs LIMIT 1))")
+                   "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("big", "big", "x" * 2_000_001, "note", "verified", "a", "t",
+                    "2026-01-01", "2026-01-01", "shared", "[]", org_id))
         db.execute("UPDATE notes SET body = replace(body, 'x', 'x')")
     payload = base64.b64encode(b"hello world" * 100).decode()
     r = c.post("/api/brain/upload", json={"filename": "a.txt", "content_b64": payload}, headers=csrf(c))
