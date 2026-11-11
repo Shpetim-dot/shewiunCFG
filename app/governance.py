@@ -198,6 +198,7 @@ def rollback(note_id: str, item: RollbackIn, request: Request) -> dict[str, Any]
 @router.post("/api/selftest")
 async def selftest(request: Request) -> dict[str, Any]:
     p = pf.need_admin(request)
+    pf.track_site("selftest_run")
     m = pf._m()
     probes: list[dict[str, Any]] = []
 
@@ -808,6 +809,7 @@ def seed_demo(request: Request) -> dict[str, int]:
                 con.execute("INSERT OR IGNORE INTO grants (bot_id,app_id,tool,org_id) VALUES (?,?,?,?)", (ids[bot_name], aid, t, o))
         con.commit()
     pf._m().append_audit("demo.workspace.loaded", p["name"], made)
+    pf.track_site("demo_loaded")
     return made
 
 

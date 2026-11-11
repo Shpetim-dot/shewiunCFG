@@ -229,8 +229,8 @@ def usage(days: int = 30) -> dict[str, Any]:
     since_iso = datetime.fromtimestamp(since, timezone.utc).isoformat()
     with pf.db() as con:
         oid = pf.org()
-        rows = con.execute("""SELECT provider, model, COUNT(*) calls, SUM(status='ok') ok, SUM(status!='ok') errors, SUM(COALESCE(tokens_in,0)) tin, SUM(COALESCE(tokens_out,0)) tout,
-            AVG(latency_ms) latency, SUM(cost) cost, SUM(status='ok' AND cost IS NULL) unknown_cost, SUM(fallback) fallbacks, MAX(currency) currency
+        rows = con.execute("""SELECT provider, model, COUNT(*) calls, SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) ok, SUM(CASE WHEN status!='ok' THEN 1 ELSE 0 END) errors, SUM(COALESCE(tokens_in,0)) tin, SUM(COALESCE(tokens_out,0)) tout,
+            AVG(latency_ms) latency, SUM(cost) cost, SUM(CASE WHEN status='ok' AND cost IS NULL THEN 1 ELSE 0 END) unknown_cost, SUM(fallback) fallbacks, MAX(currency) currency
             FROM llm_usage WHERE ts>=? AND org_id=? GROUP BY provider, model ORDER BY calls DESC""", (since_iso, oid)).fetchall()
         kinds = con.execute("SELECT kind, COUNT(*) n FROM llm_usage WHERE ts>=? AND org_id=? GROUP BY kind", (since_iso, oid)).fetchall()
         cap = _setting(con, "monthly_cap")
@@ -238,7 +238,7 @@ def usage(days: int = 30) -> dict[str, Any]:
         start = datetime.now(timezone.utc).strftime("%Y-%m-01")
         spent = con.execute("SELECT COALESCE(SUM(cost),0) FROM llm_usage WHERE ts>=? AND cost IS NOT NULL AND org_id=?", (start, oid)).fetchone()[0]
         daily = [{"day": r["day"], "calls": r["calls"], "cost": r["cost"], "tokens_in": r["tin"], "tokens_out": r["tout"]}
-                 for r in con.execute("SELECT substr(ts,1,10) day, COUNT(*) calls, ROUND(COALESCE(SUM(cost),0),6) cost, "
+                 for r in con.execute("SELECT substr(ts,1,10) AS day, COUNT(*) calls, ROUND(CAST(COALESCE(SUM(cost),0) AS NUMERIC),6) cost, "
                                       "SUM(COALESCE(tokens_in,0)) tin, SUM(COALESCE(tokens_out,0)) tout "
                                       "FROM llm_usage WHERE ts>=? AND org_id=? GROUP BY day ORDER BY day", (since_iso, oid))]
     models = [{"provider": r["provider"], "model": r["model"], "calls": r["calls"], "ok": r["ok"], "errors": r["errors"], "tokens_in": r["tin"], "tokens_out": r["tout"],

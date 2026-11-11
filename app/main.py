@@ -68,7 +68,7 @@ def now() -> str:
 
 
 def connect():
-    """sqlite3-compatible connection: SQLite by default, PostgreSQL when CFA_DATABASE_URL is set."""
+    """sqlite3-compatible connection: SQLite by default, PostgreSQL when CFA_DATABASE_URL is set (see app/dbx.py)."""
     return dbx.connect(DB_PATH)
 
 
@@ -171,7 +171,7 @@ def append_audit(event_type: str, actor: str, payload: dict[str, Any]) -> dict[s
     org_id = cfa_platform.org()
     canonical_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     with connect() as db:
-        dbx.chain_lock(db, f"audit:{org_id}")
+        dbx.chain_lock(db, f"audit:{org_id}")  # PostgreSQL: one writer extends a chain at a time
         row = db.execute("SELECT event_hash FROM audit_events WHERE org_id=? ORDER BY seq DESC LIMIT 1", (org_id,)).fetchone()
         previous_hash = row["event_hash"] if row else "GENESIS"
         material = json.dumps({
@@ -254,7 +254,7 @@ def health() -> dict[str, Any]:
         "build": (os.getenv("VERCEL_GIT_COMMIT_SHA") or os.getenv("CFA_BUILD") or "")[:7],
         "search_configured": bool(os.getenv("CFA_SEARCH_API_KEY")),
         "secret_key_configured": bool(os.getenv("CFA_SECRET_KEY")),
-        "storage": "ephemeral_sqlite" if IS_VERCEL and not dbx.is_pg() else dbx.backend(),
+        "storage": "ephemeral_sqlite" if IS_VERCEL else "sqlite",
         "storage_warning": (
             "Vercel /tmp storage is ephemeral; data may be lost between instances or deployments."
             if IS_VERCEL else None
