@@ -30,7 +30,9 @@ dst_path.parent.mkdir(parents=True, exist_ok=True)
 dst = sqlite3.connect(dst_path)
 with dst:
     src.backup(dst)
-dst.execute("PRAGMA integrity_check").fetchone()
+check = dst.execute("PRAGMA integrity_check").fetchone()[0]
+if check != "ok":
+    raise SystemExit(f"[backup] integrity_check failed: {check}")
 size = dst_path.stat().st_size
 dst.close(); src.close()
 print(f"[backup] wrote {dst_path} ({size} bytes)")
