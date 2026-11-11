@@ -84,7 +84,7 @@ def test_voxel_avatar_tile_has_no_per_avatar_pointer_handlers(tmp_path, monkeypa
     js, _ = served(c)
     block = avatar_js(js)
     start = block.index("function tile(b, s = 40, o = {})")
-    end = block.index("\\n  }", start) + 4
+    end = block.index("\n  }", start) + 4
     tile = block[start:end]
     assert "function lookOf(b)" in block
     assert "document.createElementNS(NS, 'svg')" in tile
