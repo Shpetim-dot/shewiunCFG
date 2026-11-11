@@ -132,7 +132,7 @@ def test_checkout_and_portal_talk_to_stripe_safely(tmp_path, monkeypatch):
     assert auth == "Bearer sk_test_x" and "price_pro" in form and "mode=subscription" in form and "app.example.com" in form
     assert c.post("/api/billing/checkout", json={"plan": "free"}).status_code == 422
     assert c.post("/api/billing/portal").status_code == 409  # no customer yet
-    pf_db = __import__("sqlite3").connect(main.DB_PATH)
+    pf_db = main.connect()
     pf_db.execute("INSERT OR REPLACE INTO billing (id,plan,status,customer_id) VALUES (1,'pro','active','cus_9')")
     pf_db.commit()
     assert c.post("/api/billing/portal").status_code == 502  # a foreign address is refused

@@ -30,6 +30,7 @@ if __package__ in (None, "") and importlib.util.find_spec("app") is None:
 
 from app.agent_launch import router as agent_launch_router
 from app import cfa_core as cfa_platform
+from app import dbx
 from app import site
 
 load_dotenv()
@@ -66,16 +67,9 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def connect() -> sqlite3.Connection:
-    # A short lock wait prevents transient concurrent writes from failing immediately.
-    # Foreign-key enforcement is connection-local in SQLite, so enable it consistently.
-    db = sqlite3.connect(DB_PATH, timeout=15)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout = 15000")
-    db.execute("PRAGMA foreign_keys = ON")
-    db.execute("PRAGMA journal_mode = WAL")  # readers do not block the writer; needed for consistent online backups
-    db.execute("PRAGMA synchronous = NORMAL")
-    return db
+def connect():
+    """sqlite3-compatible connection: SQLite by default, PostgreSQL when CFA_DATABASE_URL is set (see app/dbx.py)."""
+    return dbx.connect(DB_PATH)
 
 
 def init_db() -> None:
@@ -177,6 +171,7 @@ def append_audit(event_type: str, actor: str, payload: dict[str, Any]) -> dict[s
     org_id = cfa_platform.org()
     canonical_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     with connect() as db:
+        dbx.chain_lock(db, f"audit:{org_id}")  # PostgreSQL: one writer extends a chain at a time
         row = db.execute("SELECT event_hash FROM audit_events WHERE org_id=? ORDER BY seq DESC LIMIT 1", (org_id,)).fetchone()
         previous_hash = row["event_hash"] if row else "GENESIS"
         material = json.dumps({

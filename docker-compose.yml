@@ -1,17 +1,42 @@
 # Production run on a single small VM (Oracle Always Free, Hetzner, any Docker host).
 #
-#   cp .env.example .env      # then fill CFA_SECRET_KEY, CFA_PUBLIC_URL, keys
+#   cp .env.example .env      # then fill CFA_SECRET_KEY, CFA_PUBLIC_URL, CFA_PG_PASSWORD, keys
 #   docker compose up -d --build
 #
-# Two services: the app (SQLite on the named volume) and Caddy in front of it for HTTPS.
+# Three services: the app, PostgreSQL 15 for all data, and Caddy in front for HTTPS.
 # Caddy fetches a Let's Encrypt certificate automatically when DOMAIN points at this host.
+#
+# Moving an existing SQLite installation: docs/POSTGRES.md (tools/sqlite_to_postgres.py).
+# To stay on SQLite instead, delete the "db" service, the depends_on block and CFA_DATABASE_URL.
 services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cfa
+      POSTGRES_PASSWORD: ${CFA_PG_PASSWORD:?set CFA_PG_PASSWORD in .env}
+      POSTGRES_DB: cfa
+      TZ: Europe/Berlin
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cfa -d cfa"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    # no published port: only the app reaches the database. For a private psql session:
+    #   docker compose exec db psql -U cfa cfa
+
   cfa:
     build: .
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     env_file: .env
     environment:
-      CFA_DATABASE_PATH: /data/cfa.db
+      CFA_DATABASE_URL: postgresql://cfa:${CFA_PG_PASSWORD}@db:5432/cfa
+      CFA_DATABASE_PATH: /data/cfa.db      # only used for the backups folder and for importing an old SQLite file
       CFA_ENV: production
       FORWARDED_ALLOW_IPS: "*"        # only reachable through the proxy on this host
       TZ: Europe/Berlin
@@ -39,6 +64,7 @@ services:
       - caddy-config:/config
 
 volumes:
+  pg-data:
   cfa-data:
   caddy-data:
   caddy-config:

@@ -1,12 +1,14 @@
-# Single-node production image. SQLite lives on the /data volume; run exactly one worker.
+# Single-node production image. One worker; data lives in PostgreSQL (CFA_DATABASE_URL) or, without it, in SQLite on /data.
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 CFA_DATABASE_PATH=/data/cfa.db
-RUN useradd --create-home --uid 10001 app && mkdir -p /data && chown app:app /data
+# postgresql-client provides pg_dump for the in-app backup button when PostgreSQL is used
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 app && mkdir -p /data && chown app:app /data
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY app ./app
-COPY static ./static
+COPY tools ./tools
 USER app
 VOLUME ["/data"]
 EXPOSE 8000

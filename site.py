@@ -191,7 +191,7 @@ def _store_lead(v: dict[str, str]) -> None:
     from app import cfa_core as pf
     with pf.db() as con:
         con.execute("INSERT INTO leads (id,created_at,name,email,company,message,source,org_id) VALUES (?,?,?,?,?,?,?,?)",
-                    (os.urandom(5).hex(), pf._m().now(), v["name"], v["email"], v["company"], f"[{v['topic']}] {v['message']}", "landing", pf.org()))
+                    (os.urandom(5).hex(), pf._m().now(), v["name"], v["email"], v["company"], f"[{v['topic']}] {v['message']}", "landing", "site"))
 
 
 def _notify(v: dict[str, str]) -> None:
