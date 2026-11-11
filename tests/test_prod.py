@@ -28,7 +28,8 @@ def test_database_keys_are_hashed_roles_work_and_last_admin_is_protected(tmp_pat
     assert c.get("/api/bots").status_code == 401
     h = {"Authorization": f"Bearer {token}"}
     assert c.get("/api/bots", headers=h).status_code == 200
-    raw = main.connect().execute("SELECT name,role,token_hash,created_by FROM api_keys").fetchall()
+    with main.connect() as raw_con:
+        raw = [tuple(row) for row in raw_con.execute("SELECT name,role,token_hash,created_by FROM api_keys").fetchall()]
     assert token not in json.dumps(raw) and len(raw[0][2]) == 64
     bob = c.post("/api/admin/keys", json={"name": "Bob", "role": "member"}, headers=h).json()
     hb = {"Authorization": f"Bearer {bob['token']}"}
