@@ -204,20 +204,8 @@ def adopt_org(con, org_id: str) -> None:
 
 def db():
     con = _m().connect()
-    key = str(_m().DB_PATH)
-    if key in _ready:
-        if dbx.is_pg():
-            # Verify cached PostgreSQL readiness in this connection's current search_path.
-            # If a pooled connection points at an incomplete schema, recreate it safely.
-            try:
-                for table in ("mcp_servers", "api_keys", "bot_messages", "billing", "llm_usage"):
-                    con.execute(f"SELECT 1 FROM {table} LIMIT 0")
-            except sqlite3.Error:
-                _ready.discard(key)
-            else:
-                return con
-        else:
-            return con
+    if str(_m().DB_PATH) in _ready:
+        return con
     con.executescript("""
     CREATE TABLE IF NOT EXISTS bots(id TEXT PRIMARY KEY, name TEXT, role TEXT, system TEXT, color TEXT, model TEXT);
     CREATE TABLE IF NOT EXISTS bot_messages(id TEXT PRIMARY KEY, bot_id TEXT, role TEXT, content TEXT, created_at TEXT);
