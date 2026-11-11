@@ -30,6 +30,8 @@ if __package__ in (None, "") and importlib.util.find_spec("app") is None:
 
 from app.agent_launch import router as agent_launch_router
 from app import cfa_core as cfa_platform
+from app import dbx
+from app import site
 
 load_dotenv()
 # Vercel bundles files attached to the Python function. Keep the UI inside the
@@ -65,16 +67,9 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def connect() -> sqlite3.Connection:
-    # A short lock wait prevents transient concurrent writes from failing immediately.
-    # Foreign-key enforcement is connection-local in SQLite, so enable it consistently.
-    db = sqlite3.connect(DB_PATH, timeout=15)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout = 15000")
-    db.execute("PRAGMA foreign_keys = ON")
-    db.execute("PRAGMA journal_mode = WAL")  # readers do not block the writer; needed for consistent online backups
-    db.execute("PRAGMA synchronous = NORMAL")
-    return db
+def connect():
+    """sqlite3-compatible connection: SQLite by default, PostgreSQL when CFA_DATABASE_URL is set."""
+    return dbx.connect(DB_PATH)
 
 
 def init_db() -> None:
@@ -176,6 +171,7 @@ def append_audit(event_type: str, actor: str, payload: dict[str, Any]) -> dict[s
     org_id = cfa_platform.org()
     canonical_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     with connect() as db:
+        dbx.chain_lock(db, f"audit:{org_id}")
         row = db.execute("SELECT event_hash FROM audit_events WHERE org_id=? ORDER BY seq DESC LIMIT 1", (org_id,)).fetchone()
         previous_hash = row["event_hash"] if row else "GENESIS"
         material = json.dumps({
@@ -218,12 +214,15 @@ class CouncilIn(BaseModel):
     rounds: int = Field(default=1, ge=1, le=2)
 
 
-@app.get("/")
 def home() -> HTMLResponse:
+    """The platform (single-page app). Served at /app; the public landing page lives at / (see app/site.py)."""
     if not (STATIC / "index.html").is_file():  # say what is wrong instead of failing with a bare 500
         return HTMLResponse("<h1>Shewiun CFA</h1><p>The API is running, but the <code>static</code> folder was not deployed. Upload the whole project folder (app, static, requirements.txt).</p>", status_code=503)
     # The version in the asset URLs makes browsers fetch the new files after every release.
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8").replace("__V__", cfa_platform.VERSION))
+
+
+site.install(app, home)  # landing page, legal pages, contact form, sitemap, robots, 404
 
 
 @app.get("/welcome")
@@ -255,7 +254,7 @@ def health() -> dict[str, Any]:
         "build": (os.getenv("VERCEL_GIT_COMMIT_SHA") or os.getenv("CFA_BUILD") or "")[:7],
         "search_configured": bool(os.getenv("CFA_SEARCH_API_KEY")),
         "secret_key_configured": bool(os.getenv("CFA_SECRET_KEY")),
-        "storage": "ephemeral_sqlite" if IS_VERCEL else "sqlite",
+        "storage": "ephemeral_sqlite" if IS_VERCEL and not dbx.is_pg() else dbx.backend(),
         "storage_warning": (
             "Vercel /tmp storage is ephemeral; data may be lost between instances or deployments."
             if IS_VERCEL else None

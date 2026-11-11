@@ -20,6 +20,8 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+
+from app import dbx
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -415,7 +417,7 @@ DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 def csp() -> str:
     cdn = os.getenv("CFA_LOGO_CDN", "https://cdn.simpleicons.org")  # app logos; set empty to disable
-    return f"default-src 'self'; img-src 'self' data:{(' ' + cdn) if cdn else ''}; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    return f"default-src 'self'; img-src 'self' data:{(' ' + cdn) if cdn else ''}; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'" + ("; upgrade-insecure-requests" if os.getenv("CFA_ENV") == "production" else "")
 log = logging.getLogger("cfa.access")
 
 
@@ -585,8 +587,10 @@ def install(app: FastAPI) -> None:
         for k, v in HEADERS.items():
             resp.headers.setdefault(k, v)
         resp.headers.setdefault("Content-Security-Policy", csp())
-        if request.url.path.startswith("/static/") or request.url.path in ("/", "/welcome", "/trust"):
+        if request.url.path.startswith("/static/") or request.url.path in ("/", "/app", "/welcome", "/trust", "/contact", "/privacy", "/terms", "/imprint", "/thank-you"):
             resp.headers["Cache-Control"] = "no-cache"  # always revalidate, so a new release shows up
+        if request.url.path.startswith("/static/site/img/"):
+            resp.headers["Cache-Control"] = "public, max-age=604800"  # compressed landing images: cache for a week
         if request.url.path.startswith("/api/"):
             resp.headers.setdefault("Cache-Control", "no-store")
         if os.getenv("CFA_ENV") == "production":
@@ -642,7 +646,7 @@ FTS_SQL = [
 def _init_fts(con) -> None:
     """The keyword index needs SQLite's FTS5 module. Some runtimes (for example serverless images) are built without it, so a failure here must never stop the app:
     search then falls back to a plain scan and still works. CFA_DISABLE_FTS=1 forces that fallback."""
-    if os.getenv("CFA_DISABLE_FTS") == "1":
+    if dbx.is_pg() or os.getenv("CFA_DISABLE_FTS") == "1":
         return
     try:
         for q in FTS_SQL:
