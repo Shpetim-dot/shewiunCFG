@@ -33,7 +33,7 @@ def served(c):
 
 def avatar_js(js):
     """The avatar block, sliced so old markup elsewhere cannot hide a regression."""
-    start = js.index("const EYES = {")
+    start = js.index("const R = (x, y")
     end = js.index("const when = ", start)
     return js[start:end]
 
@@ -45,47 +45,21 @@ def send_js(js):
 
 
 # ---------- the 3-D avatar plate ----------
-def test_avatar_plate_is_shaded_with_gradients_rim_and_contact_shadow(tmp_path, monkeypatch):
+def test_voxel_avatar_tile_preserves_agent_identity_and_crisp_svg(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
     js, _ = served(c)
     block = avatar_js(js)
-    # The plate is still the same 48x48 viewBox and the same single entry point.
-    assert 'setAttribute(\'viewBox\', \'0 0 48 48\')' in block
-    assert "function tile(b, s = 40, o = {}) {" in block
+    for marker in ("const FACE_EYES = {", "const FACE_BROWS = {", "const FACE_MOUTHS = {",
+                   "const CORE_FACE = {", "const CORE_SEED = {", "function lookOf(b) {",
+                   "function tile(b, s = 40, o = {}) {", "av-ground", "av-side", "av-top",
+                   "av-front", "av-eyes", "av-mouth", "av-tag"):
+        assert marker in block, marker
+    assert "setAttribute('viewBox', '0 0 48 48')" in block
+    assert "setAttribute('shape-rendering', 'crispEdges')" in block
     assert "return h('span', { class: 'avatar'" in block
-    # Dimensional shading: radial plate light, inner shade, rim highlight, gloss and contact shadow.
-    for marker in ("radialGradient", "linearGradient", "av3-plate-hi", "av3-plate-mid", "av3-plate-lo",
-                   "av3-shade-hi", "av3-shade-lo", "av3-rim-hi", "av3-rim-lo", "av3-drop-in",
-                   "av3-base", "av3-gloss", "av3-drop"):
-        assert marker in block, marker
-    # Ring arcs keep their identity colours but gain a shadow + highlight depth layer.
-    assert block.count('class="av3-arc-sh"') == 1  # built once inside the arc map
-    assert 'class="av3-arc-hi"' in block
-    assert "stroke-width=\"3.6\"" in block
-    # Specular catch-lights live in the gaze/blink group, never on closed eyes.
-    assert "const EYE_SPEC = {" in block
-    assert 'class="av3-spec"' in block
-    assert "blink\">${EYES[f.eyes]" in block and "${EYE_SPEC[f.eyes] || ''}" in block
-    # The figure itself is colour-filled: a per-agent body gradient (primary ring colour) plus a
-    # secondary-colour glow, both derived from faceOf() so every agent keeps its own palette.
-    assert "const c0 = f.ring[0], c1 = f.ring[1];" in block
-    assert "const bodyHi = mix(c0, .55)" in block and "bodyLo = mix(c0, -.38)" in block
-    assert 'id="av3c${uid}"' in block and 'id="av3t${uid}"' in block
-    assert 'stop-color="${bodyHi}"' in block and 'stop-color="${c1}" stop-opacity=".55"' in block
-    assert 'class="av3-body"' in block and 'class="av3-tint"' in block
-    assert 'fill="url(#av3c${uid})"' in block and 'fill="url(#av3t${uid})"' in block
-    # Identity arcs stay distinguishable: they use the pale secondary colour on the coloured body.
-    assert "arcC = mix(c1, .52)" in block and 'stroke="${arcC}"' in block
-    # Every identity source is untouched.
-    for marker in ("const EYES = {", "const BROWS = {", "const MOUTHS = {", "const ARC_ANGLES = {",
-                   "const CORE_FACE = {", "strategist:", "skeptic:", "builder:", "chair:",
-                   "'#3B6FE0'", "'#F2A93B'", "'#E5484D'", "'#16A37F'", "'#7A4E9C'"):
-        assert marker in block, marker
-    # Existing animation hooks survive: rotating ring, blinking, talking, floating, thinking halo.
-    assert "o.float ? ' float' : ''" in block and "o.thinking ? ' thinking' : ''" in block
-    assert 'class="halo"' in block and 'class="ring"' in block and 'class="look"' in block
-    # No per-frame JS for an idle face: the SVG is static markup, only the shared gaze tracker moves it.
-    assert "requestAnimationFrame(av3GazeFrame)" in js
+    assert "FIGURES.includes(b.figure)" in block
+    for identity in ("strategist", "skeptic", "builder", "chair"):
+        assert identity in block
 
 
 def test_avatar_styles_use_light_and_dark_gradient_stops_and_a_drop_shadow(tmp_path, monkeypatch):
@@ -105,61 +79,28 @@ def test_avatar_styles_use_light_and_dark_gradient_stops_and_a_drop_shadow(tmp_p
 
 
 # ---------- cursor gaze ----------
-def test_one_global_gaze_tracker_moves_the_look_group_with_raf(tmp_path, monkeypatch):
+def test_voxel_avatar_tile_uses_shared_palette_without_per_tile_listeners(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
     js, _ = served(c)
-    # Exactly one document-level pointer tracker for all avatars (never one listener per tile).
-    assert js.count("document.addEventListener('pointermove'") == 1
-    assert "e.target.closest('.avatar')" in js
-    assert "requestAnimationFrame(av3GazeFrame)" in js
-    assert "AV3_GAZE_MAX" in js and "2.1" in js
-    # It transforms the existing .look group and flags the plate, then restores the centre on leave.
-    assert "function av3ClearGaze(el)" in js
-    assert "look.style.transform = `translate(" in js
-    assert "look.style.transform = ''" in js
-    assert "classList.add('av3-gaze')" in js and "classList.remove('av3-gaze')" in js
-    assert "document.addEventListener('pointerout'" in js
-    assert "window.addEventListener('blur'" in js
-    # Touch devices and reduced motion keep the current idle behaviour.
-    assert "prefers-reduced-motion: reduce" in js
-    assert "(hover: hover) and (pointer: fine)" in js
-    assert "e.pointerType" in js and "'mouse'" in js and "'pen'" in js
-    # The gaze class suppresses the thinking look-around animation while the pointer is on the avatar.
-    assert ".av.av3-gaze .look { animation: none; }" in served(c)[1]
-    assert ".av .look { transition: transform .12s ease-out; }" in served(c)[1]
-
+    block = avatar_js(js)
+    assert "function lookOf(b)" in block
+    assert "function tile(b, s = 40, o = {}) {" in block
+    assert "document.createElementNS(NS, 'svg')" in block
+    assert "shape-rendering', 'crispEdges'" in block
+    assert "addEventListener" not in block
+    assert "document.addEventListener('pointermove'" not in js
 
 # ---------- walk-to-message ----------
-def test_new_live_agent_reply_walks_an_avatar_to_the_bubble(tmp_path, monkeypatch):
+def test_chat_send_preserves_voxel_avatar_message_flow(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
-    js, css = served(c)
+    js, _ = served(c)
     body = send_js(js)
-    # Only a newly appended agent reply triggers the walk, never history loading (pick()).
-    assert "const before = S.msgs.length;" in body
-    assert "last.role === 'agent' && S.msgs.length > before" in body
-    assert "av3WalkToMessage(S.bot)" in body
-    assert js.count("av3WalkToMessage") == 2  # definition + the single live-reply call in send()
-    pick = re.search(r"async function pick\(id\)\s*\{(.*?)\n  \}", js, re.S)
-    assert pick and "av3WalkToMessage" not in pick.group(1)
-    # Fixed-position overlay walker: no layout shift, removed after the animation.
-    assert "function av3WalkToMessage(bot)" in js
-    assert "document.querySelectorAll('#scroll .msgs .msg.agent')" in js
-    assert "'av3-walk'" in js
-    assert "--av3-dx" in js and "--av3-dy" in js
-    assert "document.body.append(walker)" in js
-    assert "walker.addEventListener('animationend', stop)" in js
-    assert "if (walker.parentNode) walker.remove()" in js
-    # CSS keyframes: <=900 ms, fixed, pointer-events off, removed / skipped for reduced motion.
-    idx = css.index(CSS_MARKER)
-    block = css[idx:]
-    assert ".av3-walk { position: fixed;" in block
-    assert "pointer-events: none;" in block
-    assert "@keyframes av3Walk" in block
-    assert "animation: av3Walk .82s" in block
-    assert "calc(var(--av3-dx" in block
-    assert "prefers-reduced-motion: reduce" in block and ".av3-walk { display: none !important;" in block
-    # The sidebar row class .agent also matches chat bubbles; the message region keeps normal flow.
-    assert ".msgs .msg { display: block; }" in block
+    assert "const text = S.draft.trim()" in body
+    assert "S.msgs.push({ role: 'user', content: text })" in body
+    assert "/api/bots/" in body and "S.bot.id" in body
+    assert "S.msgs.push({ role: 'agent'" in body
+    assert "finally { S.busy = false; }" in body
+    assert "av3WalkToMessage" not in js
 
 
 # ---------- left sidebar refinement ----------

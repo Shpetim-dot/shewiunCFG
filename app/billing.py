@@ -15,6 +15,7 @@ import json
 import os
 import re
 import time
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -582,7 +583,11 @@ async def webhook(request: Request) -> dict[str, bool]:
 
 # ---------- leads and funnel ----------
 EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,200}\.[A-Za-z]{2,}$")
-EVENTS = ("welcome_view", "cta_pilot", "cta_demo", "cta_pricing", "trust_view", "upgrade_click", "preset_applied", "signup_started")
+EVENTS = ("welcome_view", "cta_pilot", "cta_demo", "cta_pricing", "trust_view", "upgrade_click", "preset_applied", "signup_started",
+          "landing_view", "cta_open_app", "cta_contact", "contact_sent", "pricing_view", "faq_open")  # the last six come from the landing page
+
+
+_lead_hits: dict[str, deque] = defaultdict(deque)
 
 
 class LeadIn(BaseModel):
@@ -595,15 +600,24 @@ class LeadIn(BaseModel):
 
 
 @router.post("/api/leads", status_code=201)
-async def lead(item: LeadIn) -> dict[str, bool]:
+async def lead(item: LeadIn, request: Request) -> dict[str, bool]:
     if item.website:
         return {"ok": True}  # silently drop bots
     if not EMAIL.match(item.email):
         raise HTTPException(422, "please enter a valid email address")
+    ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?")).split(",")[0].strip()
+    q, t = _lead_hits[ip], time.monotonic()
+    while q and t - q[0] > 3600:
+        q.popleft()
+    if len(q) >= 10:  # per address and hour; the per-minute POST limit in cfa_core still applies on top
+        raise HTTPException(429, "too many requests, please try again later")
+    q.append(t)
+    if len(re.findall(r"https?://", item.message)) > 2:
+        raise HTTPException(422, "please remove some links from your message")
     with pf.db() as con:
         con.execute("INSERT INTO leads (id,created_at,name,email,company,message,source,org_id) VALUES (?,?,?,?,?,?,?,?)",
                     (uuid4().hex[:10], pf._m().now(), item.name.strip(), item.email.strip().lower(),
-                     item.company.strip(), item.message.strip(), item.source, pf.org()))
+                     item.company.strip(), item.message.strip(), item.source, SITE_ORG))
     hook = os.getenv("CFA_LEADS_WEBHOOK", "")
     if hook.startswith("https://"):
         try:
@@ -618,30 +632,64 @@ async def lead(item: LeadIn) -> dict[str, bool]:
 def leads(request: Request) -> list[dict[str, Any]]:
     pf.need_admin(request)
     with pf.db() as con:
-        return [dict(r) for r in con.execute("SELECT id,created_at,name,email,company,message,source FROM leads WHERE org_id=? "
-                                             "ORDER BY created_at DESC LIMIT 200", (pf.org(),))]
+        orgs = (SITE_ORG, pf.org()) if _is_operator(con) else (pf.org(), pf.org())
+        return [dict(r) for r in con.execute("SELECT id,created_at,name,email,company,message,source FROM leads WHERE org_id IN (?, ?) "
+                                             "ORDER BY created_at DESC LIMIT 200", orgs)]
 
 
 class EventIn(BaseModel):
     name: str = Field(max_length=30)
 
 
+SITE_ORG = "site"  # visits and funnel steps belong to the operator of the platform, not to any customer organisation
+FUNNEL = (("landing_view", "Landing page views"), ("cta_open_app", "Clicked Open the platform"), ("signup_done", "Created a workspace"),
+          ("demo_loaded", "Loaded the demo workspace"), ("first_chat", "Had a first conversation"), ("selftest_run", "Ran the authorization self-test"))
+
+
+def track(name: str) -> None:
+    """Count one funnel event (never raises: analytics must not break a request)."""
+    try:
+        with pf.db() as con:
+            con.execute("INSERT INTO org_events (org_id,day,name,n) VALUES (?,?,?,1) ON CONFLICT(org_id, day, name) DO UPDATE SET n = n + 1",
+                        (SITE_ORG, pf._m().now()[:10], name))
+    except Exception:
+        pass
+
+
+def _is_operator(con) -> bool:
+    """The first organisation (or open mode without accounts) operates the platform and may read site analytics and leads."""
+    row = con.execute("SELECT id FROM orgs ORDER BY created_at, id LIMIT 1").fetchone()
+    return row is None or row[0] == pf.org()
+
+
 @router.post("/api/events", status_code=201)
 def event(item: EventIn) -> dict[str, bool]:
     if item.name not in EVENTS:
         raise HTTPException(422, "unknown event")
-    day = pf._m().now()[:10]
-    with pf.db() as con:
-        con.execute("INSERT INTO org_events (org_id,day,name,n) VALUES (?,?,?,1) ON CONFLICT(org_id, day, name) DO UPDATE SET n = n + 1",
-                    (pf.org(), day, item.name))
+    track(item.name)
     return {"ok": True}
 
 
 @router.get("/api/events/summary")
 def events_summary(request: Request) -> dict[str, Any]:
+    """Site funnel for the operator organisation: 30-day totals, the funnel with step conversion, a 14-day series and lead count."""
     pf.need_admin(request)
     with pf.db() as con:
-        rows = con.execute("SELECT name, SUM(n) AS n FROM org_events WHERE org_id=? AND day >= date('now','-30 day') GROUP BY name",
-                           (pf.org(),)).fetchall()
-        leads_n = con.execute("SELECT COUNT(*) FROM leads WHERE org_id=?", (pf.org(),)).fetchone()[0]
-    return {"last_30_days": {r["name"]: r["n"] for r in rows}, "leads_total": leads_n}
+        if not _is_operator(con):
+            return {"operator": False, "last_30_days": {}, "leads_total": 0, "funnel": [], "daily": {"days": []}}
+        rows = con.execute("SELECT name, SUM(n) AS n FROM org_events WHERE org_id IN (?, ?) AND day >= date('now','-30 day') GROUP BY name",
+                           (SITE_ORG, pf.org())).fetchall()
+        totals = {r["name"]: int(r["n"] or 0) for r in rows}
+        series = con.execute("SELECT day, name, SUM(n) AS n FROM org_events WHERE org_id IN (?, ?) AND day >= date('now','-14 day') GROUP BY day, name",
+                             (SITE_ORG, pf.org())).fetchall()
+        leads_n = con.execute("SELECT COUNT(*) FROM leads WHERE org_id IN (?, ?)", (SITE_ORG, pf.org())).fetchone()[0]
+    funnel, prev = [], None
+    for key, label in FUNNEL:
+        n = totals.get(key, 0)
+        funnel.append({"name": key, "label": label, "n": n, "pct_of_previous": (round(100 * n / prev) if prev else None)})
+        prev = n if n else prev
+    days = sorted({r["day"] for r in series})
+    daily = {"days": days}
+    for key, _ in FUNNEL:
+        daily[key] = [next((int(r["n"]) for r in series if r["day"] == d and r["name"] == key), 0) for d in days]
+    return {"operator": True, "last_30_days": totals, "leads_total": leads_n, "funnel": funnel, "daily": daily}

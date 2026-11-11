@@ -17,7 +17,7 @@ const overlayRoot = (() => {
     council: '<circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M14 20c0-2 1.5-4 3.5-4s3.5 2 3.5 4"/>',
     grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
     flask: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/>', doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
-    x: '<path d="M6 6l12 12M18 6L6 18"/>', up: '<path d="M12 19V6M6 11l6-6 6 6"/>', panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/>',
+    x: '<path d="M6 6l12 12M18 6L6 18"/>', up: '<path d="M12 19V6M6 11l6-6 6 6"/>', back: '<path d="M15 5l-7 7 7 7"/>', panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>', user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3-6 7-6s7 2 7 6"/>',
     teams: '<rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="8" y="14" width="8" height="7" rx="2"/>', store: '<path d="M4 9l2-5h12l2 5"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/>',
     pen: '<path d="M4 20l1-4 11-11 3 3L8 19z"/><path d="M14 7l3 3"/>', rocket: '<path d="M12 3c3 2 5 5 5 9l-2 3H9l-2-3c0-4 2-7 5-9z"/><path d="M9 15l-3 4 4-1M15 15l3 4-4-1"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -50,186 +50,125 @@ const overlayRoot = (() => {
   let gid = 0;
   const mix = (hex, a) => { const n = parseInt(col(hex).slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(a < 0 ? v * (1 + a) : v + (255 - v) * a)); return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''); };
   // ---------- voxel agents: flat isometric blocks (front, top, side) with a pixel face and a pixel symbol badge ----------
-    // No gradients and no per-agent filters: three flat tones per block give the depth. The look of one agent is
-    // three small settings (symbol, colour, figure) that the agent settings dialog can change and the API stores.
-    const INK = '#1B2433';
-    const hsl = (hex) => { const n = parseInt(col(hex).slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, bl = (n & 255) / 255, mx = Math.max(r, g, bl), mn = Math.min(r, g, bl), l = (mx + mn) / 2; let hh = 0, sa = 0;
-      if (mx !== mn) { const d = mx - mn; sa = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); hh = mx === r ? (g - bl) / d + (g < bl ? 6 : 0) : mx === g ? (bl - r) / d + 2 : (r - g) / d + 4; hh *= 60; } return [hh, sa, l]; };
-    const fromHsl = (hh, sa, l) => { const k = sa * Math.min(l, 1 - l), f = (n) => { const q = (n + hh / 30) % 12; return Math.round(255 * (l - k * Math.max(-1, Math.min(q - 3, 9 - q, 1)))); }; return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join(''); };
-    const lum = (hex) => { const n = parseInt(col(hex).slice(1), 16); return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; };
-    // 7x7 pixel symbols for the badge. '#' = filled pixel. A name that is not in this map falls back to "spark".
-    const SPRITES = {
-      spark: ['...#...', '...#...', '..###..', '#######', '..###..', '...#...', '...#...'],
-      shield: ['.#####.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
-      lens: ['.###...', '#...#..', '#...#..', '#...#..', '.###.#.', '......#', '.......'],
-      compass: ['..###..', '.#...#.', '#..#..#', '#.###.#', '#..#..#', '.#...#.', '..###..'],
-      wrench: ['##...##', '###.###', '.#####.', '..###..', '..###..', '..###..', '..###..'],
-      scales: ['...#...', '.#####.', '#..#..#', '#..#..#', '.#.#.#.', '...#...', '.#####.'],
-      coins: ['.#####.', '#.....#', '.#####.', '#.....#', '.#####.', '#.....#', '.#####.'],
-      book: ['.##.##.', '#..#..#', '#..#..#', '#..#..#', '#..#..#', '.##.##.', '.......'],
-      chat: ['.#####.', '#.....#', '#.....#', '#.....#', '.#####.', '..#....', '.#.....'],
-      pen: ['.....##', '....###', '...###.', '..###..', '.###...', '##.#...', '#......'],
-      rocket: ['...#...', '..###..', '..###..', '..###..', '.#####.', '.#.#.#.', '...#...'],
-      chart: ['.....#.', '.....#.', '...#.#.', '...#.#.', '.#.#.#.', '.#.#.#.', '#######'],
-      terminal: ['#######', '#.....#', '#.#...#', '#..#..#', '#.#.###', '#.....#', '#######'],
-      bug: ['.#...#.', '..###..', '.#####.', '#######', '.#####.', '#.###.#', '.#...#.'],
-      flask: ['..###..', '...#...', '...#...', '..###..', '.#####.', '#######', '#######'],
-      doc: ['#####..', '#...##.', '#...###', '#.....#', '#.....#', '#.....#', '#######'],
-      bolt: ['....##.', '...##..', '..##...', '.#####.', '...##..', '..##...', '.##....'],
-      heart: ['.##.##.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
-      star: ['...#...', '...#...', '#######', '.#####.', '..###..', '.##.##.', '.#...#.'],
-      eye: ['.......', '..###..', '.#...#.', '#..#..#', '.#...#.', '..###..', '.......'],
-      gem: ['.#####.', '###.###', '#######', '.#####.', '..###..', '...#...', '.......'],
-      crown: ['#..#..#', '##.#.##', '#######', '#######', '#######', '.......', '.......'],
-      bulb: ['..###..', '.#####.', '.#####.', '.#####.', '..###..', '..###..', '...#...'],
-      lock: ['..###..', '.#...#.', '.#...#.', '#######', '##...##', '##.#.##', '#######'],
-    };
-    const SYMBOLS = Object.keys(SPRITES);
-    const FIGURES = ['block', 'antenna', 'ears', 'crest'];
-    const FIGURE_LABEL = { block: 'Block', antenna: 'Antenna', ears: 'Ears', crest: 'Crest' };
-    const AV_COLORS = ['#2F5BD3', '#3B82F6', '#1B7F79', '#16A37F', '#3D7A4F', '#B7791F', '#E5484D', '#B5543C', '#7A4E9C', '#DB2777', '#5B6B88', '#0F172A'];
-    const spriteCache = {};
-    const spritePath = (name, u) => {
-      const key = name + '|' + u; if (spriteCache[key]) return spriteCache[key];
-      const rows = SPRITES[name] || SPRITES.spark, n = (v) => +v.toFixed(2); let d = '';
-      rows.forEach((row, y) => { let x = 0; while (x < 7) { if (row[x] !== '#') { x++; continue; } let e = x; while (e < 7 && row[e] === '#') e++; d += `M${n(x * u)} ${n(y * u)}h${n((e - x) * u)}v${n(u)}h-${n((e - x) * u)}z`; x = e; } });
-      return (spriteCache[key] = d);
-    };
-    // The face is drawn on a 12x12 pixel grid (one pixel = 2 units on the 48 unit canvas).
-    const R = (x, y, w = 1, t = 1) => `M${x} ${y}h${w}v${t}h-${w}z`;
-    const FACE_EYES = {
-      dot: R(3, 4, 2, 2) + R(7, 4, 2, 2),
-      wide: R(2, 3, 3, 3) + R(7, 3, 3, 3),
-      tall: R(3, 3, 2, 4) + R(7, 3, 2, 4),
-      happy: R(2, 5) + R(3, 4, 2, 1) + R(5, 5) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
-      calm: R(3, 5, 3, 1) + R(7, 5, 3, 1),
-      wink: R(3, 4, 2, 2) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
-    };
-    const EYE_SPEC = { wide: R(2, 3) + R(7, 3), tall: R(3, 3) + R(7, 3) };
-    const FACE_BROWS = {
-      none: '', raise: R(3, 2, 3, 1) + R(7, 1, 3, 1), soft: R(3, 2, 3, 1) + R(7, 2, 3, 1),
-      slant: R(2, 2, 2, 1) + R(4, 3) + R(8, 2, 2, 1) + R(7, 3),
-    };
-    const FACE_MOUTHS = {
-      smile: R(3, 8) + R(4, 9, 4, 1) + R(8, 8), flat: R(4, 9, 4, 1), smirk: R(4, 9, 4, 1) + R(8, 8),
-      open: R(5, 8, 2, 2), dot: R(5, 9, 2, 2), grin: R(3, 8, 6, 1) + R(4, 9, 4, 1),
-    };
-    const CORE_FACE = {
-      strategist: { ring: ['#3B6FE0', '#F2A93B'], eyes: 'dot', brow: 'none', mouth: 'smile' },
-      skeptic: { ring: ['#E5484D', '#2B3A67'], eyes: 'dot', brow: 'raise', mouth: 'flat' },
-      builder: { ring: ['#16A37F', '#F2A93B'], eyes: 'wide', brow: 'slant', mouth: 'smirk' },
-      chair: { ring: ['#7A4E9C', '#3B6FE0'], eyes: 'dot', brow: 'none', mouth: 'dot' },
-    };
-    const CORE_SEED = { strategist: '#2F5BD3', skeptic: '#B7791F', builder: '#1B7F79', chair: '#5B6B88' };
-    const hashOf = (str) => { let x = 7; for (const ch of String(str)) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
-    const pickKey = (o, n) => { const k = Object.keys(o); return k[n % k.length]; };
-    // Everything one figure needs, from the agent record: body colour, accent, face, figure shape and badge symbol.
-    function lookOf(b) {
-      b = b || {};
-      const key = (b.id || b.name || 'x'), core = CORE_FACE[key], x = hashOf(key);
-      let body = col(b.color);
-      if (core && (!b.color || String(b.color).toLowerCase() === CORE_SEED[key].toLowerCase())) body = core.ring[0];
-      const accent = core ? core.ring[1] : fromHsl((hsl(body)[0] + 150) % 360, 0.62, 0.55);
-      const face = core || { eyes: pickKey(FACE_EYES, x >> 3), brow: pickKey(FACE_BROWS, x >> 6), mouth: pickKey(FACE_MOUTHS, x >> 9) };
-      return { body, accent, eyes: face.eyes, brow: face.brow, mouth: face.mouth,
-        figure: FIGURES.includes(b.figure) ? b.figure : FIGURES[x % FIGURES.length], sym: SPRITES[b.icon] ? b.icon : 'spark' };
-    }
-    // A tiny custom mark for "pinned": the G icon map is shared and must not grow for one sidebar state.
-    const av3Pin = (s = 12) => {
-      const v = document.createElementNS(NS, 'svg');
-      for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true' })) v.setAttribute(k, x);
-      v.innerHTML = '<path fill-rule="evenodd" d="M12 2.5a6.5 6.5 0 0 1 6.5 6.4c0 4.6-6.5 12-6.5 12S5.5 13.5 5.5 8.9A6.5 6.5 0 0 1 12 2.5zm0 4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z"/>';
-      return v;
-    };
-    // A pixel symbol as its own small svg (used by the symbol picker).
-    const symbolSvg = (name, s = 22) => {
-      const v = document.createElementNS(NS, 'svg');
-      for (const [k, x] of Object.entries({ viewBox: '0 0 7 7', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true', 'shape-rendering': 'crispEdges' })) v.setAttribute(k, x);
-      v.innerHTML = `<path d="${spritePath(name, 1)}"/>`;
-      return v;
-    };
-    // state: o.thinking = the agent is working or answering (it hops and the mouth moves); o.float = a calm idle bob
-    // for the one hero avatar of a screen. Every other figure is static markup, so lists of agents cost nothing.
-    function tile(b, s = 40, o = {}) {
-      const L = lookOf(b), c = L.body, top = mix(c, 0.32), side = mix(c, -0.3), ink = lum(c) > 0.55 ? INK : '#F8FAFC';
-      const acc = L.accent, aTop = mix(acc, 0.3), aSide = mix(acc, -0.3);
-      const back = L.figure === 'ears' ? `<rect x="3" y="27" width="4" height="9" fill="${acc}"/><rect x="41" y="17" width="3" height="9" fill="${aSide}"/>` : '';
-      const deco = L.figure === 'antenna' ? `<rect x="23" y="5" width="2" height="9" fill="${side}"/><rect x="21" y="2" width="6" height="4" fill="${acc}"/>`
-        : L.figure === 'crest' ? `<rect x="16" y="12" width="4" height="4" fill="${aTop}"/><rect x="21" y="10" width="4" height="4" fill="${aTop}"/><rect x="26" y="12" width="4" height="4" fill="${aTop}"/>` : '';
-      const badge = s >= 28 && !o.nobadge ? `<g class="av-tag" transform="translate(31 31)"><rect class="av-tagbg" width="16" height="16" rx="2.5"/><path class="av-sym" transform="translate(2.4 2.4)" d="${spritePath(L.sym, 1.6)}"/></g>` : '';
-      const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true'); v.setAttribute('shape-rendering', 'crispEdges');
-      v.setAttribute('class', 'av' + (o.float ? ' bob' : '') + (o.thinking ? ' thinking' : ''));
-      v.style.setProperty('--bd', `-${(Math.random() * 5).toFixed(1)}s`);
-      v.innerHTML = '<ellipse class="av-ground" cx="22" cy="45.4" rx="15" ry="1.6"/>'
-        + `<g class="av-fig">${back}`
-        + `<path class="av-side" d="M31 19L41 9V33L31 43Z" fill="${side}"/>`
-        + `<path class="av-top" d="M7 19L17 9H41L31 19Z" fill="${top}"/>`
-        + `<rect class="av-front" x="7" y="19" width="24" height="24" fill="${c}"/>`
-        + `<rect x="7" y="19" width="24" height="1" fill="#FFFFFF" opacity=".28"/>${deco}`
-        + `<g transform="translate(7 19) scale(2)" fill="${ink}"><g class="look"><g class="av-eyes"><path d="${FACE_EYES[L.eyes] || FACE_EYES.dot}"/>${EYE_SPEC[L.eyes] ? `<path fill="#FFFFFF" d="${EYE_SPEC[L.eyes]}"/>` : ''}</g>`
-        + `</g><path d="${FACE_BROWS[L.brow] || ''}"/><g class="av-mouth"><path d="${FACE_MOUTHS[L.mouth] || FACE_MOUTHS.smile}"/></g></g></g>${badge}`;
-      return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
-    }
-  // ---------- cursor gaze: one global pointer tracker moves the hovered avatar's eyes, never a listener per tile ----------
-  const av3Reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-  const av3Fine = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
-  const AV3_GAZE_MAX = 2.1;   // 48x48 viewBox units, so the shift stays subtle at every rendered size
-  let av3Hover = null, av3Px = 0, av3Py = 0, av3Raf = 0;
-  function av3Parts(el) { return { av: el.querySelector('.av'), look: el.querySelector('.look') }; }
-  function av3ClearGaze(el) {
-    const target = el || av3Hover; if (!target) return;
-    const { av, look } = av3Parts(target);
-    if (look) look.style.transform = '';
-    if (av) av.classList.remove('av3-gaze');
-    if (!el || el === av3Hover) av3Hover = null;
+  // No gradients and no per-agent filters: three flat tones per block give the depth. The look of one agent is
+  // three small settings (symbol, colour, figure) that the agent settings dialog can change and the API stores.
+  const INK = '#1B2433';
+  const hsl = (hex) => { const n = parseInt(col(hex).slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, bl = (n & 255) / 255, mx = Math.max(r, g, bl), mn = Math.min(r, g, bl), l = (mx + mn) / 2; let hh = 0, sa = 0;
+    if (mx !== mn) { const d = mx - mn; sa = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); hh = mx === r ? (g - bl) / d + (g < bl ? 6 : 0) : mx === g ? (bl - r) / d + 2 : (r - g) / d + 4; hh *= 60; } return [hh, sa, l]; };
+  const fromHsl = (hh, sa, l) => { const k = sa * Math.min(l, 1 - l), f = (n) => { const q = (n + hh / 30) % 12; return Math.round(255 * (l - k * Math.max(-1, Math.min(q - 3, 9 - q, 1)))); }; return '#' + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join(''); };
+  const lum = (hex) => { const n = parseInt(col(hex).slice(1), 16); return (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; };
+  // 7x7 pixel symbols for the badge. '#' = filled pixel. A name that is not in this map falls back to "spark".
+  const SPRITES = {
+    spark: ['...#...', '...#...', '..###..', '#######', '..###..', '...#...', '...#...'],
+    shield: ['.#####.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
+    lens: ['.###...', '#...#..', '#...#..', '#...#..', '.###.#.', '......#', '.......'],
+    compass: ['..###..', '.#...#.', '#..#..#', '#.###.#', '#..#..#', '.#...#.', '..###..'],
+    wrench: ['##...##', '###.###', '.#####.', '..###..', '..###..', '..###..', '..###..'],
+    scales: ['...#...', '.#####.', '#..#..#', '#..#..#', '.#.#.#.', '...#...', '.#####.'],
+    coins: ['.#####.', '#.....#', '.#####.', '#.....#', '.#####.', '#.....#', '.#####.'],
+    book: ['.##.##.', '#..#..#', '#..#..#', '#..#..#', '#..#..#', '.##.##.', '.......'],
+    chat: ['.#####.', '#.....#', '#.....#', '#.....#', '.#####.', '..#....', '.#.....'],
+    pen: ['.....##', '....###', '...###.', '..###..', '.###...', '##.#...', '#......'],
+    rocket: ['...#...', '..###..', '..###..', '..###..', '.#####.', '.#.#.#.', '...#...'],
+    chart: ['.....#.', '.....#.', '...#.#.', '...#.#.', '.#.#.#.', '.#.#.#.', '#######'],
+    terminal: ['#######', '#.....#', '#.#...#', '#..#..#', '#.#.###', '#.....#', '#######'],
+    bug: ['.#...#.', '..###..', '.#####.', '#######', '.#####.', '#.###.#', '.#...#.'],
+    flask: ['..###..', '...#...', '...#...', '..###..', '.#####.', '#######', '#######'],
+    doc: ['#####..', '#...##.', '#...###', '#.....#', '#.....#', '#.....#', '#######'],
+    bolt: ['....##.', '...##..', '..##...', '.#####.', '...##..', '..##...', '.##....'],
+    heart: ['.##.##.', '#######', '#######', '#######', '.#####.', '..###..', '...#...'],
+    star: ['...#...', '...#...', '#######', '.#####.', '..###..', '.##.##.', '.#...#.'],
+    eye: ['.......', '..###..', '.#...#.', '#..#..#', '.#...#.', '..###..', '.......'],
+    gem: ['.#####.', '###.###', '#######', '.#####.', '..###..', '...#...', '.......'],
+    crown: ['#..#..#', '##.#.##', '#######', '#######', '#######', '.......', '.......'],
+    bulb: ['..###..', '.#####.', '.#####.', '.#####.', '..###..', '..###..', '...#...'],
+    lock: ['..###..', '.#...#.', '.#...#.', '#######', '##...##', '##.#.##', '#######'],
+  };
+  const SYMBOLS = Object.keys(SPRITES);
+  const FIGURES = ['block', 'antenna', 'ears', 'crest'];
+  const FIGURE_LABEL = { block: 'Block', antenna: 'Antenna', ears: 'Ears', crest: 'Crest' };
+  const AV_COLORS = ['#2F5BD3', '#3B82F6', '#1B7F79', '#16A37F', '#3D7A4F', '#B7791F', '#E5484D', '#B5543C', '#7A4E9C', '#DB2777', '#5B6B88', '#0F172A'];
+  const spriteCache = {};
+  const spritePath = (name, u) => {
+    const key = name + '|' + u; if (spriteCache[key]) return spriteCache[key];
+    const rows = SPRITES[name] || SPRITES.spark, n = (v) => +v.toFixed(2); let d = '';
+    rows.forEach((row, y) => { let x = 0; while (x < 7) { if (row[x] !== '#') { x++; continue; } let e = x; while (e < 7 && row[e] === '#') e++; d += `M${n(x * u)} ${n(y * u)}h${n((e - x) * u)}v${n(u)}h-${n((e - x) * u)}z`; x = e; } });
+    return (spriteCache[key] = d);
+  };
+  // The face is drawn on a 12x12 pixel grid (one pixel = 2 units on the 48 unit canvas).
+  const R = (x, y, w = 1, t = 1) => `M${x} ${y}h${w}v${t}h-${w}z`;
+  const FACE_EYES = {
+    dot: R(3, 4, 2, 2) + R(7, 4, 2, 2),
+    wide: R(2, 3, 3, 3) + R(7, 3, 3, 3),
+    tall: R(3, 3, 2, 4) + R(7, 3, 2, 4),
+    happy: R(2, 5) + R(3, 4, 2, 1) + R(5, 5) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
+    calm: R(3, 5, 3, 1) + R(7, 5, 3, 1),
+    wink: R(3, 4, 2, 2) + R(6, 5) + R(7, 4, 2, 1) + R(9, 5),
+  };
+  const EYE_SPEC = { wide: R(2, 3) + R(7, 3), tall: R(3, 3) + R(7, 3) };
+  const FACE_BROWS = {
+    none: '', raise: R(3, 2, 3, 1) + R(7, 1, 3, 1), soft: R(3, 2, 3, 1) + R(7, 2, 3, 1),
+    slant: R(2, 2, 2, 1) + R(4, 3) + R(8, 2, 2, 1) + R(7, 3),
+  };
+  const FACE_MOUTHS = {
+    smile: R(3, 8) + R(4, 9, 4, 1) + R(8, 8), flat: R(4, 9, 4, 1), smirk: R(4, 9, 4, 1) + R(8, 8),
+    open: R(5, 8, 2, 2), dot: R(5, 9, 2, 2), grin: R(3, 8, 6, 1) + R(4, 9, 4, 1),
+  };
+  const CORE_FACE = {
+    strategist: { ring: ['#3B6FE0', '#F2A93B'], eyes: 'dot', brow: 'none', mouth: 'smile' },
+    skeptic: { ring: ['#E5484D', '#2B3A67'], eyes: 'dot', brow: 'raise', mouth: 'flat' },
+    builder: { ring: ['#16A37F', '#F2A93B'], eyes: 'wide', brow: 'slant', mouth: 'smirk' },
+    chair: { ring: ['#7A4E9C', '#3B6FE0'], eyes: 'dot', brow: 'none', mouth: 'dot' },
+  };
+  const CORE_SEED = { strategist: '#2F5BD3', skeptic: '#B7791F', builder: '#1B7F79', chair: '#5B6B88' };
+  const hashOf = (str) => { let x = 7; for (const ch of String(str)) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
+  const pickKey = (o, n) => { const k = Object.keys(o); return k[n % k.length]; };
+  // Everything one figure needs, from the agent record: body colour, accent, face, figure shape and badge symbol.
+  function lookOf(b) {
+    b = b || {};
+    const key = (b.id || b.name || 'x'), core = CORE_FACE[key], x = hashOf(key);
+    let body = col(b.color);
+    if (core && (!b.color || String(b.color).toLowerCase() === CORE_SEED[key].toLowerCase())) body = core.ring[0];
+    const accent = core ? core.ring[1] : fromHsl((hsl(body)[0] + 150) % 360, 0.62, 0.55);
+    const face = core || { eyes: pickKey(FACE_EYES, x >> 3), brow: pickKey(FACE_BROWS, x >> 6), mouth: pickKey(FACE_MOUTHS, x >> 9) };
+    return { body, accent, eyes: face.eyes, brow: face.brow, mouth: face.mouth,
+      figure: FIGURES.includes(b.figure) ? b.figure : FIGURES[x % FIGURES.length], sym: SPRITES[b.icon] ? b.icon : 'spark' };
   }
-  function av3GazeFrame() {
-    av3Raf = 0;
-    const el = av3Hover; if (!el) return;
-    if (!el.isConnected) { av3Hover = null; return; }
-    const { av, look } = av3Parts(el); if (!av || !look) return;
-    const r = av.getBoundingClientRect(); if (!r.width) return;
-    const reach = r.width * 0.7 + 26;
-    const nx = Math.max(-1, Math.min(1, (av3Px - (r.left + r.width / 2)) / reach));
-    const ny = Math.max(-1, Math.min(1, (av3Py - (r.top + r.height / 2)) / reach));
-    av.classList.add('av3-gaze');
-    look.style.transform = `translate(${(nx * AV3_GAZE_MAX).toFixed(2)}px, ${(ny * AV3_GAZE_MAX).toFixed(2)}px)`;
-  }
-  document.addEventListener('pointermove', (e) => {
-    if (e.pointerType && e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
-    if ((av3Reduce && av3Reduce.matches) || (av3Fine && !av3Fine.matches) || !e.target || !e.target.closest) { av3ClearGaze(); return; }
-    const hit = e.target.closest('.avatar');
-    if (av3Hover && av3Hover !== hit) av3ClearGaze(av3Hover);
-    av3Hover = hit; av3Px = e.clientX; av3Py = e.clientY;
-    if (hit && !av3Raf) av3Raf = requestAnimationFrame(av3GazeFrame);
-  }, { passive: true });
-  document.addEventListener('pointerout', (e) => { if (!e.relatedTarget && av3Hover) av3ClearGaze(); });
-  document.addEventListener('scroll', () => { if (av3Hover && !av3Raf) av3Raf = requestAnimationFrame(av3GazeFrame); }, { passive: true, capture: true });
-  window.addEventListener('blur', () => av3ClearGaze());
-  // ---------- walk-to-message: the agent's little avatar hops from the sidebar edge to a live reply ----------
-  function av3WalkToMessage(bot) {
-    if (!bot || S.view !== 'chat' || (av3Reduce && av3Reduce.matches)) return;
-    const replies = document.querySelectorAll('#scroll .msgs .msg.agent');
-    const target = replies[replies.length - 1];
-    if (!target) return;
-    const tr = target.getBoundingClientRect();
-    if (tr.width < 20 || tr.height < 10) return;
-    const side = document.querySelector('.side');
-    const sr = side ? side.getBoundingClientRect() : null;
-    const size = 30, narrow = window.innerWidth <= 760 || !sr || sr.width < 40;
-    const startX = narrow ? 12 : Math.max(6, sr.right + 2);
-    const startY = Math.min(window.innerHeight - size - 8, Math.max(8, tr.top + tr.height / 2 - size / 2));
-    const endX = Math.min(window.innerWidth - size - 8, Math.max(8, tr.left + 6));
-    const endY = Math.min(window.innerHeight - size - 8, Math.max(8, tr.top - 4));
-    const walker = h('div', { class: 'av3-walk', 'aria-hidden': 'true' }, tile(bot, size, { thinking: true }));
-    walker.style.left = startX + 'px';
-    walker.style.top = startY + 'px';
-    walker.style.setProperty('--av3-dx', (endX - startX).toFixed(1) + 'px');
-    walker.style.setProperty('--av3-dy', (endY - startY).toFixed(1) + 'px');
-    const stop = () => { if (walker.parentNode) walker.remove(); };
-    walker.addEventListener('animationend', stop);
-    setTimeout(stop, 1200);
-    document.body.append(walker);
+  // A tiny custom mark for "pinned": the G icon map is shared and must not grow for one sidebar state.
+  const av3Pin = (s = 12) => {
+    const v = document.createElementNS(NS, 'svg');
+    for (const [k, x] of Object.entries({ viewBox: '0 0 24 24', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true' })) v.setAttribute(k, x);
+    v.innerHTML = '<path fill-rule="evenodd" d="M12 2.5a6.5 6.5 0 0 1 6.5 6.4c0 4.6-6.5 12-6.5 12S5.5 13.5 5.5 8.9A6.5 6.5 0 0 1 12 2.5zm0 4a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z"/>';
+    return v;
+  };
+  // A pixel symbol as its own small svg (used by the symbol picker).
+  const symbolSvg = (name, s = 22) => {
+    const v = document.createElementNS(NS, 'svg');
+    for (const [k, x] of Object.entries({ viewBox: '0 0 7 7', width: s, height: s, fill: 'currentColor', 'aria-hidden': 'true', 'shape-rendering': 'crispEdges' })) v.setAttribute(k, x);
+    v.innerHTML = `<path d="${spritePath(name, 1)}"/>`;
+    return v;
+  };
+  // state: o.thinking = the agent is working or answering (it hops and the mouth moves); o.float = a calm idle bob
+  // for the one hero avatar of a screen. Every other figure is static markup, so lists of agents cost nothing.
+  function tile(b, s = 40, o = {}) {
+    const L = lookOf(b), c = L.body, top = mix(c, 0.32), side = mix(c, -0.3), ink = lum(c) > 0.55 ? INK : '#F8FAFC';
+    const acc = L.accent, aTop = mix(acc, 0.3), aSide = mix(acc, -0.3);
+    const back = L.figure === 'ears' ? `<rect x="3" y="27" width="4" height="9" fill="${acc}"/><rect x="41" y="17" width="3" height="9" fill="${aSide}"/>` : '';
+    const deco = L.figure === 'antenna' ? `<rect x="23" y="5" width="2" height="9" fill="${side}"/><rect x="21" y="2" width="6" height="4" fill="${acc}"/>`
+      : L.figure === 'crest' ? `<rect x="16" y="12" width="4" height="4" fill="${aTop}"/><rect x="21" y="10" width="4" height="4" fill="${aTop}"/><rect x="26" y="12" width="4" height="4" fill="${aTop}"/>` : '';
+    const badge = s >= 28 && !o.nobadge ? `<g class="av-tag" transform="translate(31 31)"><rect class="av-tagbg" width="16" height="16" rx="2.5"/><path class="av-sym" transform="translate(2.4 2.4)" d="${spritePath(L.sym, 1.6)}"/></g>` : '';
+    const v = document.createElementNS(NS, 'svg'); v.setAttribute('viewBox', '0 0 48 48'); v.setAttribute('width', s); v.setAttribute('height', s); v.setAttribute('aria-hidden', 'true'); v.setAttribute('shape-rendering', 'crispEdges');
+    v.setAttribute('class', 'av' + (o.float ? ' bob' : '') + (o.thinking ? ' thinking' : ''));
+    v.style.setProperty('--bd', `-${(Math.random() * 5).toFixed(1)}s`);
+    v.innerHTML = '<ellipse class="av-ground" cx="22" cy="45.4" rx="15" ry="1.6"/>'
+      + `<g class="av-fig">${back}`
+      + `<path class="av-side" d="M31 19L41 9V33L31 43Z" fill="${side}"/>`
+      + `<path class="av-top" d="M7 19L17 9H41L31 19Z" fill="${top}"/>`
+      + `<rect class="av-front" x="7" y="19" width="24" height="24" fill="${c}"/>`
+      + `<rect x="7" y="19" width="24" height="1" fill="#FFFFFF" opacity=".28"/>${deco}`
+      + `<g transform="translate(7 19) scale(2)" fill="${ink}"><g class="av-eyes"><path d="${FACE_EYES[L.eyes] || FACE_EYES.dot}"/>${EYE_SPEC[L.eyes] ? `<path fill="#FFFFFF" d="${EYE_SPEC[L.eyes]}"/>` : ''}</g>`
+      + `<path d="${FACE_BROWS[L.brow] || ''}"/><g class="av-mouth"><path d="${FACE_MOUTHS[L.mouth] || FACE_MOUTHS.smile}"/></g></g></g>${badge}`;
+    return h('span', { class: 'avatar', style: `width:${s}px;height:${s}px` }, v);
   }
   const when = (t) => (t || '').slice(0, 16).replace('T', ' ');
   const botBy = (id) => S.bots.find((b) => b.id === id) || { color: '#5B6B88', icon: 'spark', name: id };
@@ -289,7 +228,7 @@ const overlayRoot = (() => {
     if (view === 'settings') { openSettings(); return; }
     stopAct(); S.view = view; S.drawer = false; S.menu = false; S.err = ''; S.info = ''; if (view !== 'council') S.room = null; render();
     await run(async () => {
-      if (view === 'brain') { await loadNotes(); await loadBots(); S.graph = S.notes.length > 0; if (!S.note && S.notes[0]) await openNote(S.notes[0].id, true); S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
+      if (view === 'brain') { await loadNotes(); await loadBots(); S.graph = S.notes.length > 0; S.brainPane = isMobile() ? 'list' : S.brainPane; if (!S.note && S.notes[0]) await openNote(S.notes[0].id, true); S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
       if (view === 'council') S.calls = await api('/api/calls');
       if (view === 'research') { S.rlist = await api('/api/research'); try { S.health = await api('/api/health'); S.ssearch = await api('/api/search/status'); } catch {} }
       if (view === 'org') { await loadOrg(); if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; } }
@@ -299,7 +238,7 @@ const overlayRoot = (() => {
       if (view === 'inventory') { S.inv = await api('/api/inventory'); S.invSum = await api('/api/inventory/summary'); }
       if (view === 'usage') { [S.usage, S.provs, S.prices, S.cu] = await Promise.all([api('/api/usage'), api('/api/providers'), api('/api/prices'), api('/api/computer-use/status')]); }
       if (view === 'market') S.market = (await api('/api/marketplace')).curated;
-      if (view === 'control') { S.afilter = {}; S.policyDraft = {}; S.auditOpen = {}; [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=200').then((d) => { S.audit = d.events || []; S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered; return S.audit; }), api('/api/security/policies').then((d) => { S.policyMeta = d; return d.policies; }), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary')]); }
+      if (view === 'control') { S.afilter = {}; S.policyDraft = {}; S.auditOpen = {}; [S.approvals, S.audit, S.policies, S.test, S.toolCalls, S.cov, S.sum] = await Promise.all([api('/api/security/approvals'), api('/api/security/audit?limit=200').then((d) => { S.audit = d.events || []; S.auditIntegrity = d.integrity || null; S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered; return S.audit; }), api('/api/security/policies').then((d) => { S.policyMeta = d; return d.policies; }), api('/api/selftest/latest'), api('/api/tool-calls'), api('/api/coverage'), api('/api/summary'), api('/api/inventory').then((d) => { S.ctlInv = d; return d; }), api('/api/inventory/summary').then((d) => { S.ctlInvSum = d; return d; })]); }
     });
   }
   async function pick(id) {
@@ -308,7 +247,7 @@ const overlayRoot = (() => {
   }
   async function openNote(id, quiet) {
     if (S.view !== 'brain') { stopAct(); S.view = 'brain'; S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
-    S.drawer = false; S.newNote = false; S.edit = false;
+    S.drawer = false; S.newNote = false; S.edit = false; if (isMobile() && !quiet) S.brainPane = 'note';
     const f = async () => { if (!S.notes.length) await loadNotes(); S.note = await api('/api/brain/notes/' + id); S.versions = await api(`/api/brain/notes/${id}/versions`); };
     if (quiet) await f(); else await run(f);
   }
@@ -323,12 +262,8 @@ const overlayRoot = (() => {
   function updateTicker() { const t = document.getElementById('ticker'); if (t) t.replaceChildren(...S.activity.slice(0, 6).map((e) => h('div', {}, `${when(e.ts)} · ${e.bot || 'someone'} ${e.kind === 'read' ? 'read' : 'wrote'} "${e.title || 'a note'}"`))); }
   async function send() {
     const text = S.draft.trim(); if (!text || S.busy) return;
-    const before = S.msgs.length;
     S.draft = ''; S.busy = true; S.msgs.push({ role: 'user', content: text }); render();
     await run(async () => { try { const r = await api(`/api/bots/${S.bot.id}/messages`, { method: 'POST', body: { content: text } }); S.msgs.push({ role: 'agent', content: r.reply, note: r.draft_note_id, used: r.used }); } finally { S.busy = false; } });
-    // Walk the little avatar to the bubble only for a live reply (never while history is loading).
-    const last = S.msgs[S.msgs.length - 1];
-    if (last && last.role === 'agent' && S.msgs.length > before) av3WalkToMessage(S.bot);
   }
   async function loadDemo() { await run(async () => { const r = await api('/api/demo/workspace', { method: 'POST' }); await Promise.all([loadBots(), loadNotes(), loadApps(), loadTeams()]); S.menu = false; S.info = `Demo workspace loaded: ${r.agents} agents, ${r.notes} notes, 2 teams, 3 apps. All of it is sample data.`; }); }
 
@@ -337,25 +272,89 @@ const overlayRoot = (() => {
     const items = [['Load the demo workspace', S.bots.length > 4, loadDemo, 'Load'], ['Run a council call', S.calls.length > 0, () => go('council'), 'Open'], ['Run the authorization self-test', !!(S.test && S.test.id), () => go('control'), 'Open'],
       ['Connect an app or MCP server', S.apps.some((a) => a.connected), openApps, 'Open'], ['Create a team', S.teams.length > 0, () => go('teams'), 'Open']];
     if (items.every((i) => i[1]) || S.skip) return null;
-    return h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, `Getting started: ${items.filter((i) => i[1]).length} of ${items.length}`), btn('Hide', () => { S.skip = true; render(); }, 'link')),
+    const next = items.find((i) => !i[1]), doneN = items.filter((i) => i[1]).length;
+    if (isMobile() && !S.checkOpen) return h('button', { type: 'button', class: 'check-sum', onclick: () => { S.checkOpen = true; render(); } },
+      h('span', { class: 'check-ring', style: `--p:${Math.round((doneN / items.length) * 100)}` }, String(doneN)), h('span', { class: 'check-txt' }, h('b', {}, `Getting started: ${doneN} of ${items.length}`), h('small', {}, `Next: ${next[0]}`)), icon('back', 16));
+    return h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, `Getting started: ${doneN} of ${items.length}`), isMobile() ? btn('Collapse', () => { S.checkOpen = false; render(); }, 'link') : null, btn('Hide', () => { S.skip = true; render(); }, 'link')),
       items.map(([t, done, f, l]) => h('div', { class: 'check' + (done ? ' done' : '') }, h('span', { class: 'tick' }, done ? icon('check', 14) : null), h('span', { style: 'flex:1' }, t), done ? null : btn(l, f, 'btn'))));
   }
+  // ---------- calm feedback: small toasts instead of banners that stay on screen ----------
+  const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
+  const isCoarse = () => window.matchMedia('(pointer: coarse)').matches;
+  const ago = (ts) => {
+    const t = Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(ts || '') ? ts : (ts || '') + 'Z'); if (!t) return when(ts);
+    const d = Math.max(0, (Date.now() - t) / 1000);
+    return d < 60 ? 'now' : d < 3600 ? Math.floor(d / 60) + ' min' : d < 86400 ? Math.floor(d / 3600) + ' h' : Math.floor(d / 86400) + ' d';
+  };
+  function toast(msg, kind) {
+    let box = document.getElementById('toasts');
+    if (!box) { box = h('div', { id: 'toasts', class: 'toasts', 'aria-live': 'polite' }); document.body.append(box); }
+    const el = h('div', { class: 'toast' + (kind === 'bad' ? ' bad' : ''), role: kind === 'bad' ? 'alert' : 'status' }, h('span', { class: 'toast-text' }, String(msg)),
+      h('button', { class: 'toast-x', type: 'button', 'aria-label': 'Dismiss', onclick: () => el.remove() }, icon('x', 14)));
+    box.append(el); while (box.children.length > 3) box.firstChild.remove();
+    setTimeout(() => el.remove(), kind === 'bad' ? 7000 : 4200);
+  }
+
+  // ---------- chat: the agent speaks as a profile (avatar, name, role, time), you speak as a plain bubble ----------
+  function chatRow(b, m, prev) {
+    if (m.role !== 'agent') return h('div', { class: 'msgrow user' }, h('div', { class: 'msg user' }, m.content));
+    const cont = !!prev && prev.role === 'agent';
+    return h('div', { class: 'msgrow ai' + (cont ? ' cont' : '') },
+      h('span', { class: 'msgav' }, cont ? null : tile(b, 36)),
+      h('div', { class: 'msgmain' },
+        cont ? null : h('div', { class: 'msghead' }, h('b', {}, b.name), h('span', { class: 'muted' }, b.role), m.created_at ? h('span', { class: 'muted mono' }, when(m.created_at)) : null),
+        h('div', { class: 'msg agent' }, m.content),
+        h('button', { type: 'button', class: 'msg-copy', 'aria-label': 'Copy reply', title: 'Copy reply', onclick: (e) => { const t = e.currentTarget; (navigator.clipboard ? navigator.clipboard.writeText(m.content) : Promise.reject()).then(() => { t.classList.add('done'); toast('Copied to clipboard'); setTimeout(() => t.classList.remove('done'), 1500); }).catch(() => toast('Copy is not available here', 'bad')); } }, icon('doc', 14)),
+        h('small', { class: 'muted msgsrc' }, m.used && m.used.length ? ['Based on: ', m.used.flatMap((u) => [btn(u.title, () => openNote(u.id), 'link'), ' '])] : 'Based on no verified notes'),
+        m.note ? h('small', {}, btn('Saved to Brain as draft', () => openNote(m.note), 'link')) : null));
+  }
+  const chatTyping = (b) => h('div', { class: 'msgrow ai' }, h('span', { class: 'msgav' }, tile(b, 36, { thinking: true })),
+    h('div', { class: 'msgmain' }, h('div', { class: 'msghead' }, h('b', {}, b.name), h('span', { class: 'muted' }, 'is answering…')),
+      h('div', { class: 'skel-lines', 'aria-hidden': 'true' }, h('span', { class: 'skel-line' }), h('span', { class: 'skel-line short' }))));
+
+  // ---------- notification centre: a side panel with filters, day groups, per-item read state ----------
+  const NT_ICON = { approval: 'shield', run: 'terminal', audit: 'doc' };
+  const ntDay = (ts) => { const t = Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(ts || '') ? ts : (ts || '') + 'Z'); return t && new Date(t).toDateString() === new Date().toDateString() ? 'Today' : 'Earlier'; };
+  const markRead = (keys) => api('/api/notifications/read', { method: 'POST', body: { keys } }).then(loadNotifs).then(() => render()).catch(() => {});
+  function notifModal() {
+    const n = S.notifs || { items: [], unread: 0 }, f = S.nfilter || 'all';
+    const close = () => { S.modal = null; syncOverlays(true); };
+    const items = n.items.filter((i) => (f === 'unread' ? !i.read : f === 'approval' ? i.kind === 'approval' : true));
+    const tab = (id, label, count) => h('button', { type: 'button', class: 'nt-tab', 'aria-selected': f === id ? 'true' : 'false', onclick: () => { S.nfilter = id; syncOverlays(true); } }, label, count ? h('span', { class: 'nt-count' }, String(count)) : null);
+    const row = (i) => h('button', { type: 'button', class: 'nt-item' + (i.read ? '' : ' unread'),
+      onclick: () => { if (!i.read) markRead([i.key]); S.modal = null; syncOverlays(true); go(i.view || 'control'); } },
+      h('span', { class: 'nt-ic' }, icon(NT_ICON[i.kind] || 'bell', 16)),
+      h('span', { class: 'nt-main' }, h('b', {}, i.title), h('span', { class: 'nt-detail muted' }, String(i.detail || ''))),
+      h('span', { class: 'nt-time muted' }, ago(i.ts)), i.read ? null : h('span', { class: 'nt-dot', 'aria-label': 'Unread' }));
+    const groups = ['Today', 'Earlier'].map((g) => [g, items.filter((i) => ntDay(i.ts) === g)]).filter(([, l]) => l.length);
+    const body = S.notifLoading ? h('div', { class: 'skel-lines', style: 'padding:16px' }, [1, 2, 3, 4].map(() => h('span', { class: 'skel-line tall' })))
+      : groups.length ? groups.map(([g, l]) => h('section', {}, h('h3', { class: 'nt-group' }, g), l.map(row)))
+        : h('div', { class: 'empty' }, icon('bell', 30), h('h3', {}, f === 'unread' ? 'You are all caught up' : 'Nothing needs your attention'), h('p', { class: 'muted' }, 'Approvals, runs and audit alerts show up here.'));
+    return h('div', { class: 'scrim nt-scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
+      h('aside', { class: 'nt-panel', role: 'dialog', 'aria-label': 'Notifications' },
+        h('div', { class: 'nt-head' }, h('h2', {}, 'Notifications'), h('span', { class: 'sp' }),
+          n.unread ? btn('Mark all read', () => markRead(n.items.map((i) => i.key)), 'link') : null, btn([icon('x', 16)], close, 'ibtn nt-close', { 'aria-label': 'Close' })),
+        h('div', { class: 'nt-tabs', role: 'tablist' }, tab('all', 'All'), tab('unread', 'Unread', n.unread), tab('approval', 'Approvals')),
+        h('div', { class: 'nt-body' }, body)));
+  }
+
   function chatView() {
     const b = S.bot; if (!b) return h('div', { class: 'body' }, h('p', { class: 'empty muted' }, 'Choose an agent.'));
     const ta = h('textarea', { rows: 1, placeholder: `Message ${b.name}`, 'aria-label': `Message ${b.name}` }); ta.value = S.draft;
     const sb = h('button', { class: 'send', type: 'button', 'aria-label': 'Send', disabled: !S.draft.trim() || S.busy, onclick: send }, icon('up', 18));
     ta.addEventListener('input', () => { S.draft = ta.value; sb.disabled = !ta.value.trim() || S.busy; ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
-    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+    ta.setAttribute('enterkeyhint', 'send');
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !isCoarse()) { e.preventDefault(); send(); } });  // on a touch keyboard Enter is a new line; the arrow sends
     return h('div', { style: 'display:flex;flex-direction:column;min-height:0;flex:1' },
       h('div', { class: 'bar' }, tile(b, 34, { float: true, thinking: S.busy }), h('h1', {}, b.name), h('span', { class: 'muted' }, b.role), b.status === 'suspended' ? h('span', { class: 'chip warn' }, 'suspended') : null, h('span', { class: 'sp' }), S.bill && S.bill.enabled && S.bill.plan === 'free' ? btn('Upgrade', () => { track('upgrade_click'); go('plans'); }, 'btn primary') : null, h('span', { class: 'chip' }, b.model),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Toggle agent details', 'aria-pressed': S.panel, onclick: () => { S.panel = !S.panel; render(); } }, icon('panel'))),
       h('div', { class: 'body', id: 'scroll', 'aria-live': 'polite' }, h('div', { class: 'col' }, checklist(), h('div', { class: 'msgs' },
-        S.msgs.length ? S.msgs.map((m) => h('div', { class: 'msg ' + m.role }, m.content,
-          m.role === 'agent' ? h('small', { class: 'muted' }, m.used && m.used.length ? ['Based on: ', m.used.flatMap((u) => [btn(u.title, () => openNote(u.id), 'link'), ' '])] : 'Based on no verified notes') : null,
-          m.note ? h('small', {}, btn('Saved to Brain as draft', () => openNote(m.note), 'link')) : null))
-          : h('p', { class: 'empty muted' }, `Start a conversation with ${b.name}. Replies are scripted until a model key is set.`),
-        S.busy ? h('div', { class: 'msg agent muted' }, `${b.name} is answering…`) : null))),
-      h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb)));
+        S.msgs.length ? S.msgs.map((m, i) => chatRow(b, m, S.msgs[i - 1]))
+          : h('div', { class: 'chat-empty' }, tile(b, 72, { float: true }), h('h2', {}, `Talk to ${b.name}`), h('p', { class: 'muted' }, `${b.role}. Replies are scripted until a model key is set.`),
+            h('div', { class: 'chat-sugg' }, [`What can you help me with?`, `Summarize the key notes in the Brain`, `What are the biggest risks you see?`].map((q) => btn(q, () => { S.draft = q; send(); }, 'chip sugg')))),
+        S.busy ? chatTyping(b) : null))),
+      h('button', { type: 'button', class: 'to-latest', id: 'to-latest', 'aria-label': 'Jump to the latest message', onclick: () => { const sc = document.getElementById('scroll'); if (sc) sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' }); } }, icon('up', 16)),
+      h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb), h('div', { class: 'composer-hint muted' }, 'Enter to send · Shift+Enter for a new line')));
   }
   function passport() {
     const b = S.bot; if (!b) return null;
@@ -372,7 +371,8 @@ const overlayRoot = (() => {
         h('span', { class: 'chip' }, b.team || 'General'),
         h('span', { class: 'chip ' + (b.status === 'suspended' ? 'warn' : 'ok') }, b.status === 'suspended' ? 'Suspended' : 'Active'),
         h('span', { class: 'chip agx-modelchip' + (modelOk ? '' : ' warn') }, agxModelLabel(b))),
-      btn([agxGear(15), 'Agent settings'], () => openAgentSettings('general'), 'btn agx-gearbtn'));
+      btn([agxGear(15), 'Agent settings'], () => openAgentSettings('general'), 'btn agx-gearbtn'),
+      h('button', { class: 'ibtn sheet-close', type: 'button', 'aria-label': 'Close details', onclick: () => { S.panel = false; render(); } }, icon('x', 18)));
     let body;
     if (S.tab === 'overview') body = agxOverviewTab(b);
     else if (S.tab === 'activity' || S.tab === 'screen') body = agxActivityTab(b);
@@ -526,7 +526,7 @@ const overlayRoot = (() => {
     const now = Date.now(); let pulsing = false;
     for (const n of nodes) {
       for (const el of [n.el, n.halo]) { el.setAttribute('cx', n.x); el.setAttribute('cy', n.y); } n.label.setAttribute('x', n.x + n.r + 3); n.label.setAttribute('y', n.y + 4);
-      const until = S.pulse[n.id] || 0; if (until > now) { pulsing = true; n.halo.setAttribute('opacity', (((until - now) / 6000) * 0.9).toFixed(2)); n.halo.setAttribute('r', n.r + 6 + 3 * Math.sin(now / 200)); } else n.halo.setAttribute('opacity', 0);
+      const until = S.pulse[n.id] || 0; if (until > now) { pulsing = true; n.halo.setAttribute('opacity', (((until - now) / 6000) * 0.9).toFixed(2)); n.halo.setAttribute('r', n.r + 6); } else n.halo.setAttribute('opacity', 0);
     }
     sim.alpha *= 0.985; if (sim.alpha > 0.03 || sim.drag || pulsing) sim.raf = requestAnimationFrame(tick);
   }
@@ -534,12 +534,12 @@ const overlayRoot = (() => {
     const W = 860, H = 560, s = svg(W, H), deg = {}, byId = {};
     edges.forEach((e) => { deg[e.from] = (deg[e.from] || 0) + 1; deg[e.to] = (deg[e.to] || 0) + 1; });
     nodes.forEach((n, i) => { const a = (2 * Math.PI * i) / Math.max(nodes.length, 1); Object.assign(n, { x: W / 2 + Math.cos(a) * W / 3.2, y: H / 2 + Math.sin(a) * H / 3.2, vx: 0, vy: 0, r: 5 + Math.min(deg[n.id] || 0, 8) }); byId[n.id] = n; });
-    const lines = edges.map(() => sadd(s, 'line', { stroke: '#8FB1FF', 'stroke-opacity': '.28' }));
+    const lines = edges.map(() => sadd(s, 'line', { stroke: 'currentColor', 'stroke-opacity': '.22' }));
     sim = { nodes, edges, lines, byId, W, H, alpha: 1, raf: 0, drag: null };
     nodes.forEach((n) => {
-      const c = nodeColor(n); n.halo = sadd(s, 'circle', { r: n.r + 8, fill: 'none', stroke: '#7FA2FF', 'stroke-width': 2, opacity: 0 });
-      n.el = sadd(s, 'circle', { r: n.r, fill: n.status === 'verified' ? c : '#0B1A33', stroke: c, 'stroke-width': 2, style: 'cursor:pointer' }); sadd(n.el, 'title', {}, `${n.title} (${n.kind}, ${n.status}, ${n.space})`);
-      n.label = sadd(s, 'text', { 'font-size': 10, fill: '#CFE0FF', 'pointer-events': 'none' }, n.title.slice(0, 24));
+      const c = nodeColor(n); n.halo = sadd(s, 'circle', { r: n.r + 8, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2, opacity: 0 });
+      n.el = sadd(s, 'circle', { r: n.r, fill: n.status === 'verified' ? c : 'var(--surface)', stroke: c, 'stroke-width': 2, style: 'cursor:pointer' }); sadd(n.el, 'title', {}, `${n.title} (${n.kind}, ${n.status}, ${n.space})`);
+      n.label = sadd(s, 'text', { 'font-size': 10, fill: 'currentColor', 'pointer-events': 'none' }, n.title.slice(0, 24));
       n.el.addEventListener('pointerdown', (ev) => { if (!sim) return; sim.drag = n; n.moved = 0; ev.preventDefault(); sim.alpha = 0.6; kick(); });
     });
     const at = (ev) => { const r = s.getBoundingClientRect(); return [((ev.clientX - r.left) * W) / (r.width || W), ((ev.clientY - r.top) * H) / (r.height || H)]; };
@@ -620,7 +620,7 @@ const overlayRoot = (() => {
     if (S.orphans) list = list.filter((n) => !(n.links || []).length && !(n.backlinks_count || 0));
     if (S.sortBy === 'title') list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     else if (S.sortBy === 'links') list = [...list].sort((a, b) => ((b.links || []).length + (b.backlinks_count || 0)) - ((a.links || []).length + (a.backlinks_count || 0)));
-    const kindChips = ['', 'note', 'fact', 'decision', 'rule', 'hypothesis'].map((k) => btn(k || 'All', () => { S.kindFilter = k; render(); }, 'chip' + (S.kindFilter === k ? ' ok' : ''), { 'aria-pressed': (S.kindFilter || '') === k }));
+    const kindChips = h('select', { class: 'field brain-sel', 'aria-label': 'Kind filter', onchange: (e) => { S.kindFilter = e.target.value; render(); } }, [['', 'All kinds'], ...['note', 'fact', 'decision', 'rule', 'hypothesis'].map((k) => [k, k])].map(([v, l]) => h('option', { value: v, selected: (S.kindFilter || '') === v }, l)));
     const sortSel = h('select', { class: 'field', style: 'width:auto;font-size:12px', 'aria-label': 'Sort notes', onchange: (e) => { S.sortBy = e.target.value; render(); } },
       [['', 'Recently changed'], ['title', 'Title A-Z'], ['links', 'Most links']].map(([v, l]) => h('option', { value: v, selected: (S.sortBy || '') === v }, l)));
     const tree = h('div', { class: 'tree' }, [...new Set(list.map((n) => n.space))].sort().map((sp) => h('details', { open: true }, h('summary', {}, `${sp} (${list.filter((n) => n.space === sp).length})`),
@@ -632,8 +632,8 @@ const overlayRoot = (() => {
     const drop = h('div', { class: 'drop' }, icon('doc', 18), h('span', { style: 'flex:1' }, 'Drop a file or ', btn('upload', pickFile, 'link')), h('small', { class: 'muted' }, '.md .txt .csv .json .pdf'));
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); }); drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); uploadFile(e.dataTransfer.files[0]); });
-    const left = h('div', {}, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Neurons'], () => { S.graph = !S.graph; S.newNote = false; render(); })), drop,
-      h('div', { style: 'height:8px' }), q, h('div', { class: 'row2', style: 'margin:8px 0' }, ['', 'draft', 'verified'].map((f) => btn(f || 'All', () => { S.filter = f; render(); }, 'chip' + (S.filter === f ? ' ok' : ''), { 'aria-pressed': S.filter === f })), S.space ? btn(`space: ${S.space} ×`, () => { S.space = ''; render(); }, 'chip ok') : null),
+    const left = h('div', { class: 'brain-left' }, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; S.brainPane = 'note'; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Graph'], () => { S.graph = !S.graph; S.newNote = false; render(); }, 'btn brain-toggle')), drop,
+      h('div', { style: 'height:8px' }), q, h('div', { class: 'row2', style: 'margin:8px 0' }, h('select', { class: 'field brain-sel', 'aria-label': 'Status filter', onchange: (e) => { S.filter = e.target.value; render(); } }, [['', 'All statuses'], ['draft', 'Drafts'], ['verified', 'Verified']].map(([v, l]) => h('option', { value: v, selected: (S.filter || '') === v }, l))), S.space ? btn(`space: ${S.space} ×`, () => { S.space = ''; render(); }, 'chip ok') : null),
       h('div', { class: 'row2', style: 'margin:6px 0;flex-wrap:wrap' }, kindChips, btn(S.orphans ? 'Orphans on' : 'Orphans', () => { S.orphans = !S.orphans; render(); }, 'chip' + (S.orphans ? ' ok' : ''), { 'aria-pressed': !!S.orphans }), sortSel),
       list.length ? tree : (S.notes.length ? h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'No note matches the current filters.'), btn('Reset filters', () => { S.kindFilter = ''; S.filter = ''; S.orphans = false; S.space = ''; S.q = ''; S.sortBy = ''; render(); }, 'btn')) : h('p', { class: 'muted' }, 'No notes yet.')));
     let mid; const n = S.note;
@@ -650,8 +650,8 @@ const overlayRoot = (() => {
       const spSel = h('select', { class: 'field', style: 'width:auto', 'aria-label': 'Space filter', onchange: (e) => { S.gSpace = e.target.value; render(); } }, [['', 'All spaces'], ...spaces.map((x) => [x, x])].map(([v, l]) => h('option', { value: v, selected: S.gSpace === v }, l)));
       const zoom = (d) => { S.gzoom = Math.max(0.5, Math.min(2, (S.gzoom || 1) + d)); render(); };
       const zbtns = h('div', { class: 'row2', style: 'width:auto' }, btn('−', () => zoom(-0.2), 'chip', { 'aria-label': 'Zoom out' }), btn('+', () => zoom(0.2), 'chip', { 'aria-label': 'Zoom in' }));
-      mid = h('div', {}, h('h2', {}, 'Live brain'), h('div', { class: 'row2', style: 'margin-bottom:8px' }, sel, stSel, spSel, zbtns, h('span', { class: 'muted', id: 'gcap' }, '')),
-        h('div', { class: 'legend' }, h('span', {}, 'Filled = verified, hollow = draft'), h('span', {}, 'Color = the agent that wrote it'), h('span', {}, 'Drag a neuron. A halo means an agent just read or wrote it.')), bigGraph());
+      mid = h('div', {}, h('h2', {}, 'Brain'), h('div', { class: 'row2', style: 'margin-bottom:8px' }, sel, stSel, spSel, zbtns, h('span', { class: 'muted', id: 'gcap' }, '')),
+        h('div', { class: 'legend' }, h('span', {}, 'Filled = verified · hollow = draft'), h('span', {}, 'Ring = an agent just read or wrote it')), bigGraph());
     } else if (n) {
       const flagged = n.flags.includes('instruction_like') && !n.flags.includes('acknowledged'), ta = h('textarea', { class: 'field', rows: 10 }); ta.value = n.body;
       const reload = async () => { S.versions = await api(`/api/brain/notes/${n.id}/versions`); await loadNotes(); };
@@ -670,7 +670,12 @@ const overlayRoot = (() => {
         h('details', { style: 'margin-top:20px' }, h('summary', { class: 'muted' }, `Version history (${S.versions.length})`), S.versions.map((v) => h('div', { class: 'card', style: 'margin:8px 0' }, h('span', { class: 'mono' }, `v${v.version} · ${when(v.created_at)} · ${v.actor} · ${v.reason} · ${v.status}`), h('div', { class: 'muted' }, v.body.slice(0, 120)),
           btn('Roll back to this version', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/rollback`, { method: 'POST', body: { version: v.version } }); await reload(); }), 'link')))));
     } else mid = S.notes.length ? h('p', { class: 'muted' }, 'Select a note.') : emptyState('graph', 'Your Brain is empty', 'Create notes or load the demo workspace to see the agents memory.', btn([icon('plus', 16), 'New note'], () => { S.newNote = true; render(); }, 'btn primary'));
-    return h('div', { class: 'brain' }, left, h('div', {}, mid), h('div', { id: 'brain-side' }, noteSide(S.note)));
+    const pane = S.brainPane || (isMobile() ? 'list' : (S.graph ? 'graph' : 'list'));
+    const setPane = (p) => { S.brainPane = p; if (p === 'graph') { S.graph = true; S.newNote = false; } if (p === 'list') S.graph = false; render(); };
+    const seg = h('div', { class: 'brain-seg', role: 'tablist', 'aria-label': 'Brain view' }, [['list', 'Notes'], ['graph', 'Graph']].concat(S.note || S.newNote ? [['note', S.newNote ? 'New note' : 'Note']] : []).map(([p, l]) =>
+      h('button', { type: 'button', role: 'tab', class: 'brain-segbtn', 'aria-selected': pane === p ? 'true' : 'false', onclick: () => setPane(p) }, l)));
+    return h('div', { class: 'brain', 'data-pane': pane }, seg, left, h('div', { class: 'brain-mid' }, mid),
+      h('div', { id: 'brain-side', class: 'brain-side' }, h('button', { type: 'button', class: 'btn brain-back', onclick: () => setPane(S.graph ? 'graph' : 'list') }, icon('back', 16), 'Back'), noteSide(S.note)));
   }
 
   // ---------- research ----------
@@ -1536,6 +1541,7 @@ const overlayRoot = (() => {
   const ctlLoadAudit = async () => {
     const d = await api(ctlAuditPath());
     S.audit = d.events || [];
+    S.auditIntegrity = d.integrity || null;
     S.auditTotal = d.total_filtered == null ? S.audit.length : d.total_filtered;
     S.auditOpen = {};
   };
@@ -1585,6 +1591,207 @@ const overlayRoot = (() => {
   };
   const ctlToggleAudit = (id) => { S.auditOpen = S.auditOpen || {}; S.auditOpen[id] = !S.auditOpen[id]; render(); };
   const ctlChevron = (open) => { const v = icon('up', 14); v.style.transform = open ? 'rotate(180deg)' : ''; return v; };
+  const ctlDecide = (a, decision) => run(async () => {
+    await api(`/api/security/approvals/${a.id}/decision`, { method: 'POST', body: { decision, decided_by: 'ui' } });
+    await go('control');
+  });
+
+  // ---- batch 19: dashboard helpers (real data only) ----
+  const ctl2Age = (ts) => {
+    const ms = Date.now() - Date.parse(ts || '');
+    if (!Number.isFinite(ms) || ms < 0) return 'moment';
+    const h = Math.floor(ms / 36e5);
+    return h < 1 ? 'under 1 h' : h < 48 ? h + ' h' : Math.floor(h / 24) + ' days';
+  };
+  const ctl2Kpi = (label, value, sub, tone) => h('div', { class: 'ctl2-kpi' + (tone ? ' ' + tone : '') },
+    h('div', { class: 'ctl2-kpi-label' }, label),
+    h('div', { class: 'ctl2-kpi-value' }, value),
+    h('div', { class: 'ctl2-kpi-sub' }, sub));
+  const ctl2Card = (title, note, ...kids) => h('div', { class: 'ctl2-card' },
+    h('div', { class: 'ctl2-card-head' }, h('b', {}, title), note ? h('span', { class: 'muted ctl2-card-note' }, note) : null),
+    ...kids);
+  const ctl2RiskCounts = () => {
+    const k = { low: 0, medium: 0, high: 0, suspended: 0 };
+    (S.ctlInv || []).forEach((a) => { const lvl = (a.risk && a.risk.level) || 'low'; k[lvl] = (k[lvl] || 0) + 1; });
+    return k;
+  };
+  const ctl2RiskChart = () => {
+    if (S.ctlInv == null) return h('p', { class: 'muted ctl2-empty' }, 'Loading inventory risk…');
+    const k = ctl2RiskCounts(), order = [['low', '#1B7F79'], ['medium', '#B7791F'], ['high', '#B42318'], ['suspended', '#7C8BA5']];
+    const total = order.reduce((n, [lvl]) => n + (k[lvl] || 0), 0);
+    if (!total) return h('p', { class: 'muted ctl2-empty' }, 'No agents in this workspace yet. Risk levels appear once agents exist.');
+    const W = 320, H = 148, barX = 78, barW = 176, max = Math.max(1, ...order.map(([lvl]) => k[lvl] || 0));
+    const s = svg(W, H);
+    order.forEach(([lvl, color], i) => {
+      const y = 16 + i * 32, w = Math.round(((k[lvl] || 0) / max) * barW);
+      sadd(s, 'text', { x: 0, y: y + 10, 'font-size': 11, fill: 'var(--muted)' }, lvl);
+      sadd(s, 'rect', { x: barX, y: y, width: barW, height: 12, rx: 6, fill: 'var(--line)' });
+      if (w > 0) sadd(s, 'rect', { x: barX, y: y, width: Math.max(4, w), height: 12, rx: 6, fill: color });
+      sadd(s, 'text', { x: W - 2, y: y + 10, 'text-anchor': 'end', 'font-size': 12, fill: 'var(--ink)' }, String(k[lvl] || 0));
+    });
+    return s;
+  };
+  const ctl2AuditDays = () => {
+    const counts = {};
+    (S.audit || []).forEach((e) => { const day = String(e.created_at || '').slice(0, 10); if (day) counts[day] = (counts[day] || 0) + 1; });
+    const out = [];
+    for (let i = 13; i >= 0; i--) {
+      const day = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10);
+      out.push({ day, n: counts[day] || 0 });
+    }
+    return out;
+  };
+  const ctl2AuditChart = () => {
+    if (!(S.audit || []).length) return h('p', { class: 'muted ctl2-empty' }, 'No audit events in the loaded window yet.');
+    const days = ctl2AuditDays(), W = 320, H = 130, pad = 14, bw = (W - 2 * pad) / days.length;
+    const max = Math.max(1, ...days.map((d) => d.n));
+    const s = svg(W, H);
+    days.forEach((d, i) => {
+      const barW = Math.max(4, bw - 8), x = pad + i * bw + 4;
+      const hgt = d.n ? Math.max(3, Math.round(((H - 56) * d.n) / max)) : 2;
+      const y = H - 30 - hgt;
+      sadd(s, 'rect', { x, y, width: barW, height: hgt, rx: 3, fill: d.n ? 'var(--accent)' : 'var(--line)' });
+      if (i % 2 === 0) sadd(s, 'text', { x: x + barW / 2, y: H - 12, 'text-anchor': 'middle', 'font-size': 9, fill: 'var(--muted)' }, d.day.slice(5));
+      if (d.n) sadd(s, 'text', { x: x + barW / 2, y: y - 4, 'text-anchor': 'middle', 'font-size': 10, fill: 'var(--ink)' }, String(d.n));
+    });
+    return s;
+  };
+  const ctl2CoverageBars = () => {
+    const items = (S.cov && S.cov.items) || [];
+    if (!items.length) return h('p', { class: 'muted ctl2-empty' }, 'Coverage data is loading.');
+    return h('div', { class: 'ctl2-bars' }, items.map((c) => {
+      const covered = c.status === 'covered', partial = c.status === 'partial';
+      const pct = covered ? 100 : partial ? 50 : 0, tone = covered ? 'ok' : partial ? 'warn' : 'bad';
+      return h('div', { class: 'ctl2-barrow' },
+        h('div', { class: 'ctl2-bar-label' },
+          h('span', { class: 'ctl2-dot ' + tone, 'aria-hidden': 'true' }),
+          h('span', { class: 'ctl2-bar-name', title: c.name }, (String(c.id).startsWith('ASI') ? c.id + ' · ' : '') + c.name)),
+        h('div', { class: 'ctl2-track', role: 'progressbar', 'aria-valuenow': pct, 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-label': c.name + ' coverage' },
+          h('i', { class: 'ctl2-fill ' + tone, style: 'width:' + pct + '%' })),
+        h('span', { class: 'ctl2-bar-status chip ctl-status ' + tone }, c.status));
+    }));
+  };
+  const ctl2AttendanceCount = () => {
+    const inv = S.ctlInv || [];
+    return {
+      unverified: inv.filter((a) => a.trust === 'unverified').length,
+      gaps: inv.filter((a) => (a.accountability || []).length).length,
+      high: inv.filter((a) => a.risk && a.risk.level === 'high').length,
+    };
+  };
+  const ctl2Kpis = () => {
+    const pend = (S.approvals || []).filter((a) => a.status === 'pending');
+    const invSum = S.ctlInvSum, counts = ctl2AttendanceCount();
+    const covItems = (S.cov && S.cov.items) || [];
+    const covered = covItems.filter((c) => c.status === 'covered').length;
+    const partial = covItems.filter((c) => c.status === 'partial').length;
+    const policies = S.policies || [], custom = policies.filter((p) => p.overridden).length;
+    const oldest = pend.length ? ctl2Age(pend[pend.length - 1].created_at) : '';
+    return h('div', { class: 'ctl2-kpis' },
+      ctl2Kpi('Pending approvals', pend.length ? String(pend.length) : String((S.sum || {}).pending_approvals ?? 0),
+        pend.length ? 'oldest open ' + oldest : 'nothing waits for a decision', pend.length ? 'warn' : 'ok'),
+      ctl2Kpi('Suspended agents', String((S.sum || {}).suspended ?? 0),
+        'of ' + ((S.sum || {}).agents ?? '—') + ' agents · switch below', (S.sum || {}).suspended ? 'warn' : 'ok'),
+      ctl2Kpi('High-risk agents', invSum ? String(invSum.high_risk) : '—',
+        invSum ? 'risk score 4+ · ' + invSum.total + ' agents inventoried' : 'inventory is loading', counts.high ? 'bad' : 'ok'),
+      ctl2Kpi('Unverified agents', S.ctlInv == null ? '—' : String(counts.unverified),
+        S.ctlInv == null ? 'inventory is loading' : 'imported from outside, read-only rights', counts.unverified ? 'warn' : 'ok'),
+      ctl2Kpi('Accountability gaps', S.ctlInv == null ? '—' : String(counts.gaps),
+        invSum ? `${invSum.ownerless} no owner · ${invSum.no_sponsor} no sponsor · ${invSum.no_purpose} no purpose` : 'inventory is loading', counts.gaps ? 'warn' : 'ok'),
+      ctl2Kpi('Coverage', covItems.length ? covered + ' / ' + covItems.length : '—',
+        covItems.length ? partial + ' partial · ' + (covItems.length - covered - partial) + ' not covered' : 'coverage is loading',
+        covItems.length && covered === covItems.length ? 'ok' : 'warn'),
+      ctl2Kpi('Custom policies', policies.length ? custom + ' / ' + policies.length : '—',
+        'effects changed from the defaults', custom ? 'info' : 'ok'));
+  };
+  const ctl2MetaStrip = () => h('div', { class: 'ctl2-meta' },
+    [['Agents', (S.sum || {}).agents], ['Memory drafts', (S.sum || {}).drafts], ['Apps connected', (S.sum || {}).apps], ['Audit events', S.auditTotal]]
+      .map(([label, value]) => h('span', { class: 'ctl2-meta-item' }, h('span', { class: 'muted' }, label), h('b', {}, String(value ?? '—')))));
+
+  const ctl2Attention = () => {
+    const inv = S.ctlInv || [], pend = (S.approvals || []).filter((a) => a.status === 'pending');
+    const high = inv.filter((a) => a.risk && a.risk.level === 'high').sort((a, b) => (b.risk.score || 0) - (a.risk.score || 0));
+    const gaps = inv.filter((a) => (a.accountability || []).length);
+    const rows = [];
+    pend.slice(0, 3).forEach((a) => rows.push(h('div', { class: 'ctl2-att-row' },
+      h('span', { class: 'chip warn' }, 'approval'),
+      h('div', { class: 'ctl2-att-main' }, h('b', {}, a.action_type), h('div', { class: 'muted' }, (a.risk_level || '') + ' risk · ' + a.description)),
+      h('div', { class: 'ctl2-att-actions' }, btn('Approve', () => ctlDecide(a, 'approved'), 'link'), btn('Reject', () => ctlDecide(a, 'rejected'), 'link')))));
+    high.slice(0, 3).forEach((a) => rows.push(h('div', { class: 'ctl2-att-row' },
+      h('span', { class: 'chip risk-high' }, 'high risk'),
+      h('div', { class: 'ctl2-att-main' }, h('b', {}, a.name), h('div', { class: 'muted' }, (a.team || 'General') + ' · score ' + ((a.risk && a.risk.score) || 0) + '/10 · ' + a.trust)),
+      h('div', { class: 'ctl2-att-actions' }, btn('Review', () => go('inventory'), 'link')))));
+    gaps.filter((a) => !(a.risk && a.risk.level === 'high')).slice(0, 3).forEach((a) => rows.push(h('div', { class: 'ctl2-att-row' },
+      h('span', { class: 'chip warn' }, 'gaps'),
+      h('div', { class: 'ctl2-att-main' }, h('b', {}, a.name), h('div', { class: 'muted' }, 'missing: ' + (a.accountability || []).join(', ') + ' · ' + (a.team || 'General'))),
+      h('div', { class: 'ctl2-att-actions' }, btn('Assign', () => go('inventory'), 'link')))));
+    const total = pend.length + high.length + gaps.length;
+    return ctl2Card('Needs attention', total ? total + ' item' + (total === 1 ? '' : 's') : 'all clear',
+      rows.length ? h('div', { class: 'ctl2-att-list' }, rows) : h('p', { class: 'muted ctl2-empty' }, 'Nothing needs attention: no pending approvals, no high-risk agents and no accountability gaps.'),
+      total > rows.length ? h('p', { class: 'muted ctl2-more' }, (total - rows.length) + ' more item' + (total - rows.length === 1 ? '' : 's') + ' in the sections below.') : null);
+  };
+  const ctl2TopRisks = () => {
+    const list = (S.ctlInv || []).slice().sort((a, b) => (((b.risk || {}).score) || 0) - (((a.risk || {}).score) || 0)).slice(0, 6);
+    return ctl2Card('Top risks by score', 'Agents ranked by the inventory risk score',
+      list.length ? h('div', { class: 'ctl2-risks' }, list.map((a) => {
+        const score = (a.risk && a.risk.score) || 0, lvl = (a.risk && a.risk.level) || 'low';
+        return h('div', { class: 'ctl2-risk-row' }, tile(a, 26),
+          h('div', { class: 'ctl2-risk-main' }, h('b', {}, a.name), h('div', { class: 'muted ctl2-risk-sub' }, (a.team || 'General') + ' · ' + a.trust + ' · ' + a.status)),
+          h('div', { class: 'ctl2-risk-score' },
+            h('div', { class: 'ctl2-score', role: 'meter', 'aria-valuenow': score, 'aria-valuemin': 0, 'aria-valuemax': 10, 'aria-label': a.name + ' risk score' }, h('i', { style: 'width:' + Math.min(100, score * 10) + '%' })),
+            h('span', { class: 'mono' }, score + '/10')),
+          h('span', { class: 'chip risk-' + lvl }, lvl));
+      })) : h('p', { class: 'muted ctl2-empty' }, 'No agent inventory yet.'),
+      h('div', { class: 'ctl2-card-foot' }, btn('Open inventory', () => go('inventory'), 'link')));
+  };
+  const ctl2Incident = () => h('div', { class: 'ctl2-incident' },
+    h('div', { class: 'ctl2-incident-main' },
+      h('div', { class: 'ctl2-card-head' }, h('b', {}, 'Incident switch'), h('span', { class: 'chip ' + (S.sum.suspended ? 'warn' : 'ok') }, S.sum.suspended ? S.sum.suspended + ' suspended' : 'all agents active')),
+      h('p', { class: 'muted' }, 'Suspends every agent at once: chat, calls and tool use stop. Resume restores them. Both actions are written to the audit log.')),
+    h('div', { class: 'ctl2-incident-actions' },
+      btn(S.panicArm ? 'Click again to suspend all agents' : 'Suspend all agents', () => {
+        if (!S.panicArm) { S.panicArm = true; return render(); }
+        S.panicArm = false;
+        run(async () => { const r = await api('/api/security/panic', { method: 'POST', body: { action: 'suspend_all', reason: 'incident switch' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = `${r.agents} agent(s) suspended.`; });
+      }, S.panicArm ? 'btn primary' : 'btn'),
+      btn('Resume all', () => run(async () => { await api('/api/security/panic', { method: 'POST', body: { action: 'resume_all' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = 'All agents resumed.'; }))));
+
+  // ---- audit trail: one detail renderer for the feed and the full table ----
+  const ctlAuditDetail = (e) => h('div', { class: 'ctl-audit-detail-body' },
+    h('div', { class: 'mono ctl-audit-meta' },
+      h('div', {}, 'id: ' + e.id),
+      h('div', {}, 'seq: ' + e.seq),
+      h('div', {}, 'created_at: ' + e.created_at),
+      h('div', {}, 'org_id: ' + e.org_id),
+      h('div', {}, 'previous_hash: ' + e.previous_hash),
+      h('div', {}, 'event_hash: ' + e.event_hash)),
+    h('div', { class: 'muted ctl-audit-payload-label' }, 'Payload'),
+    h('pre', { class: 'ctl-audit-json' }, JSON.stringify(e.payload, null, 2)));
+  const ctl2FeedRow = (e) => {
+    const open = !!(S.auditOpen || {})[e.id];
+    const toggle = () => ctlToggleAudit(e.id);
+    return h('div', { class: 'ctl2-feed-item' },
+      h('div', { class: 'ctl2-feed-row', tabindex: 0, role: 'button', 'aria-expanded': open ? 'true' : 'false',
+        'aria-label': `Event ${e.event_type} by ${e.actor || 'system'} — show details`, onclick: toggle,
+        onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } } },
+        h('span', { class: 'mono ctl2-feed-time' }, when(e.created_at)),
+        h('span', { class: 'ctl2-feed-type' }, e.event_type),
+        h('span', { class: 'muted ctl2-feed-actor' }, e.actor || 'system'),
+        h('span', { class: 'mono muted ctl2-feed-hash' }, String(e.event_hash || '').slice(0, 10)),
+        h('span', { class: 'ctl-audit-chev' }, ctlChevron(open))),
+      open ? h('div', { class: 'ctl2-feed-detail' }, ctlAuditDetail(e)) : null);
+  };
+  const ctl2AuditTrail = () => {
+    const events = (S.audit || []).slice(0, 15), integ = S.auditIntegrity;
+    const chain = integ
+      ? (integ.valid ? h('span', { class: 'chip ok' }, 'chain valid · ' + integ.checked + ' events') : h('span', { class: 'chip warn' }, 'chain broken'))
+      : h('span', { class: 'chip' }, 'integrity not checked yet');
+    return h('section', { class: 'ctl2-sec', 'aria-label': 'Audit trail' },
+      h('div', { class: 'ctl2-sec-head' }, h('h2', { class: 'ctl2-h2' }, 'Audit trail'), chain, h('span', { class: 'sp' }),
+        btn('Open all events', () => { const el = document.getElementById('ctl2-all-audit'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 'link')),
+      h('p', { class: 'muted ctl2-note' }, 'Newest first. Click a row for the payload and the hash chain fields. The full, filterable log with the SIEM export is in the next section.'),
+      events.length ? h('div', { class: 'ctl2-feed' }, events.map(ctl2FeedRow)) : h('p', { class: 'muted ctl2-empty' }, 'No audit events yet. The first action in this workspace starts the chain.'));
+  };
 
   function ctlCoverage() {
     const cov = S.cov || {}, items = cov.items || [];
@@ -1665,16 +1872,7 @@ const overlayRoot = (() => {
         h('td', {}, e.actor || 'system'),
         h('td', { class: 'mono' }, String(e.event_hash || '').slice(0, 12)),
         h('td', {}, h('span', { class: 'ctl-audit-chev' }, ctlChevron(open)))),
-        open ? h('tr', { class: 'ctl-audit-detail' }, h('td', { colspan: 5 },
-          h('div', { class: 'mono ctl-audit-meta' },
-            h('div', {}, 'id: ' + e.id),
-            h('div', {}, 'seq: ' + e.seq),
-            h('div', {}, 'created_at: ' + e.created_at),
-            h('div', {}, 'org_id: ' + e.org_id),
-            h('div', {}, 'previous_hash: ' + e.previous_hash),
-            h('div', {}, 'event_hash: ' + e.event_hash)),
-          h('div', { class: 'muted ctl-audit-payload-label' }, 'Payload'),
-          h('pre', { class: 'ctl-audit-json' }, JSON.stringify(e.payload, null, 2)))) : null];
+        open ? h('tr', { class: 'ctl-audit-detail' }, h('td', { colspan: 5 }, ctlAuditDetail(e))) : null];
     };
     return [h('h2', {}, 'Audit log'),
       h('p', { class: 'muted' }, 'Hash-linked chain per organisation. Filters run on the server; the export sends the same filters as NDJSON for SIEM tools. Click a row to see the full payload.'),
@@ -1699,24 +1897,47 @@ const overlayRoot = (() => {
 
   function controlView() {
     const pend = (S.approvals || []).filter((a) => a.status === 'pending');
-    const sumCards = h('div', { class: 'cards', style: 'margin-bottom:16px' }, [['Agents', S.sum.agents], ['Suspended', S.sum.suspended], ['Pending approvals', S.sum.pending_approvals], ['Memory drafts', S.sum.drafts], ['Apps connected', S.sum.apps]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l), h('b', { style: 'font-size:22px' }, String(v ?? 0)))));
-    const incident = h('div', { class: 'card', style: 'margin-bottom:16px' }, h('b', {}, 'Incident switch'), h('p', { class: 'muted' }, 'Suspends every agent at once: chat, calls and tool use stop. Resume restores them. Both are written to the audit log.'),
-      h('div', { class: 'row2' }, btn(S.panicArm ? 'Click again to suspend all agents' : 'Suspend all agents', () => { if (!S.panicArm) { S.panicArm = true; return render(); } S.panicArm = false; run(async () => { const r = await api('/api/security/panic', { method: 'POST', body: { action: 'suspend_all', reason: 'incident switch' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = `${r.agents} agent(s) suspended.`; }); }, S.panicArm ? 'btn primary' : 'btn'),
-        btn('Resume all', () => run(async () => { await api('/api/security/panic', { method: 'POST', body: { action: 'resume_all' } }); await loadBots(); S.sum = await api('/api/summary'); S.info = 'All agents resumed.'; }))));
-    return h('div', { class: 'body' }, h('div', { class: 'col' }, sumCards, ctlCoverage(), incident,
+    const header = h('div', { class: 'ctl2-head' },
+      h('div', { class: 'ctl2-headtext' },
+        h('div', { class: 'ctl2-eyebrow' }, 'Governance'),
+        h('h2', { class: 'ctl2-title' }, 'Control'),
+        h('p', { class: 'muted ctl2-sub' }, 'Live posture for this organisation: approvals, agent risk, coverage and the hash-linked audit trail. Every value comes from the server.')),
+      h('div', { class: 'ctl2-headactions' }, btn('Refresh', () => { go('control'); }, 'btn'), btn('Open inventory', () => go('inventory'), 'btn')));
+    const auditDays = ctl2AuditDays(), auditDaysUsed = auditDays.filter((d) => d.n).length;
+    const auditCaption = 'Events per day from the loaded audit window (' + (S.audit || []).length + ' of up to 200 newest events).'
+      + (auditDaysUsed === 1 && (S.audit || []).length ? ' The loaded window covers a single day so far; the chart fills in as the workspace is used.' : '');
+    const charts = h('div', { class: 'ctl2-charts' },
+      ctl2Card('Risk distribution', 'Inventory levels', h('div', { class: 'ctl2-chart' }, ctl2RiskChart()),
+        h('p', { class: 'muted ctl2-caption' }, 'Computed from capabilities, tool grants, trust and criticality — not a model guess.')),
+      ctl2Card('Agentic coverage', 'Self-assessment', h('div', { class: 'ctl2-chart ctl2-chart-tight' }, ctl2CoverageBars()),
+        h('p', { class: 'muted ctl2-caption' }, 'Covered means every mapped control is present; partial means gaps remain. Full details below.')),
+      ctl2Card('Audit volume', 'Last 14 days', h('div', { class: 'ctl2-chart' }, ctl2AuditChart()),
+        h('p', { class: 'muted ctl2-caption' }, auditCaption)));
+    const mid = h('div', { class: 'ctl2-mid' }, ctl2Attention(), ctl2TopRisks());
+    const approvalsSec = h('section', { class: 'ctl2-sec', 'aria-label': 'Approval queue' },
       h('h2', {}, 'Approval queue'), h('p', { class: 'muted' }, 'Approving records a human decision. A tool call only runs when you execute it afterwards.'),
-      pend.length ? pend.map((a) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, a.action_type), ` (${a.risk_level}): ${a.description}`, h('div', { class: 'row2', style: 'margin-top:8px' }, ['approved', 'rejected'].map((d) => btn(d === 'approved' ? 'Approve' : 'Reject', () => run(async () => { await api(`/api/security/approvals/${a.id}/decision`, { method: 'POST', body: { decision: d, decided_by: 'ui' } }); await go('control'); })))))) : h('p', { class: 'muted' }, 'Nothing pending.'),
-      h('h2', {}, 'Tool calls'), S.toolCalls.length ? S.toolCalls.map((t) => h('div', { class: 'card', style: 'margin-bottom:8px' }, h('b', {}, `${t.app}.${t.tool}`), ` as ${botBy(t.bot_id).name}`, h('span', { class: 'chip ' + (['invalidated', 'expired'].includes(t.status) ? 'warn' : ''), style: 'margin-left:8px' }, `${t.status} / approval ${t.approval_status}`), h('div', { class: 'pre' }, JSON.stringify(t.args)), t.payload_hash ? h('div', { class: 'muted mono', style: 'font-size:11px' }, `Approval covers exactly this payload (${t.payload_hash})` + (t.expires_at ? `, valid until ${when(t.expires_at)}` : '')) : null,
-        t.status === 'pending' && t.approval_status === 'approved' ? h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Execute now', () => run(async () => { await api(`/api/tool-calls/${t.approval_id}/execute`, { method: 'POST' }); await go('control'); }), 'btn primary')) : null, t.result ? h('div', { class: 'pre' }, t.result) : null)) : h('p', { class: 'muted' }, 'No tool calls waiting.'),
+      pend.length ? h('div', { class: 'ctl2-list' }, pend.map((a) => h('div', { class: 'card ctl2-item' }, h('b', {}, a.action_type), ` (${a.risk_level}): ${a.description}`, h('div', { class: 'row2', style: 'margin-top:8px' }, ['approved', 'rejected'].map((d) => btn(d === 'approved' ? 'Approve' : 'Reject', () => ctlDecide(a, d))))))) : h('p', { class: 'muted ctl2-empty' }, 'Nothing pending.'));
+    const toolSec = h('section', { class: 'ctl2-sec', 'aria-label': 'Tool calls' },
+      h('h2', {}, 'Tool calls'), S.toolCalls.length ? h('div', { class: 'ctl2-list' }, S.toolCalls.map((t) => h('div', { class: 'card ctl2-item' }, h('b', {}, `${t.app}.${t.tool}`), ` as ${botBy(t.bot_id).name}`, h('span', { class: 'chip ' + (['invalidated', 'expired'].includes(t.status) ? 'warn' : ''), style: 'margin-left:8px' }, `${t.status} / approval ${t.approval_status}`), h('div', { class: 'pre' }, JSON.stringify(t.args)), t.payload_hash ? h('div', { class: 'muted mono', style: 'font-size:11px' }, `Approval covers exactly this payload (${t.payload_hash})` + (t.expires_at ? `, valid until ${when(t.expires_at)}` : '')) : null,
+        t.status === 'pending' && t.approval_status === 'approved' ? h('div', { class: 'row2', style: 'margin-top:8px' }, btn('Execute now', () => run(async () => { await api(`/api/tool-calls/${t.approval_id}/execute`, { method: 'POST' }); await go('control'); }), 'btn primary')) : null, t.result ? h('div', { class: 'pre' }, t.result) : null))) : h('p', { class: 'muted ctl2-empty' }, 'No tool calls waiting.'));
+    const selftestSec = h('section', { class: 'ctl2-sec', 'aria-label': 'Self-test section' },
       h('h2', {}, 'Authorization self-test'), h('p', { class: 'muted' }, "Synthetic probes against this app: capabilities, tool grants, suspended agents, memory spaces, unverified and instruction-like notes. It tests this app's enforcement, not model behavior."),
       h('div', { class: 'row2' }, btn(S.covBusy ? 'Running self-test…' : [icon('flask', 16), 'Run self-test'], ctlRunSelfTest, 'btn', { disabled: !!S.covBusy }), btn('Run finance demo', () => run(async () => { S.demo = await api('/api/demo/finance', { method: 'POST' }); S.test = await api('/api/selftest/latest'); S.cov = await api('/api/coverage'); await go('control'); }))),
       S.demo ? h('div', {}, S.demo.steps.map((x) => h('p', {}, (x.ok ? 'OK: ' : 'FAIL: ') + x.step))) : null,
       S.test && S.test.id ? [h('p', {}, h('b', {}, `${S.test.passed} passed, ${S.test.failed} failed `), btn('Download report', () => run(async () => { await dl(`/api/selftest/${S.test.id}/report.md`, 'selftest-report.md'); }), 'link'), ' ', S.test.share_url ? [h('a', { class: 'link', href: S.test.share_url, target: '_blank', rel: 'noopener noreferrer' }, 'Open public link'), ' ', btn('Copy', () => { navigator.clipboard && navigator.clipboard.writeText(location.origin + S.test.share_url); S.info = 'Link copied. Anyone with it can read this report.'; render(); }, 'link'), ' ', btn('Revoke', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'DELETE' }); S.test = await api('/api/selftest/latest'); }), 'link')] : btn('Create public link', () => run(async () => { await api(`/api/selftest/${S.test.id}/share`, { method: 'POST' }); S.test = await api('/api/selftest/latest'); }), 'link')),
-        h('table', {}, h('tbody', {}, S.test.probes.filter((x) => !x.ok).concat(S.test.probes.filter((x) => x.ok).slice(0, 6)).map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.expected), h('td', {}, x.actual), h('td', {}, x.ok ? 'pass' : 'FAIL')))))] : null,
-      ctlPolicies(),
-      S.funnel ? [h('h2', {}, 'Pipeline'), h('div', { class: 'cards' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'card' }, h('div', { class: 'muted' }, l + ' (30 days)'), h('b', { style: 'font-size:22px' }, String(v || 0))))),
-        S.leads.length ? h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60)))))) : h('p', { class: 'muted' }, 'No leads yet. The public page /welcome has the pilot form.')] : null,
-      ctlAudit()));
+        h('div', { class: 'tbl-wrap' }, h('table', { class: 'ctl-selftest-table' }, h('tbody', {}, S.test.probes.filter((x) => !x.ok).concat(S.test.probes.filter((x) => x.ok).slice(0, 6)).map((x) => h('tr', {}, h('td', {}, x.name), h('td', {}, x.expected), h('td', {}, x.actual), h('td', {}, x.ok ? 'pass' : 'FAIL'))))))] : null);
+    const pipelineSec = S.funnel ? h('section', { class: 'ctl2-sec', 'aria-label': 'Pipeline' },
+      h('h2', {}, 'Pipeline'), h('div', { class: 'ctl2-pipeline' }, [['Page views', S.funnel.last_30_days.welcome_view], ['Pilot clicks', S.funnel.last_30_days.cta_pilot], ['Leads', S.funnel.leads_total], ['Presets applied', S.funnel.last_30_days.preset_applied], ['Upgrade clicks', S.funnel.last_30_days.upgrade_click]].map(([l, v]) => h('div', { class: 'ctl2-mini' }, h('span', { class: 'muted' }, l + ' · 30 days'), h('b', {}, String(v || 0))))),
+      S.leads.length ? h('div', { class: 'tbl-wrap' }, h('table', {}, h('tbody', {}, S.leads.slice(0, 8).map((x) => h('tr', {}, h('td', { class: 'mono' }, when(x.created_at)), h('td', {}, x.name), h('td', {}, x.email), h('td', {}, x.company), h('td', { class: 'muted' }, x.message.slice(0, 60))))))) : h('p', { class: 'muted ctl2-empty' }, 'No leads yet. The public page /welcome has the pilot form.')) : null;
+    return h('div', { class: 'body' }, h('div', { class: 'wide ctl2' },
+      header, ctl2Kpis(), ctl2MetaStrip(), charts, ctl2Incident(), mid,
+      h('div', { class: 'ctl2-two' }, approvalsSec, toolSec),
+      ctl2AuditTrail(),
+      h('section', { id: 'ctl2-all-audit', class: 'ctl2-sec', 'aria-label': 'All audit events' }, ctlAudit()),
+      ctlCoverage(),
+      h('section', { class: 'ctl2-sec', 'aria-label': 'Policies' }, ctlPolicies()),
+      selftestSec,
+      pipelineSec));
   }
 
   // ---------- modals ----------
@@ -1724,8 +1945,8 @@ const overlayRoot = (() => {
     S.modal = 'apps'; S.appOpen = null; S.appTab = 'catalog'; S.appQ = ''; S.appCat = 'All';
     S.menu = false; S.drawer = false; S.err = ''; S.mcpNote = ''; S.mcpBusy = null;
     S.appsLoading = !(S.apps && S.apps.length);
-    render();
-    await run(async () => { try { await Promise.all([loadApps(), loadBots()]); } finally { S.appsLoading = false; syncOverlays(true); } });
+    syncOverlays(true);
+    try { await Promise.all([loadApps(), loadBots()]); } catch (e) { S.err = e.message; } finally { S.appsLoading = false; syncOverlays(true); }
   }
   async function openAgent() { S.modal = 'agent'; S.menu = false; render(); await run(async () => { const t = await api('/api/templates'); S.tmpl = t.filter((x) => x.id); S.caps = (t.find((x) => x.capabilities) || {}).capabilities || []; }); }
   const close = () => { S.modal = null; render(); };
@@ -1735,8 +1956,9 @@ const overlayRoot = (() => {
     if (S.mcpNote === undefined) S.mcpNote = '';
     const apps = S.apps || [], bots = S.bots || [], tab = S.appTab || 'catalog';
     const connected = apps.filter((a) => a.connected), live = apps.filter((a) => a.live);
-    const busy = !!S.mcpBusy, q = S.appQ || '', cat = S.appCat || 'All';
-    // Rebuild the overlay while keeping the modal's scroll position (0 = jump to top for a new view).
+    const q = S.appQ || '', cat = S.appCat || 'All';
+    // Structural refresh only (tab/detail switches and actions that change the connector set).
+    // Everything else patches the existing DOM, so the tree does not flicker or lose scroll.
     const refresh = (top = null) => {
       const old = document.querySelector('.mcp-modal'), keep = old ? old.scrollTop : 0;
       syncOverlays(true);
@@ -1744,15 +1966,9 @@ const overlayRoot = (() => {
       if (next) next.scrollTop = top == null ? keep : top;
     };
     const closeApps = () => { S.modal = null; S.appOpen = null; S.appTab = 'catalog'; S.appQ = ''; S.appCat = 'All'; S.mcpNote = ''; S.mcpBusy = null; S.err = ''; render(); };
-    const setTab = (id) => { S.appTab = id; S.appOpen = null; S.mcpNote = ''; S.err = ''; refresh(0); };
-    const openDetail = (id) => { S.appOpen = id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' }; S.mcpNote = ''; S.err = ''; refresh(0); };
-    const back = () => { S.appOpen = null; S.mcpNote = ''; refresh(0); };
-    // Run an API mutation inside the overlay: busy label, error + success feedback, refresh, keep scroll.
-    const act = (key, fn) => {
-      S.mcpBusy = key; S.err = ''; S.mcpNote = '';
-      refresh();
-      run(fn).then(() => { S.mcpBusy = null; if (S.err) S.mcpNote = ''; refresh(); });
-    };
+    const setTab = (id) => { if (S.mcpBusy) return; S.appTab = id; S.appOpen = null; S.mcpNote = ''; S.err = ''; refresh(0); };
+    const openDetail = (id) => { if (S.mcpBusy) return; S.appOpen = id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' }; S.mcpNote = ''; S.err = ''; refresh(0); };
+    const back = () => { if (S.mcpBusy) return; S.appOpen = null; S.mcpNote = ''; refresh(0); };
     const riskWord = (r) => (r === 'read' ? 'read' : r === 'write' ? 'needs approval' : 'blocked');
     const fmtTool = (n) => `${n} tool${n === 1 ? '' : 's'}`;
     const toolSummary = (a) => {
@@ -1760,111 +1976,171 @@ const overlayRoot = (() => {
       return `${r} read · ${w} ${w === 1 ? 'needs' : 'need'} approval · ${s} blocked`;
     };
     const agentsOf = (a) => bots.filter((b) => (a.grants[b.id] || []).length);
-    const matches = (a) => (tab !== 'catalog' || cat === 'All' || a.category === cat) && `${a.name} ${a.category} ${a.description}`.toLowerCase().includes(q.trim().toLowerCase());
-    const filtered = apps.filter(matches);
+    const visible = (a) => (tab !== 'catalog' || (S.appCat || 'All') === 'All' || a.category === S.appCat) && `${a.name} ${a.category} ${a.description}`.toLowerCase().includes((S.appQ || '').trim().toLowerCase());
+    const filtered = apps.filter(visible);
     const cats = ['All', ...new Set(apps.map((a) => a.category))].sort((x, y) => (x === 'All' ? -1 : y === 'All' ? 1 : x.localeCompare(y)));
     const openApp = S.appOpen ? apps.find((a) => a.id === S.appOpen) : null;
     if (S.appOpen && !openApp) S.appOpen = null;
     const loading = !!S.appsLoading && !apps.length;
+    // Feedback is painted into one persistent notice node instead of rebuilding the overlay.
+    const paintNotice = () => {
+      const el = document.getElementById('mcp-notice');
+      if (!el) return;
+      el.replaceChildren(...(S.err ? [h('div', { class: 'mcp-alert mcp3-alert', role: 'alert' }, S.err)]
+        : S.mcpNote ? [h('div', { class: 'mcp-success mcp3-success' }, S.mcpNote)] : []));
+    };
+    // A button whose label can change while its request runs; the tree around it stays untouched.
+    const actionBtn = (label, cls, handler) => {
+      const t = h('span', {}, label);
+      let b;
+      b = btn([t], () => handler({ b, t }), cls || 'btn');
+      return { b, t };
+    };
+    // One request at a time. Disables only the clicked button, then either patches the notice
+    // (in-place actions) or forces one structural rebuild (opts.reload).
+    const runAction = (key, ref, busyText, fn, opts = {}) => {
+      if (S.mcpBusy) return;
+      S.mcpBusy = key; S.err = ''; S.mcpNote = '';
+      paintNotice();
+      const modal = document.querySelector('.mcp-modal');
+      if (modal) modal.setAttribute('aria-busy', 'true');
+      const idle = ref ? ref.t.textContent : '';
+      if (ref) { ref.b.disabled = true; if (busyText) ref.t.textContent = busyText; }
+      run(fn).then(() => {
+        S.mcpBusy = null;
+        const m = document.querySelector('.mcp-modal');
+        if (m) m.removeAttribute('aria-busy');
+        if (ref) { ref.b.disabled = false; ref.t.textContent = idle; }
+        if (S.err) S.mcpNote = '';
+        if (opts.reload) refresh(); else paintNotice();
+      });
+    };
+    // In-place search/category filtering: no overlay rebuild, so the caret never jumps.
+    const applyFilter = () => {
+      const body = document.getElementById('mcp-body');
+      if (!body) return;
+      const needle = (S.appQ || '').trim().toLowerCase(), mode = body.dataset.mode;
+      let shown = 0, connShown = 0;
+      body.querySelectorAll('.mcp-card').forEach((card) => {
+        const okCat = (S.appCat || 'All') === 'All' || card.dataset.cat === S.appCat;
+        const ok = okCat && (!needle || (card.dataset.search || '').includes(needle));
+        card.hidden = !ok;
+        if (ok) shown++;
+      });
+      body.querySelectorAll('.mcp-conn').forEach((row) => {
+        const ok = !needle || (row.dataset.search || '').includes(needle);
+        row.hidden = !ok;
+        if (ok) connShown++;
+      });
+      const count = document.querySelector('[data-mcp-count]');
+      if (count) count.textContent = mode === 'catalog' ? `${shown} of ${apps.length} apps` : `${connShown} of ${connected.length} connected`;
+      const empty = body.querySelector('[data-mcp-empty]');
+      if (empty) empty.hidden = mode === 'catalog' ? shown > 0 : connShown > 0;
+      const chips = document.querySelectorAll('[data-mcp-cat]');
+      chips.forEach((chip) => chip.setAttribute('aria-pressed', chip.dataset.mcpCat === (S.appCat || 'All') ? 'true' : 'false'));
+    };
+    const resetFilters = () => {
+      S.appQ = ''; S.appCat = 'All';
+      const input = document.querySelector('input[aria-label="Search connectors"]');
+      if (input) input.value = '';
+      applyFilter();
+    };
 
-    const head = h('div', { class: 'mcp-head' },
-      h('div', { class: 'mcp-headtext' }, h('h2', { class: 'mcp-title' }, 'Connect apps'), h('p', { class: 'muted' }, 'Browse the demo catalog, manage per-agent tool grants, or connect a live MCP server over Streamable HTTP.')),
+    const tag = (label, on) => h('span', { class: 'chip mcp3-tag' + (on ? ' on' : '') }, on ? h('i', { class: 'mcp3-tag-dot', 'aria-hidden': 'true' }) : null, label);
+    const head = h('div', { class: 'mcp-head mcp3-head' },
+      h('div', { class: 'mcp-headtext' }, h('h2', { class: 'mcp-title mcp3-title' }, 'Connect apps'), h('p', { class: 'muted mcp3-sub' }, 'Browse the demo catalog, manage per-agent tool grants, or connect a live MCP server over Streamable HTTP.')),
       h('div', { class: 'mcp-headright' },
-        h('span', { class: 'chip' + (connected.length ? ' ok' : '') }, connected.length + ' connected'),
-        h('span', { class: 'chip' + (live.length ? ' ok' : '') }, live.length + ' live MCP'),
+        h('span', { class: 'chip mcp3-count-chip' }, connected.length + ' connected'),
+        h('span', { class: 'chip mcp3-count-chip' }, live.length + ' live MCP'),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Close apps dialog', onclick: closeApps }, icon('x'))));
     const TABS = [['catalog', 'Catalog'], ['mine', 'My connectors'], ['add', 'Add MCP server']];
-    const tabs = h('div', { class: 'tabs mcp-tabs', role: 'tablist' }, TABS.map(([id, label]) =>
+    const tabs = h('div', { class: 'tabs mcp-tabs mcp3-tabs', role: 'tablist' }, TABS.map(([id, label]) =>
       btn(label, () => setTab(id), 'mcp-tab', { role: 'tab', 'aria-selected': tab === id ? 'true' : 'false', 'aria-controls': 'mcp-body' })));
-    const banners = [
-      tab !== 'add' && !openApp ? h('div', { class: 'mcp-banner' }, icon('grid', 16), h('span', {}, 'The catalog apps are a demo and contact no external service. Live MCP servers you add are real and run on your own endpoint.')) : null,
-      S.err ? h('div', { class: 'mcp-alert', role: 'alert' }, S.err) : null,
-      !S.err && S.mcpNote ? h('div', { class: 'mcp-success' }, S.mcpNote) : null];
+    const banner = tab !== 'add' && !openApp ? h('div', { class: 'mcp-banner mcp3-banner' }, icon('grid', 15), h('span', {}, 'The catalog apps are a demo and contact no external service. Live MCP servers you add are real and run on your own endpoint.')) : null;
     const searchEl = h('input', { class: 'mcp-searchinput', placeholder: tab === 'catalog' ? 'Search apps and MCP servers' : 'Search connected apps and servers', value: q, 'aria-label': 'Search connectors' });
-    searchEl.addEventListener('input', () => {
-      S.appQ = searchEl.value;
-      const p = searchEl.selectionStart;
-      refresh();
-      const e = document.querySelector('input[aria-label="Search connectors"]');
-      if (e) { e.focus(); e.setSelectionRange(p, p); }
-    });
-    const toolbar = !openApp && tab !== 'add' ? [
-      h('div', { class: 'mcp-toolbar' }, h('div', { class: 'mcp-search' }, icon('search', 16), searchEl),
-        h('span', { class: 'muted mcp-count' }, tab === 'catalog' ? `${filtered.length} of ${apps.length} apps` : `${filtered.filter((a) => a.connected).length} of ${connected.length} connected`)),
-      tab === 'catalog' ? h('div', { class: 'mcp-cats' }, cats.map((c) => btn(c, () => { S.appCat = c; refresh(); }, 'chip' + (cat === c ? ' ok' : ''), { 'aria-pressed': cat === c ? 'true' : 'false' }))) : null] : [];
-    const skeleton = () => h('div', { class: 'mcp-grid' }, [0, 1, 2].map(() => h('div', { class: 'card mcp-card' },
-      h('span', { class: 'skel', style: 'height:42px;width:42px;border-radius:10px' }), h('span', { class: 'skel', style: 'height:14px;width:60%;margin-top:10px' }),
-      h('span', { class: 'skel', style: 'height:12px;width:92%;margin-top:8px' }), h('span', { class: 'skel', style: 'height:12px;width:74%;margin-top:6px' }))));
-    const resetFilters = () => { S.appQ = ''; S.appCat = 'All'; refresh(); };
+    searchEl.addEventListener('input', () => { S.appQ = searchEl.value; applyFilter(); });
+    const toolbar = !openApp && tab !== 'add' && !loading ? [
+      h('div', { class: 'mcp-toolbar mcp3-toolbar' }, h('div', { class: 'mcp-search mcp3-search' }, icon('search', 16), searchEl),
+        h('span', { class: 'muted mcp-count mcp3-result', 'data-mcp-count': '1' }, tab === 'catalog' ? `${filtered.length} of ${apps.length} apps` : `${apps.filter((a) => a.connected && visible(a)).length} of ${connected.length} connected`)),
+      tab === 'catalog' ? h('div', { class: 'mcp-cats mcp3-cats' }, cats.map((c) => btn(c, () => { S.appCat = c; applyFilter(); }, 'chip mcp3-cat', { 'aria-pressed': cat === c ? 'true' : 'false', 'data-mcp-cat': c }))) : null] : [];
+    const skelLine = (style) => h('span', { class: 'skel mcp3-skel-line', style });
+    const skeleton = () => h('div', { class: 'mcp-grid mcp3-grid mcp3-skel' }, [0, 1, 2].map(() => h('div', { class: 'card mcp-card mcp3-card mcp3-skel-card' },
+      skelLine('height:36px;width:36px;border-radius:8px'), skelLine('height:13px;width:55%;margin-top:12px'),
+      skelLine('height:11px;width:92%;margin-top:12px'), skelLine('height:11px;width:70%;margin-top:7px'))));
+    const skeletonRows = () => h('div', { class: 'mcp3-skel' }, [0, 1, 2].map(() => h('div', { class: 'card mcp-conn mcp3-card mcp3-skel-card mcp3-skel-row' },
+      skelLine('height:36px;width:36px;border-radius:8px'), h('div', { class: 'mcp3-skel-copy' }, skelLine('height:13px;width:45%'), skelLine('height:11px;width:75%;margin-top:8px')))));
 
-    const connectApp = (a) => act('connect:' + a.id, async () => {
+    const connectApp = (a, ref) => runAction('connect:' + a.id, ref, 'Connecting…', async () => {
       await api(`/api/apps/${a.id}/connect`, { method: 'POST' });
       await loadApps();
       S.appOpen = a.id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' };
       S.mcpNote = `${a.name} connected in demo mode. No external service is contacted.`;
-    });
-    const refreshServer = (a) => act('refresh:' + a.id, async () => {
+    }, { reload: true });
+    const refreshServer = (a, ref) => runAction('refresh:' + a.id, ref, 'Refreshing…', async () => {
       const r = await api(`/api/mcp/servers/${a.id}/refresh`, { method: 'POST' });
       await loadApps();
       S.mcpNote = `Tools refreshed for ${a.name}: ${fmtTool((r.tools || []).length)}.`;
-    });
-    const removeServer = (a) => {
+    }, { reload: true });
+    const removeServer = (a, ref) => {
       if (S.mcpBusy) return;
       if (!window.confirm(`Remove the MCP server "${a.name}"? Its tools and every agent grant for it are deleted. This cannot be undone.`)) return;
-      act('remove:' + a.id, async () => { await api(`/api/mcp/servers/${a.id}`, { method: 'DELETE' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `Live MCP server ${a.name} removed.`; });
+      runAction('remove:' + a.id, ref, 'Removing…', async () => { await api(`/api/mcp/servers/${a.id}`, { method: 'DELETE' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `Live MCP server ${a.name} removed.`; }, { reload: true });
     };
-    const disconnectApp = (a) => {
+    const disconnectApp = (a, ref) => {
       if (S.mcpBusy) return;
       if (!window.confirm(`Disconnect "${a.name}"? Every agent grant for this app is deleted. You can reconnect it from the catalog at any time.`)) return;
-      act('disconnect:' + a.id, async () => { await api(`/api/apps/${a.id}/disconnect`, { method: 'POST' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `${a.name} disconnected. Agent grants for it were removed.`; });
+      runAction('disconnect:' + a.id, ref, 'Disconnecting…', async () => { await api(`/api/apps/${a.id}/disconnect`, { method: 'POST' }); S.appOpen = null; S.appTab = 'mine'; await loadApps(); S.mcpNote = `${a.name} disconnected. Agent grants for it were removed.`; }, { reload: true });
     };
 
     const catalogCard = (a) => {
       const agents = agentsOf(a);
-      return h('div', { class: 'card mcp-card' },
-        h('div', { class: 'mcp-card-top' }, appLogo(a, 42), h('div', { class: 'mcp-card-title' }, h('b', { title: a.name }, a.name), h('div', { class: 'muted' }, a.category))),
-        h('div', { class: 'row2' }, h('span', { class: 'chip' + (a.live ? ' ok' : '') }, a.live ? 'Live' : 'Demo'), a.connected ? h('span', { class: 'chip ok' }, 'Connected') : null,
-          a.tools.some((x) => x.risk === 'secret') ? h('span', { class: 'chip warn' }, 'secrets blocked') : null),
+      const connectRef = actionBtn('Connect', 'btn mcp3-cta', (ref) => connectApp(a, ref));
+      return h('div', { class: 'card mcp-card mcp3-card', hidden: !visible(a), 'data-search': `${a.name} ${a.category} ${a.description}`.toLowerCase(), 'data-cat': a.category },
+        h('div', { class: 'mcp-card-top' }, appLogo(a, 36), h('div', { class: 'mcp-card-title' }, h('b', { title: a.name }, a.name), h('div', { class: 'muted' }, a.category))),
+        h('div', { class: 'row2 mcp3-tags' }, tag(a.live ? 'Live' : 'Demo', a.live), a.connected ? tag('Connected', true) : null,
+          a.tools.some((x) => x.risk === 'secret') ? h('span', { class: 'chip mcp3-tag mcp3-warn' }, 'secrets blocked') : null),
         h('p', { class: 'mcp-desc', title: a.description }, a.description || 'No description provided.'),
         h('div', { class: 'mcp-toolcounts' }, toolSummary(a)),
         h('div', { class: 'mcp-card-foot' },
           h('span', { class: 'mcp-status' }, a.connected ? (agents.length ? `${agents.length} agent${agents.length === 1 ? '' : 's'} with grants` : 'Connected · no agent grants yet') : 'Not connected'),
-          a.connected ? btn('Manage grants', () => openDetail(a.id), 'btn primary') : btn('Connect', () => connectApp(a), 'btn primary', { disabled: busy })));
+          a.connected ? btn('Manage grants', () => openDetail(a.id), 'btn mcp3-cta') : connectRef.b));
     };
     const catalogBody = () => {
       if (loading) return skeleton();
-      if (!filtered.length) return h('div', { class: 'mcp-empty' }, icon('search', 34), h('h3', {}, apps.length ? 'No apps match your search' : 'No apps available'),
-        h('p', { class: 'muted' }, apps.length ? `Nothing in the catalog matches "${q}"${cat !== 'All' ? ' in ' + cat : ''}. Try a different search or reset the filters.` : 'The API returned no apps for this workspace. Reload the dialog to try again.'),
-        apps.length ? btn('Reset filters', resetFilters, 'btn primary') : null);
-      return h('div', { class: 'mcp-grid' }, filtered.map(catalogCard));
+      if (!apps.length) return h('div', { class: 'mcp-empty mcp3-empty' }, icon('grid', 30), h('h3', {}, 'No apps available'), h('p', { class: 'muted' }, 'The API returned no apps for this workspace. Reload the dialog to try again.'));
+      return h('div', {},
+        h('div', { class: 'mcp-grid mcp3-grid' }, apps.map(catalogCard)),
+        h('div', { class: 'mcp-empty mcp3-empty', 'data-mcp-empty': '1', hidden: filtered.length > 0 }, icon('search', 30), h('h3', {}, 'No apps match your search'),
+          h('p', { class: 'muted' }, 'Nothing in the catalog matches the current search or category.'), btn('Reset filters', resetFilters, 'btn mcp3-cta')));
     };
 
     const connRow = (a) => {
       const agents = agentsOf(a);
-      return h('div', { class: 'card mcp-conn' },
-        h('div', { class: 'mcp-conn-main' }, appLogo(a, 40),
+      const refreshRef = actionBtn(a.live ? 'Refresh tools' : 'Disconnect', 'btn mcp3-cta mcp3-sm', (ref) => (a.live ? refreshServer(a, ref) : disconnectApp(a, ref)));
+      const removeRef = a.live ? actionBtn('Remove server', 'link mcp-danger mcp3-danger', (ref) => removeServer(a, ref)) : null;
+      return h('div', { class: 'card mcp-conn mcp3-card', 'data-search': `${a.name} ${a.category} ${a.description}`.toLowerCase() },
+        h('div', { class: 'mcp-conn-main' }, appLogo(a, 36),
           h('div', { class: 'mcp-conn-info' },
-            h('div', { class: 'row2' }, h('b', {}, a.name), h('span', { class: 'chip' + (a.live ? ' ok' : '') }, a.live ? 'Live MCP server' : 'Demo app'), a.live ? null : h('span', { class: 'chip' }, a.category)),
+            h('div', { class: 'row2' }, h('b', {}, a.name), tag(a.live ? 'Live MCP server' : 'Demo app', a.live), a.live ? null : h('span', { class: 'chip mcp3-tag' }, a.category)),
             h('div', { class: 'muted mcp-conn-desc' }, a.description || 'No description provided.'),
-            h('div', { class: 'row2' }, h('span', { class: 'chip' }, fmtTool(a.tools.length)), h('span', { class: 'muted' }, toolSummary(a)))),
-          h('div', { class: 'mcp-conn-actions' }, btn('Manage grants', () => openDetail(a.id), 'btn primary'),
-            a.live ? btn(busy && S.mcpBusy === 'refresh:' + a.id ? 'Refreshing…' : 'Refresh tools', () => refreshServer(a), 'btn', { disabled: busy })
-                   : btn('Disconnect', () => disconnectApp(a), 'btn', { disabled: busy }),
-            a.live ? btn('Remove server', () => removeServer(a), 'link mcp-danger', { disabled: busy }) : null)),
+            h('div', { class: 'row2' }, h('span', { class: 'chip mcp3-tag' }, fmtTool(a.tools.length)), h('span', { class: 'muted' }, toolSummary(a)))),
+          h('div', { class: 'mcp-conn-actions' }, btn('Manage grants', () => openDetail(a.id), 'btn mcp3-cta'),
+            refreshRef.b, removeRef ? removeRef.b : null)),
         h('div', { class: 'mcp-conn-agents' }, h('span', {}, 'With grants:'),
           agents.length ? agents.map((b) => h('span', { class: 'row2 mcp-agentchip' }, tile(b, 20), b.name)) : h('span', { class: 'muted' }, 'no agent yet — open Manage grants to assign tools')));
     };
     const mineBody = () => {
-      if (loading) return skeleton();
-      if (!connected.length) return h('div', { class: 'mcp-empty' }, icon('grid', 34), h('h3', {}, 'No connectors yet'),
+      if (loading) return skeletonRows();
+      if (!connected.length) return h('div', { class: 'mcp-empty mcp3-empty' }, icon('grid', 30), h('h3', {}, 'No connectors yet'),
         h('p', { class: 'muted' }, 'Demo catalog apps connect instantly and contact no external service. Live MCP servers you add are real and run on your own endpoint.'),
-        h('div', { class: 'row2', style: 'justify-content:center' }, btn('Browse catalog', () => setTab('catalog'), 'btn primary'), btn('Add MCP server', () => setTab('add'), 'btn')));
-      const rows = filtered.filter((a) => a.connected);
-      if (!rows.length) return h('div', { class: 'mcp-empty' }, icon('search', 34), h('h3', {}, 'No connectors match your search'),
-        h('p', { class: 'muted' }, `Nothing connected matches "${q}".`), btn('Reset search', resetFilters, 'btn primary'));
+        h('div', { class: 'row2', style: 'justify-content:center' }, btn('Browse catalog', () => setTab('catalog'), 'btn mcp3-cta'), btn('Add MCP server', () => setTab('add'), 'btn mcp3-cta')));
+      const rows = connected.filter((a) => visible(a));
       const liveRows = rows.filter((a) => a.live), demoRows = rows.filter((a) => !a.live);
-      return h('div', {}, liveRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Live MCP servers'), liveRows.map(connRow)) : null,
-        demoRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Demo catalog apps'), demoRows.map(connRow)) : null);
+      return h('div', { class: 'mcp3-conns' },
+        liveRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Live MCP servers'), liveRows.map(connRow)) : null,
+        demoRows.length ? h('div', { class: 'mcp-section' }, h('h3', {}, 'Demo catalog apps'), demoRows.map(connRow)) : null,
+        h('div', { class: 'mcp-empty mcp3-empty', 'data-mcp-empty': '1', hidden: rows.length > 0 }, icon('search', 30), h('h3', {}, 'No connectors match your search'),
+          h('p', { class: 'muted' }, 'Try a different search.'), btn('Reset search', resetFilters, 'btn mcp3-cta')));
     };
 
     const addBody = () => {
@@ -1875,31 +2151,30 @@ const overlayRoot = (() => {
       nm.addEventListener('input', () => { m.name = nm.value; });
       url.addEventListener('input', () => { m.url = url.value; });
       tk.addEventListener('input', () => { m.token = tk.value; });
-      const field = (label, inp) => h('label', { class: 'mcp-field' }, h('span', {}, label), inp);
-      const submit = () => {
+      const field = (label, inp) => h('label', { class: 'mcp-field mcp3-field' }, h('span', {}, label), inp);
+      const addRef = actionBtn('Add server', 'btn mcp3-primary', (ref) => {
         if (S.mcpBusy) return;
         const name = (m.name || '').trim(), u = (m.url || '').trim();
-        if (name.length < 2) { S.err = 'The server name needs at least 2 characters.'; S.mcpNote = ''; refresh(); return; }
-        if (!/^https?:\/\//i.test(u)) { S.err = 'The server URL must start with https:// (or http:// only when this deployment allows insecure test servers).'; S.mcpNote = ''; refresh(); return; }
-        act('add', async () => {
+        if (name.length < 2) { S.err = 'The server name needs at least 2 characters.'; S.mcpNote = ''; paintNotice(); return; }
+        if (!/^https?:\/\//i.test(u)) { S.err = 'The server URL must start with https:// (or http:// only when this deployment allows insecure test servers).'; S.mcpNote = ''; paintNotice(); return; }
+        runAction('add', ref, 'Connecting…', async () => {
           const r = await api('/api/mcp/servers', { method: 'POST', body: { name, url: u, token: (m.token || '').trim() || undefined } });
           S.mcp = { name: '', url: '', token: '' };
           await loadApps();
           S.appTab = 'catalog'; S.appOpen = r.id; S.tcall = { bot: '', tool: '', args: '{}', out: '', outStatus: '' };
           S.mcpNote = `Live MCP server added with ${fmtTool((r.tools || []).length)}.`;
-        });
-      };
-      const facts = h('aside', { class: 'card mcp-add-card' }, h('b', {}, 'What this connects to'),
-        h('ul', { class: 'mcp-facts' },
+        }, { reload: true });
+      });
+      const facts = h('aside', { class: 'card mcp-add-card mcp3-card' }, h('b', {}, 'What this connects to'),
+        h('ul', { class: 'mcp-facts mcp3-facts' },
           h('li', {}, h('span', { class: 'dicon' }, icon('panel', 15)), h('span', {}, h('b', {}, 'Streamable HTTP'), 'MCP servers that answer JSON-RPC over HTTP. Their tools are discovered when you add the server; every tool counts as a write unless the server marks it read-only.')),
           h('li', {}, h('span', { class: 'dicon' }, icon('shield', 15)), h('span', {}, h('b', {}, 'Encrypted token'), 'A bearer token is encrypted at rest and never shown again. Token storage needs CFA_SECRET_KEY on the deployment.')),
           h('li', {}, h('span', { class: 'dicon' }, icon('x', 15)), h('span', {}, h('b', {}, 'Not supported'), 'OAuth and legacy SSE-only servers. Secret-looking tools are always blocked by policy.'))));
-      return h('div', { class: 'mcp-add-grid' },
-        h('div', { class: 'card mcp-add-card' }, h('h3', { style: 'margin:0' }, 'Add a live MCP server'),
+      return h('div', { class: 'mcp-add-grid mcp3-add-grid' },
+        h('div', { class: 'card mcp-add-card mcp3-card' }, h('h3', { style: 'margin:0' }, 'Add a live MCP server'),
           h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, 'The server must speak MCP over Streamable HTTP. Shewiun discovers its tools, encrypts the bearer token and never shows it again.'),
           field('Name', nm), field('Server URL', url), field('Bearer token (optional)', tk),
-          h('div', { class: 'row2' }, btn(S.mcpBusy === 'add' ? 'Connecting and discovering tools…' : 'Add server', submit, 'btn primary', { disabled: busy }),
-            h('span', { class: 'muted', style: 'font-size:12px' }, 'Discovery can take a few seconds.'))),
+          h('div', { class: 'row2' }, addRef.b, h('span', { class: 'muted', style: 'font-size:12px' }, 'Discovery can take a few seconds.'))),
         facts);
     };
 
@@ -1907,37 +2182,44 @@ const overlayRoot = (() => {
       const t = S.tcall, callTools = a.tools.filter((x) => x.risk !== 'secret'), grantable = callTools.length;
       if (!callTools.some((x) => x.name === t.tool)) t.tool = grantable ? callTools[0].name : '';
       if (!bots.some((b) => b.id === t.bot)) t.bot = bots.length ? bots[0].id : '';
-      const legend = h('div', { class: 'mcp-legend' },
-        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip ok' }, 'read'), h('span', { class: 'muted' }, 'runs immediately')),
-        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip warn' }, 'write'), h('span', { class: 'muted' }, 'waits for a human approval')),
-        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip risk-high' }, 'secret'), h('span', { class: 'muted' }, 'can never be granted (blocked by policy)')));
-      const matrix = a.tools.length ? h('div', { class: 'tbl-wrap mcp-matrix-wrap' }, h('table', { class: 'mcp-matrix' },
+      const legend = h('div', { class: 'mcp-legend mcp3-legend' },
+        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip mcp3-risk mcp3-risk-read' }, 'read'), h('span', { class: 'muted' }, 'runs immediately')),
+        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip mcp3-risk mcp3-risk-write' }, 'write'), h('span', { class: 'muted' }, 'waits for a human approval')),
+        h('span', { class: 'mcp-legend-item' }, h('span', { class: 'chip mcp3-risk mcp3-risk-secret' }, 'secret'), h('span', { class: 'muted' }, 'can never be granted (blocked by policy)')));
+      const matrix = a.tools.length ? h('div', { class: 'tbl-wrap mcp-matrix-wrap mcp3-matrix-wrap' }, h('table', { class: 'mcp-matrix mcp3-matrix' },
         h('thead', {}, h('tr', {}, h('th', {}, 'Agent'), a.tools.map((x) => h('th', {}, x.name, h('div', { class: 'mcp-risklabel' }, riskWord(x.risk)))), h('th', {}, 'Grants'))),
         h('tbody', {}, bots.map((b) => {
           const init = a.grants[b.id] || [];
           const switches = a.tools.map((x) => h('input', { type: 'checkbox', role: 'switch', value: x.name, checked: init.includes(x.name), disabled: x.risk === 'secret',
             title: x.risk === 'secret' ? 'Secret-looking tools can never be granted (policy: secrets.read is denied).' : `${x.name}: ${riskWord(x.risk)}`,
             'aria-label': `${b.name} · ${x.name} (${riskWord(x.risk)})` }));
-          const countEl = h('span', { class: 'muted mcp-count' }, `${init.length} of ${grantable} granted`);
+          const countEl = h('span', { class: 'muted mcp-count mcp3-grantcount' }, `${init.length} of ${grantable} granted`);
           const syncCount = () => { countEl.textContent = `${switches.filter((i) => i.checked).length} of ${grantable} granted`; };
           switches.forEach((i) => i.addEventListener('change', syncCount));
           const key = 'grant:' + a.id + ':' + b.id;
-          const save = () => act(key, async () => {
+          const saveRef = actionBtn('Save', 'btn mcp3-cta mcp3-sm', (ref) => runAction(key, ref, 'Saving…', async () => {
             const r = await api(`/api/bots/${b.id}/apps/${a.id}`, { method: 'PUT', body: { tools: switches.filter((i) => i.checked).map((i) => i.value) } });
-            await loadApps();
+            a.grants[b.id] = r.tools || [];
             S.mcpNote = `Grants for ${b.name} saved (${fmtTool((r.tools || []).length)}) and written to the audit log.`;
-          });
+          }));
           const allRead = () => { switches.forEach((i, ix) => { if (a.tools[ix].risk === 'read') i.checked = true; }); syncCount(); };
           return h('tr', {}, h('td', {}, h('span', { class: 'row2' }, tile(b, 24), b.name)),
-            switches.map((i) => h('td', {}, h('label', { class: 'mcp-switch' }, i, h('span', { class: 'mcp-track' }, h('span', { class: 'mcp-knob' }))))),
-            h('td', {}, h('div', { class: 'mcp-agentacts' }, countEl, btn(S.mcpBusy === key ? 'Saving…' : 'Save', save, 'btn', { disabled: busy }), btn('All read', allRead, 'link'))));
+            switches.map((i) => h('td', {}, h('label', { class: 'mcp-switch mcp3-switch' }, i, h('span', { class: 'mcp-track mcp3-track' }, h('span', { class: 'mcp-knob mcp3-knob' }))))),
+            h('td', {}, h('div', { class: 'mcp-agentacts mcp3-agentacts' }, countEl, saveRef.b, btn('All read', allRead, 'link mcp3-link'))));
         })))) : h('p', { class: 'muted' }, 'This connector exposes no tools.');
       const agentSel = h('select', { class: 'field', 'aria-label': 'Agent for test call', onchange: (e) => { t.bot = e.target.value; } }, bots.map((b) => h('option', { value: b.id, selected: b.id === t.bot }, b.name)));
       const toolSel = h('select', { class: 'field', 'aria-label': 'Tool for test call', onchange: (e) => { t.tool = e.target.value; } }, callTools.map((x) => h('option', { value: x.name, selected: x.name === t.tool }, `${x.name} (${riskWord(x.risk)})`)));
       const args = h('textarea', { class: 'field', rows: 2, 'aria-label': 'Arguments as JSON' });
       args.value = t.args;
       args.addEventListener('input', () => { t.args = args.value; });
-      const runCall = () => act('call:' + a.id, async () => {
+      const outSlot = h('div', { class: 'mcp3-tryout-slot' });
+      const paintOut = () => {
+        outSlot.replaceChildren(...(t.out ? [h('div', { class: 'mcp-tryout mcp3-tryout' },
+          h('div', { class: 'row2' }, h('span', { class: 'chip mcp3-tag' + (t.outStatus === 'pending_approval' ? ' warn' : ' on') }, t.outStatus === 'pending_approval' ? 'waiting for approval' : 'completed'), t.outMeta ? h('span', { class: 'muted mcp3-outmeta' }, t.outMeta) : null),
+          h('div', { class: 'pre mcp3-pre' }, t.out))] : []));
+      };
+      paintOut();
+      const runRef = actionBtn('Run call', 'btn mcp3-primary', (ref) => runAction('call:' + a.id, ref, 'Running…', async () => {
         let ar = {};
         try { ar = JSON.parse(t.args || '{}'); } catch { throw new Error('Arguments must be valid JSON.'); }
         const r = await api(`/api/bots/${t.bot}/tools`, { method: 'POST', body: { app: a.id, tool: t.tool, args: ar } });
@@ -1945,33 +2227,32 @@ const overlayRoot = (() => {
         t.outStatus = r.status === 'pending_approval' ? 'pending_approval' : 'completed';
         t.outMeta = `${agentName} · ${a.id}.${t.tool}`;
         t.out = r.status === 'pending_approval' ? `Waiting for approval (${(r.approval || {}).id || 'approval'}). Approve it in Control, then execute. Nothing was executed.` : (r.result || 'The call completed without a result.');
-      });
-      const actions = a.live
-        ? [btn('Refresh tools', () => refreshServer(a), 'btn', { disabled: busy }), btn('Remove server', () => removeServer(a), 'link mcp-danger', { disabled: busy })]
-        : [btn('Disconnect', () => disconnectApp(a), 'link mcp-danger', { disabled: busy })];
-      return h('div', { class: 'mcp-detail' },
-        h('div', { class: 'mcp-backrow' }, btn('Back', back, 'link'), h('span', { class: 'sp' }), actions),
-        h('div', { class: 'mcp-apphead' }, appLogo(a, 44),
+        paintOut();
+      }));
+      const refreshRef = a.live ? actionBtn('Refresh tools', 'btn mcp3-cta mcp3-sm', (ref) => refreshServer(a, ref)) : null;
+      const removeRef = actionBtn(a.live ? 'Remove server' : 'Disconnect', 'link mcp-danger mcp3-danger', (ref) => (a.live ? removeServer(a, ref) : disconnectApp(a, ref)));
+      return h('div', { class: 'mcp-detail mcp3-detail' },
+        h('div', { class: 'mcp-backrow mcp3-backrow' }, btn('Back', back, 'link mcp3-link'), h('span', { class: 'sp' }), refreshRef ? refreshRef.b : null, removeRef.b),
+        h('div', { class: 'mcp-apphead mcp3-apphead' }, appLogo(a, 40),
           h('div', { class: 'mcp-apptitle' }, h('b', {}, a.name),
-            h('div', { class: 'row2' }, h('span', { class: 'chip' + (a.live ? ' ok' : '') }, a.live ? 'Live MCP server' : 'Demo app'), h('span', { class: 'chip ok' }, 'Connected'), a.live ? null : h('span', { class: 'chip' }, a.category)))),
-        h('p', { class: 'muted', style: 'margin:0' }, a.description || 'No description provided.'),
+            h('div', { class: 'row2' }, tag(a.live ? 'Live MCP server' : 'Demo app', a.live), tag('Connected', true), a.live ? null : h('span', { class: 'chip mcp3-tag' }, a.category)))),
+        h('p', { class: 'muted mcp3-desc', style: 'margin:0' }, a.description || 'No description provided.'),
         h('h3', {}, 'Agent tool grants'),
-        h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, 'Each agent needs an explicit grant per tool. Read tools run immediately; write tools create an approval request; secret-looking tools can never be granted.'),
+        h('p', { class: 'muted mcp3-help', style: 'margin:0;font-size:13px' }, 'Each agent needs an explicit grant per tool. Read tools run immediately; write tools create an approval request; secret-looking tools can never be granted.'),
         legend, matrix,
-        h('div', { class: 'card mcp-try' }, h('h3', {}, 'Try a call'),
-          h('p', { class: 'muted', style: 'margin:0;font-size:13px' }, a.live ? 'Runs against the live MCP server. Read tools return immediately; write tools wait for a human approval in Control.' : 'Demo call: no external service is contacted. Read tools return sample data; write tools create a real approval request.'),
-          h('div', { class: 'mcp-trygrid' }, agentSel, toolSel), args,
-          h('div', { class: 'row2' }, btn(S.mcpBusy === 'call:' + a.id ? 'Running…' : 'Run call', runCall, 'btn primary', { disabled: busy || !grantable }),
-            h('span', { class: 'muted', style: 'font-size:12px' }, grantable ? 'The call is audited as this agent.' : 'This connector has no callable tools.')),
-          t.out ? h('div', { class: 'mcp-tryout' },
-            h('div', { class: 'row2' }, h('span', { class: 'chip ' + (t.outStatus === 'pending_approval' ? 'warn' : 'ok') }, t.outStatus === 'pending_approval' ? 'waiting for approval' : 'completed'), t.outMeta ? h('span', { class: 'muted' }, t.outMeta) : null),
-            h('div', { class: 'pre' }, t.out)) : null));
+        h('div', { class: 'card mcp-try mcp3-card mcp3-try' }, h('h3', {}, 'Try a call'),
+          h('p', { class: 'muted mcp3-help', style: 'margin:0;font-size:13px' }, a.live ? 'Runs against the live MCP server. Read tools return immediately; write tools wait for a human approval in Control.' : 'Demo call: no external service is contacted. Read tools return sample data; write tools create a real approval request.'),
+          h('div', { class: 'mcp-trygrid mcp3-trygrid' }, agentSel, toolSel), args,
+          h('div', { class: 'row2' }, runRef.b, h('span', { class: 'muted', style: 'font-size:12px' }, grantable ? 'The call is audited as this agent.' : 'This connector has no callable tools.')),
+          outSlot));
     };
 
     const body = openApp ? detailBody(openApp) : tab === 'mine' ? mineBody() : tab === 'add' ? addBody() : catalogBody();
+    const notice = S.err ? h('div', { class: 'mcp-alert mcp3-alert', role: 'alert' }, S.err) : S.mcpNote ? h('div', { class: 'mcp-success mcp3-success' }, S.mcpNote) : null;
     return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) closeApps(); } },
-      h('div', { class: 'modal mcp-modal', role: 'dialog', 'aria-label': 'Connect apps and MCP servers' },
-        head, tabs, banners, toolbar, h('div', { id: 'mcp-body' }, body)));
+      h('div', { class: 'modal mcp-modal mcp3-modal', role: 'dialog', 'aria-label': 'Connect apps and MCP servers' },
+        head, tabs, h('div', { id: 'mcp-notice', class: 'mcp3-notice' }, notice), banner, toolbar,
+        h('div', { id: 'mcp-body', 'data-mode': openApp ? 'detail' : tab }, body)));
   }
   function agentModal() {
     const d = S.ag, t = S.tmpl.find((x) => x.id === d.template) || { scopes: [] };
@@ -2012,7 +2293,18 @@ const overlayRoot = (() => {
   }
   function mobileBar() {
     return h('div', { class: 'mbar' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', onclick: () => { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
+      h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
       h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Connect apps', onclick: openApps }, icon('grid')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus')));
+  }
+  // Bottom tab bar for phones: the places people use most, one tap away. "Agents" opens the agent list when you are
+  // already in a chat; "More" opens the full menu. Hidden by CSS above 760px and while the keyboard is open.
+  function mobileTabs() {
+    const tab = (v, label, ic) => h('button', { type: 'button', class: 'mtab', 'aria-current': S.view === v ? 'page' : false,
+      onclick: () => { S.panel = false; if (v === 'chat' && S.view === 'chat') { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } else { S.drawer = false; go(v); } } }, icon(ic, 22), h('span', {}, label));
+    const pend = (S.sum && S.sum.approvals) || 0;
+    return h('nav', { class: 'mtabs', 'aria-label': 'Main navigation' }, tab('chat', 'Agents', 'chat'), tab('council', 'Council', 'scales'), tab('brain', 'Brain', 'graph'),
+      h('button', { type: 'button', class: 'mtab', 'aria-current': S.view === 'control' ? 'page' : false, onclick: () => { S.panel = false; S.drawer = false; go('control'); } }, icon('shield', 22), h('span', {}, 'Control'), pend ? h('i', { class: 'mtab-dot', 'aria-label': pend + ' pending' }) : null),
+      h('button', { type: 'button', class: 'mtab', 'aria-expanded': S.drawer, onclick: () => { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } }, icon('menu', 22), h('span', {}, 'More')));
   }
   // model editor shared by the agent panel and the agent settings overlay.
   // An agent with no live model says "Model must be configured" instead of pretending.
@@ -2288,6 +2580,28 @@ const overlayRoot = (() => {
   function agxModelSection(b, st) {
     return agxCard('Model', modelEditor(b));
   }
+  // Customise the figure of one agent: pixel symbol, body colour and figure shape. Saved through PUT /api/bots/{id}/look.
+  function agxLookCard(b, st) {
+    const base = lookOf(b);
+    const cur = st.look || (st.look = { icon: base.sym, color: base.body, figure: base.figure });
+    const dirty = cur.icon !== base.sym || cur.color.toLowerCase() !== base.body.toLowerCase() || cur.figure !== base.figure;
+    const set = (k, v) => { cur[k] = v; syncOverlays(true); };
+    const pick = (label, pressed, onclick, kids, cls, style) => h('button', { type: 'button', class: 'look-opt ' + (cls || ''), style: style || false, 'aria-label': label, title: label, 'aria-pressed': pressed ? 'true' : 'false', onclick }, kids);
+    const custom = h('input', { type: 'color', class: 'look-color', value: cur.color, 'aria-label': 'Custom colour' });
+    custom.addEventListener('change', () => set('color', custom.value));
+    const save = btn(st.busy === 'look' ? 'Saving…' : 'Save figure', () => agxAct('look', async () => {
+      await api(`/api/bots/${b.id}/look`, { method: 'PUT', body: { icon: cur.icon, color: cur.color, figure: cur.figure } });
+      st.look = null; await loadBots(); render(); return 'Figure updated.'; }), 'btn primary', { disabled: !!st.busy || !dirty });
+    return agxCard('Figure', [
+      h('div', { class: 'look' },
+        h('div', { class: 'look-preview' }, tile(Object.assign({}, b, { icon: cur.icon, color: cur.color, figure: cur.figure }), 96, { float: true })),
+        h('div', { class: 'look-controls' },
+          h('div', { class: 'look-group' }, h('span', { class: 'look-label' }, 'Symbol'), h('div', { class: 'look-grid' }, SYMBOLS.map((s) => pick(s, cur.icon === s, () => set('icon', s), symbolSvg(s, 22))))),
+          h('div', { class: 'look-group' }, h('span', { class: 'look-label' }, 'Colour'), h('div', { class: 'look-grid' }, AV_COLORS.map((c) => pick(c, cur.color.toLowerCase() === c.toLowerCase(), () => set('color', c), null, 'look-sw', 'background:' + c)), custom)),
+          h('div', { class: 'look-group' }, h('span', { class: 'look-label' }, 'Figure'), h('div', { class: 'look-grid' }, FIGURES.map((f) => pick(FIGURE_LABEL[f], cur.figure === f, () => set('figure', f), FIGURE_LABEL[f], 'look-fig')))),
+          h('div', { class: 'row2' }, save, dirty ? btn('Reset', () => { st.look = null; syncOverlays(true); }, 'btn') : null))),
+    ]);
+  }
   function agxGeneralSection(b, st) {
     const name = h('input', { class: 'field agx-nameinput', maxlength: 40, value: st.name || b.name, 'aria-label': 'Agent name', style: 'flex:1;min-width:180px' });
     const rename = () => {
@@ -2315,8 +2629,8 @@ const overlayRoot = (() => {
         agxRow('Name', h('div', { class: 'row2' }, name, renameBtn)),
         agxRow('Role', h('span', {}, b.role), 'Roles come from the agent template and do not change after the agent is created.'),
         agxRow('Team', h('span', {}, b.team || 'General'), 'The team is set when the agent is created.'),
-        agxRow('Icon & colour', h('span', { class: 'row2' }, tile(b, 26), h('span', { class: 'mono' }, b.color || '—')), 'The face is drawn from the agent name; the icon and colour are set at creation.'),
       ]),
+      agxLookCard(b, st),
       agxModelSection(b, st),
       agxCard('Criticality', [
         agxRow('Criticality', h('div', { class: 'row2' }, crit, metaBtn), 'How much review this agent needs before it acts: low, medium or high.'),
@@ -2990,6 +3304,7 @@ const overlayRoot = (() => {
     return h('div', { class: 'scrim set2-scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) closeS(); } },
       h('div', { class: 'modal set2-modal', role: 'dialog', 'aria-label': 'Settings' },
         h('div', { class: 'set2-head' },
+          h('img', { class: 'set2-logo', src: '/static/icon.png', alt: '', width: 36, height: 36 }),
           h('div', { class: 'set2-headtext' }, h('h2', { class: 'set2-title' }, 'Settings'), h('p', { class: 'set2-sub' }, 'Workspace configuration for models, search, access and data.')),
           h('div', { class: 'set2-headbtns' }, btn('Reload', settingsForm(() => loadSettingsData()), 'chip', { 'aria-label': 'Reload settings data' }), btn([icon('x', 16)], closeS, 'chip set2-close', { 'aria-label': 'Close settings' }))),
         h('div', { class: 'set2-body' }, nav,
@@ -3104,7 +3419,7 @@ const overlayRoot = (() => {
 
   // ---------- organisation ----------
   async function loadOrg() {
-    S.org = { members: [], invitations: [], revenue: null, announcements: [], metrics: null };
+    S.org = Object.assign({ members: [], invitations: [], revenue: null, announcements: [], metrics: null, invoices: null }, S.org && S.orgKeep ? { invoices: S.org.invoices } : {});
     try {
       const m = await api('/api/org/members');
       S.org.members = (m && m.members) || [];
@@ -3113,95 +3428,114 @@ const overlayRoot = (() => {
     try { S.org.revenue = await api('/api/org/revenue'); } catch {}
     try { S.org.announcements = ((await api('/api/announcements')).announcements) || []; } catch {}
     try { S.org.metrics = await api('/api/admin/metrics'); } catch {}
+    S.orgKeep = true;
     render();
   }
+  async function loadInsights() {
+    S.org.insights = 'loading'; render();
+    try { const [sum, leads] = await Promise.all([api('/api/events/summary'), api('/api/leads')]); S.org.insights = { sum, leads }; }
+    catch (e) { S.org.insights = { sum: { operator: false, funnel: [] }, leads: [], err: e.message }; }
+    render();
+  }
+  async function loadOrgInvoices() {
+    S.org.invoices = 'loading'; render();
+    try { S.org.invoices = (await api('/api/billing/invoices')).invoices || []; } catch (e) { S.org.invoices = []; S.org.invErr = e.message; }
+    render();
+  }
+  // Organisation: a calm workspace page (left section list, one section at a time). Flat, no hero gradient.
   function orgView() {
     const o = S.org || { members: [], invitations: [], revenue: null, announcements: [], metrics: null };
     const me = S.me || {}, role = me.role || '', meId = me.user ? me.user.id : '';
-    const canAdmin = ['owner', 'admin', 'super_admin'].indexOf(role) >= 0;
+    const canAdmin = ['owner', 'admin', 'super_admin'].indexOf(role) >= 0, isOwner = role === 'owner';
     const ROLES = ['viewer', 'developer', 'security_manager', 'admin', 'owner'];
-    const memberCard = (u) => {
-      const sel = h('select', { class: 'field', style: 'max-width:170px;font-size:12px', 'aria-label': 'Role of ' + (u.name || u.email) },
-        ROLES.map((r) => h('option', { value: r, selected: u.role === r }, r)));
-      sel.addEventListener('change', () => run(async () => {
-        await api(`/api/org/members/${u.id}`, { method: 'PATCH', body: { role: sel.value } });
-        S.info = 'Role of ' + (u.name || u.email) + ' changed to ' + sel.value + '.';
-        await loadOrg();
-      }));
-      const remove = (u.id !== meId && u.role !== 'owner') ? btn('Remove', () => run(async () => {
-        await api(`/api/org/members/${u.id}`, { method: 'DELETE' });
-        await loadOrg();
-      }), 'link') : null;
-      return h('div', { class: 'card', style: 'padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
-        h('span', { class: 'tile', style: 'width:34px;height:34px;background:var(--accent);color:var(--on-accent)' }, icon('user', 18)),
-        h('div', { style: 'flex:1;min-width:160px' }, h('b', {}, u.name || u.email), h('div', { class: 'muted', style: 'font-size:12px' }, u.email + (u.id === meId ? ' · that is you' : ''))),
-        canAdmin ? sel : h('span', { class: 'chip' }, u.role), remove);
-    };
-    const inviteInp = h('input', { class: 'field', id: 'inv-email', placeholder: 'colleague@company.example', style: 'flex:1' });
-    const inviteBtn = canAdmin ? h('div', { style: 'display:flex;gap:8px;margin:10px 0;align-items:center' }, inviteInp,
-      btn('Invite', () => run(async () => {
-        const email = (document.getElementById('inv-email') || {}).value || '';
-        const r = await api('/api/org/invitations', { method: 'POST', body: { email: email, role: 'developer' } });
-        S.info = r && r.token ? 'Invitation created. Token (dev): ' + r.token : 'Invitation sent to ' + email + '.';
-        await loadOrg();
-      }), 'btn primary')) : h('p', { class: 'muted' }, 'Only owners and admins can invite members.');
-    const rev = o.revenue;
-    const money = rev ? h('div', { style: 'margin-bottom:14px' }, h('div', { class: 'cards' },
-      ['plan', 'mrr_eur', 'arr_eur', 'seats'].map((k) => h('div', { class: 'card stat' },
-        h('div', { class: 'muted' }, ({ plan: 'Plan', mrr_eur: 'MRR / month', arr_eur: 'ARR / year', seats: 'Seats' })[k]),
-        h('b', { style: 'font-size:20px' }, k === 'plan' ? (rev.plan_name || rev.plan) : ((rev[k] || 0) + (k === 'seats' ? '' : ' EUR')))))),
-      h('div', { class: 'row2', style: 'margin-top:8px' },
-        h('span', { class: 'chip ' + (rev.status === 'active' ? 'ok' : 'warn') }, rev.status === 'active' ? 'Active' : rev.status === 'demo' ? 'Demo' : String(rev.status || 'n/a')),
-        rev.customer_since ? h('span', { class: 'muted', style: 'font-size:12px' }, 'Customer since ' + when(rev.customer_since)) : null),
-      h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0 0' }, rev.note || 'MRR = plan price x paid seats (not an accounting ledger).'),
-      rev.status === 'demo' ? h('div', { style: 'margin-top:10px' }, btn('Create a workspace for real revenue', () => { S.auth = true; S.setup = true; render(); }, 'btn primary')) : null) : emptyState('coins', 'No revenue data yet', 'As soon as an organisation exists this block shows plan, MRR, ARR and seats.');
-    const anIn = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Title, e.g. Maintenance window Sunday 02:00', maxlength: 120 }), body: h('input', { class: 'field', id: 'an-body', placeholder: 'Message to your team', maxlength: 500 }) };
-    const annCard = canAdmin ? h('div', { class: 'card', style: 'padding:12px;margin-bottom:10px' },
-      h('b', {}, 'Message to the team'), h('div', { style: 'height:6px' }), anIn.title, h('div', { style: 'height:6px' }), anIn.body,
-      h('div', { style: 'margin-top:8px' }, btn('Publish', () => run(async () => {
-        await api('/api/announcements', { method: 'POST', body: { title: anIn.title.value.trim(), body: anIn.body.value.trim(), level: 'info', audience: 'all' } });
-        anIn.title.value = ''; anIn.body.value = ''; await loadOrg();
-      }), 'btn'))) : null;
-    const notices = o.announcements.map((a) => h('div', { class: 'card', style: 'padding:10px;margin-bottom:6px' },
-      h('div', { class: 'row2' }, h('b', {}, a.title), h('span', { class: 'chip' }, a.level)),
-      h('p', { class: 'muted', style: 'margin:6px 0 0' }, a.body),
-      h('div', { class: 'muted', style: 'font-size:11px' }, a.published_at ? when(a.published_at) : '')));
-    const met = o.metrics;
-    const danger = role === 'owner' ? h('details', { style: 'margin-top:22px' },
-      h('summary', { class: 'muted' }, 'Danger zone: delete organisation'),
-      h('div', { class: 'card', style: 'padding:12px;margin-top:8px' },
-        h('p', { class: 'muted' }, 'Deletes every agent, note, call, audit event and member of this organisation. This cannot be undone.'),
+    const tab = S.orgTab || 'overview', rev = o.revenue, met = o.metrics;
+    const sections = [['overview', 'Overview', 'grid'], ['members', 'Members', 'user'], ['announcements', 'Announcements', 'chat'], ['billing', 'Billing', 'coins'], ['data', 'Data', 'doc']].concat(canAdmin ? [['insights', 'Insights', 'chart']] : [], isOwner ? [['danger', 'Danger zone', 'shield']] : []);
+    const openTab = (id) => { S.orgTab = id; if (id === 'billing' && canAdmin && o.invoices == null) loadOrgInvoices(); else if (id === 'insights' && canAdmin && o.insights == null) loadInsights(); else render(); };
+    const nav = h('nav', { class: 'org2-nav', 'aria-label': 'Organisation sections' },
+      h('div', { class: 'org2-ws' }, h('span', { class: 'org2-mark' }, ((me.org && me.org.name) || 'W').slice(0, 1).toUpperCase()),
+        h('div', { class: 'org2-wsname' }, h('b', {}, me.org ? me.org.name : 'Workspace'), h('small', {}, (rev ? rev.plan_name + ' plan · ' : '') + (role || 'open mode')))),
+      sections.map(([id, label, ic]) => h('button', { type: 'button', class: 'org2-navbtn', 'aria-current': tab === id ? 'true' : 'false', onclick: () => openTab(id) }, icon(ic, 16), label)));
+    const stat = (k, v, s) => h('div', { class: 'org2-stat' }, h('span', { class: 'muted' }, k), h('b', {}, String(v)), s ? h('small', { class: 'muted' }, s) : null);
+    const eur = (v) => (v == null ? '—' : new Intl.NumberFormat('en', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v));
+    const head = (title, sub, act) => h('div', { class: 'org2-head' }, h('div', {}, h('h2', {}, title), sub ? h('p', { class: 'muted' }, sub) : null), act || null);
+    const revStats = () => rev ? h('div', { class: 'org2-stats' }, stat('Plan', rev.plan_name || rev.plan, rev.status === 'active' ? 'Active' : String(rev.status || '')), stat('MRR', eur(rev.mrr_eur), 'per month'), stat('ARR', eur(rev.arr_eur), 'per year'), stat('Seats', rev.seats)) : null;
+
+    // Overview
+    const overview = [head('Overview', 'How your workspace is doing right now.'),
+      h('div', { class: 'org2-stats' }, stat('Members', o.members.length), stat('Agents', met ? met.counts.agents : '—'), stat('Notes', met ? met.counts.notes : '—'), stat('Open approvals', met ? met.counts.approvals_pending : '—')),
+      rev ? [h('h3', { class: 'org2-h3' }, 'Revenue'), revStats()] : null,
+      h('h3', { class: 'org2-h3' }, 'Latest announcement'),
+      o.announcements.length ? h('div', { class: 'org2-card' }, h('b', {}, o.announcements[0].title), h('p', { class: 'muted' }, o.announcements[0].body)) : h('p', { class: 'muted' }, 'No announcements yet.')];
+
+    // Members
+    const sel = (u) => { const s = h('select', { class: 'field org2-role', 'aria-label': 'Role of ' + (u.name || u.email) }, ROLES.map((r) => h('option', { value: r, selected: u.role === r }, r === 'owner' ? 'owner (co-owner)' : r)));
+      s.addEventListener('change', () => run(async () => { await api(`/api/org/members/${u.id}`, { method: 'PATCH', body: { role: s.value } }); S.info = (u.name || u.email) + ' is now ' + s.value + '.'; await loadOrg(); })); return s; };
+    const owners = o.members.filter((u) => u.role === 'owner').length;
+    const memberRow = (u) => h('div', { class: 'org2-row' },
+      h('span', { class: 'org2-initial' }, (u.name || u.email || '?').slice(0, 1).toUpperCase()),
+      h('div', { class: 'org2-who' }, h('b', {}, u.name || u.email), h('small', { class: 'muted' }, u.email + (u.id === meId ? ' · you' : ''))),
+      canAdmin ? sel(u) : h('span', { class: 'chip' }, u.role),
+      canAdmin && u.id !== meId && u.role !== 'owner' ? btn('Remove', () => run(async () => { await api(`/api/org/members/${u.id}`, { method: 'DELETE' }); await loadOrg(); }), 'link mcp3-danger') : h('span', { class: 'org2-gap' }));
+    const inv = { email: h('input', { class: 'field', id: 'inv-email', placeholder: 'colleague@company.example', type: 'email', style: 'flex:1;min-width:200px' }),
+      role: h('select', { class: 'field', id: 'inv-role', 'aria-label': 'Role for the invitation' }, ROLES.filter((r) => isOwner || r !== 'owner').map((r) => h('option', { value: r, selected: r === 'developer' }, r))) };
+    const members = [head('Members', `${o.members.length} in this workspace · ${owners} owner${owners === 1 ? '' : 's'}. At least one owner always stays.`),
+      canAdmin ? h('div', { class: 'org2-invite' }, inv.email, inv.role, btn('Invite', () => run(async () => {
+        const email = (inv.email.value || '').trim(); const r = await api('/api/org/invitations', { method: 'POST', body: { email, role: inv.role.value } });
+        S.info = r && r.token ? 'Invitation created. Token (dev): ' + r.token : 'Invitation sent to ' + email + '.'; await loadOrg(); }), 'btn primary')) : h('p', { class: 'muted' }, 'Only owners and admins can invite members.'),
+      h('div', { class: 'org2-list' }, o.members.map(memberRow)),
+      o.invitations.length ? [h('h3', { class: 'org2-h3' }, 'Pending invitations'), h('div', { class: 'org2-list' }, o.invitations.map((i) => h('div', { class: 'org2-row' }, h('span', { class: 'org2-initial' }, '…'), h('div', { class: 'org2-who' }, h('b', {}, i.email), h('small', { class: 'muted' }, 'invited as ' + i.role)), h('span', { class: 'chip' }, 'pending'))))] : null];
+
+    // Announcements
+    const an = { title: h('input', { class: 'field', id: 'an-title', placeholder: 'Title, e.g. Maintenance window Sunday 02:00', maxlength: 120 }), body: h('textarea', { class: 'field', id: 'an-body', rows: 3, placeholder: 'Message to your team', maxlength: 500 }) };
+    const announcements = [head('Announcements', 'Messages that reach everyone inside the platform.'),
+      canAdmin ? h('div', { class: 'org2-card' }, an.title, h('div', { style: 'height:8px' }), an.body, h('div', { style: 'margin-top:10px' }, btn('Publish', () => run(async () => {
+        await api('/api/announcements', { method: 'POST', body: { title: an.title.value.trim(), body: an.body.value.trim(), level: 'info', audience: 'all' } }); S.info = 'Announcement published.'; await loadOrg(); }), 'btn primary'))) : null,
+      o.announcements.length ? h('div', { class: 'org2-list' }, o.announcements.map((a) => h('div', { class: 'org2-card' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, a.title), h('span', { class: 'muted mono' }, a.published_at ? when(a.published_at) : '')), h('p', { class: 'muted' }, a.body)))) : emptyState('chat', 'No announcements', 'Post the first message to your team.')];
+
+    // Billing (Stripe)
+    const money = (n, c) => (n == null ? '—' : new Intl.NumberFormat('en', { style: 'currency', currency: (c || 'eur').toUpperCase() }).format(n / 100));
+    const invs = o.invoices;
+    const billing = [head('Billing', 'Plan, revenue and invoices. Payments run through Stripe per organisation.', h('div', { class: 'row2' }, btn('Change plan', () => go('plans'), 'btn'), btn('Manage in Stripe', () => run(async () => { const r = await api('/api/billing/portal', { method: 'POST' }); location.href = r.url; }), 'btn primary'))),
+      revStats() || emptyState('coins', 'No revenue data yet', 'Revenue appears as soon as the organisation has a plan.'),
+      rev ? h('p', { class: 'muted org2-note' }, rev.note || 'MRR = plan price × paid seats (not an accounting ledger).') : null,
+      h('h3', { class: 'org2-h3' }, 'Invoices'),
+      invs === 'loading' ? h('div', { class: 'skel-lines' }, [1, 2, 3].map(() => h('span', { class: 'skel-line tall' })))
+        : invs && invs.length ? h('div', { class: 'org2-list' }, invs.map((i) => h('div', { class: 'org2-row' }, h('div', { class: 'org2-who' }, h('b', {}, i.number || i.id), h('small', { class: 'muted' }, i.created ? when(i.created) : '')),
+          h('b', {}, money(i.amount_due, i.currency)), h('span', { class: 'chip' }, i.status || ''), i.hosted_invoice_url ? h('a', { class: 'link', href: i.hosted_invoice_url, target: '_blank', rel: 'noopener' }, 'View') : h('span', { class: 'org2-gap' }))))
+          : h('p', { class: 'muted' }, o.invErr || 'No invoices yet. They appear here once Stripe has billed this organisation.')];
+
+    // Insights: the public site funnel (first organisation only) and the enquiries that came in through the website
+    const ins = o.insights, sum = ins && ins !== 'loading' ? ins.sum : null;
+    const insights = [head('Insights', 'Visits, sign-ups and enquiries from the public website. Counts are anonymous daily totals and only include visitors who accepted analytics.', btn('Refresh', () => loadInsights(), 'btn')),
+      ins === 'loading' ? h('div', { class: 'skel-lines' }, [1, 2, 3, 4].map(() => h('span', { class: 'skel-line tall' })))
+        : !sum || !sum.operator ? emptyState('chart', 'Only the operator sees site analytics', ins && ins.err ? ins.err : 'The first organisation of this installation owns the website statistics.')
+          : [h('div', { class: 'org2-stats' }, stat('Enquiries', sum.leads_total, 'all time'), stat('Visits', sum.last_30_days.landing_view || 0, 'last 30 days'), stat('Workspaces', sum.last_30_days.signup_done || 0, 'last 30 days'), stat('Activated', sum.last_30_days.first_chat || 0, 'first conversation')),
+            h('h3', { class: 'org2-h3' }, 'Funnel, last 30 days'),
+            h('div', { class: 'org2-list funnel' }, sum.funnel.map((f, i) => { const top = Math.max(1, sum.funnel[0].n || 1);
+              return h('div', { class: 'org2-row funnel-row' }, h('div', { class: 'funnel-main' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, f.label), h('span', { class: 'mono' }, String(f.n)), h('span', { class: 'chip' }, f.pct_of_previous == null ? 'start' : f.pct_of_previous + '% of previous')),
+                h('div', { class: 'funnel-bar' }, h('i', { style: `width:${Math.max(2, Math.round((f.n / top) * 100))}%` }))));
+            })),
+            h('h3', { class: 'org2-h3' }, 'Enquiries'),
+            ins.leads.length ? h('div', { class: 'org2-list' }, ins.leads.slice(0, 20).map((l) => h('div', { class: 'org2-card' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, l.name + (l.company ? ' · ' + l.company : '')), h('span', { class: 'muted mono' }, when(l.created_at))),
+              h('p', { class: 'muted' }, l.message), h('div', { style: 'margin-top:6px' }, h('a', { class: 'link', href: 'mailto:' + l.email }, l.email)))))
+              : h('p', { class: 'muted' }, 'No enquiries yet. The contact form on the website lands here.')]];
+
+    // Data
+    const data = [head('Data & export', 'Everything this organisation holds. Secrets are never included.'),
+      h('div', { class: 'org2-card' }, h('p', { class: 'muted' }, S.xsum ? (S.xsum.rows + ' rows across ' + S.xsum.tables + ' tables are exportable.') : 'Full JSON export of agents, notes, calls and the audit log.'),
+        h('div', { class: 'row2' }, btn('Download full export', () => { dl('/api/org/export', 'org-export.json'); }, 'btn primary'),
+          btn('What is included?', () => run(async () => { S.xsum = await api('/api/org/export/summary'); S.info = S.xsum.note; }), 'btn')))];
+
+    // Danger
+    const danger = [head('Danger zone', 'Deleting the organisation cannot be undone.'),
+      h('div', { class: 'org2-card' }, h('p', { class: 'muted' }, 'Deletes every agent, note, call, audit event and member of this organisation.'),
         btn('Delete organisation', () => {
-          const slug = (me.org && me.org.slug) || '';
-          const typed = window.prompt('Type the slug to delete: ' + slug) || '';
-          if (typed.trim().toLowerCase() === slug) run(async () => {
-            await api('/api/org?confirm=' + encodeURIComponent(slug), { method: 'DELETE' });
-            location.reload();
-          });
-          else if (typed) S.info = 'Cancelled: slug does not match.';
-          else S.info = 'Cancelled.';
-        }, 'btn')) ) : null;
-    return h('div', { class: 'body' }, h('div', { class: 'wide' },
-      h('div', { class: 'card hero', style: 'padding:18px;margin-bottom:14px' },
-        h('div', { class: 'row2' }, h('div', {}, h('h2', { style: 'margin:0' }, me.org ? me.org.name : 'Organisation'), h('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Your workspace: members, roles, revenue and announcements.')),
-          h('span', { class: 'chip ok' }, role || '–')),
-        met ? h('p', { class: 'muted', style: 'font-size:12px' }, 'Agents ' + met.counts.agents + ' · Notes ' + met.counts.notes + ' · Calls ' + met.counts.calls + ' · open approvals ' + met.counts.approvals_pending + ' · audit events ' + met.counts.audit_events) : null),
-      h('div', { class: 'org-grid' },
-        h('div', { class: 'org-col' },
-          h('h3', {}, 'Members (' + o.members.length + ')'),
-          o.members.map(memberCard), inviteBtn,
-          o.invitations.length ? h('div', { class: 'muted', style: 'font-size:13px' }, 'Open invitations: ' + o.invitations.map((i) => i.email + ' (' + i.role + ')').join(', ')) : null,
-          h('h3', { style: 'margin-top:18px' }, 'Announcements'),
-          annCard, notices.length ? notices : emptyState('chat', 'No announcements', 'Announcements reach your engineering team right inside the platform.')),
-        h('div', { class: 'org-col' },
-          h('h3', {}, 'Billing & revenue'),
-          money,
-          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Stripe'), h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, 'Checkout, customer portal and invoices run through Stripe per organisation. No shared customer.'), btn('Plans & upgrade', () => go('plans'), 'btn primary')),
-          h('div', { class: 'card', style: 'padding:14px;margin-bottom:14px' }, h('b', {}, 'Data & privacy'),
-            h('p', { class: 'muted', style: 'font-size:12px;margin:6px 0' }, (S.xsum ? (S.xsum.rows + ' rows across ' + S.xsum.tables + ' tables are exportable.') : 'Full JSON export of everything this organisation holds. Secrets are never included.')),
-            h('div', { class: 'row2', style: 'flex-wrap:wrap' }, btn('Download full export', () => { dl('/api/org/export', 'org-export.json'); }, 'btn primary'),
-              btn('What is included?', () => run(async () => { S.xsum = await api('/api/org/export/summary'); S.info = S.xsum.note; render(); }), 'btn'))),
-          danger))));
+          const slug = (me.org && me.org.slug) || ''; const typed = window.prompt('Type the slug to delete: ' + slug) || '';
+          if (typed.trim().toLowerCase() === slug) run(async () => { await api('/api/org?confirm=' + encodeURIComponent(slug), { method: 'DELETE' }); location.reload(); });
+          else S.info = typed ? 'Cancelled: slug does not match.' : 'Cancelled.'; render(); }, 'btn mcp3-danger'))];
+
+    const content = { overview, members, announcements, billing, data, insights, danger }[tab] || overview;
+    return h('div', { class: 'body org2' }, h('div', { class: 'org2-shell' }, nav, h('div', { class: 'org2-content' }, content)));
   }
 
   function syncOverlays(force) {
@@ -3232,26 +3566,8 @@ const overlayRoot = (() => {
     try { S.notifs = await api('/api/notifications'); } catch {}
   }
   async function openNotifs() {
-    S.modal = 'notif'; syncOverlays(true);
-    await run(async () => { await loadNotifs(); render(); });
-  }
-  function notifModal() {
-    const n = S.notifs || { items: [], unread: 0 };
-    const close = () => { S.modal = null; syncOverlays(true); };
-    const markAll = () => run(async () => {
-      await api('/api/notifications/read', { method: 'POST', body: { keys: n.items.map((i) => i.key) } });
-      await loadNotifs(); syncOverlays(true);
-    });
-    return h('div', { class: 'scrim', onclick: (e) => { if (e.target.classList.contains('scrim')) close(); } },
-      h('div', { class: 'modal', role: 'dialog', 'aria-label': 'Notifications', style: 'max-width:560px' },
-        h('div', { class: 'row2' }, h('h2', { style: 'margin:0;flex:1' }, 'Notifications'),
-          n.unread ? h('span', { class: 'chip warn' }, n.unread + ' unread') : h('span', { class: 'chip ok' }, 'all read'),
-          btn('Mark all read', markAll, 'chip'), btn([icon('x', 16)], close, 'chip', { 'aria-label': 'Close' })),
-        n.items.length ? h('div', { style: 'margin-top:10px' }, n.items.map((i) => h('button', { type: 'button', class: 'notif-item' + (i.read ? ' read' : ''),
-          onclick: () => { S.modal = null; syncOverlays(true); go(i.view || 'control'); } },
-          h('span', { class: 'chip ' + (i.kind === 'approval' ? 'warn' : i.kind === 'run' ? 'warn' : 'ok') }, i.kind),
-          h('span', { style: 'flex:1;min-width:0' }, h('b', {}, i.title), h('div', { class: 'muted', style: 'font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, String(i.detail || ''))),
-          h('span', { class: 'muted mono', style: 'font-size:11px' }, when(i.ts))))) : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Nothing needs your attention right now.'))));
+    S.modal = 'notif'; S.notifLoading = !S.notifs; syncOverlays(true);
+    try { await loadNotifs(); } finally { S.notifLoading = false; syncOverlays(true); }
   }
   function closeCtx() { S.ctx = null; syncOverlays(true); }
   function agentCtx() {
@@ -3382,9 +3698,10 @@ const overlayRoot = (() => {
             S.unreadA[b.id] ? h('span', { class: 'av3-unread', title: 'Unread', 'aria-label': 'Unread' }) : null))];
       })),
       meterBlock(),
-      h('button', { class: 'appsbtn av3-mcp', type: 'button', title: 'Connect apps and MCP servers', onclick: openApps }, icon('grid', 20),
-        h('span', { class: 'av3-mcp-txt' }, h('b', {}, 'Connect apps'), h('small', {}, `${S.sum.apps || 0} connected · MCP`)),
-        h('span', { class: 'av3-mcp-badge' }, h('i', { class: 'av3-dot' + (S.sum.apps ? ' on' : '') }), h('span', { class: 'chip' }, 'MCP'))),
+      h('button', { class: 'appsbtn mcp3-connect', type: 'button', title: 'Connect apps and MCP servers', onclick: openApps },
+        h('span', { class: 'mcp3-connect-ic' }, icon('grid', 18)),
+        h('span', { class: 'mcp3-connect-txt' }, h('b', {}, 'Connect apps'), h('small', {}, `${S.sum.apps || 0} connected · MCP`)),
+        h('span', { class: 'mcp3-connect-count', 'aria-hidden': 'true' }, String(S.sum.apps || 0))),
       h('div', { style: 'position:relative' }, S.menu ? h('div', { class: 'pop', role: 'menu' }, btn([icon('chart', 16), 'Plans & usage'], () => go('plans'), 'menuitem'), btn([icon('wrench', 16), 'Settings'], () => openSettings(), 'menuitem'), btn([icon('table', 16), 'Agent inventory'], () => go('inventory'), 'menuitem'), btn([icon('grid', 16), 'Apps'], openApps, 'menuitem'),
         btn([icon('spark', 16), 'Load demo workspace'], loadDemo, 'menuitem'), btn([icon('x', 16), 'Sign out'], logout, 'menuitem')) : null,
         h('button', { class: 'acct av3-acct', type: 'button', 'aria-expanded': S.menu, 'aria-label': 'Account menu', onclick: () => { S.menu = !S.menu; render(); } },
@@ -3395,21 +3712,33 @@ const overlayRoot = (() => {
           h('span', { class: 'av3-acctchip', title: hd.build ? 'build ' + hd.build : '' }, `v${hd.version || '?'}`),
           h('span', { class: 'av3-acctchev' }, icon('up', 14)))));
     if (!S.notifs && !S._notifsAsked) { S._notifsAsked = true; loadNotifs().then(() => { if (S.notifs && S.notifs.unread) syncOverlays(); }); }
+    if (!S.info) S._toasted = ''; else if (S._toasted !== S.info) { S._toasted = S.info; toast(S.info); }
     const view = { chat: chatView, council: councilView, brain: brainView, research: researchView, teams: teamsView, inventory: inventoryView, usage: usageView, market: marketView, control: controlView, plans: plansView, settings: settingsView, org: orgView }[S.view]();
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
-      h('main', { class: 'main', style: viewChanged ? 'animation:cfaFade .22s ease' : '' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null, S.info && !S.err ? h('div', { class: 'banner', role: 'status' }, S.info) : null,
-        warn ? h('div', { class: 'banner', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
-      );
+      h('main', { class: 'main' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null,
+        warn ? h('div', { class: 'banner warnbar', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
+      hasPanel ? h('div', { class: 'sheet-scrim', onclick: () => { S.panel = false; render(); } }) : null, mobileTabs());
+    document.title = (S.notifs && S.notifs.unread ? `(${S.notifs.unread}) ` : '') + (S.view === 'chat' && S.bot ? `${S.bot.name} · Shewiun` : 'Shewiun');
     restoreScrollState(scrollMem);
     const sc = document.getElementById('scroll');
     if (sc && !(scrollMem && scrollMem.some((m) => m.sel === '#scroll'))) sc.scrollTop = sc.scrollHeight;
     ensureScreen();
     syncOverlays();
   }
+  document.addEventListener('focusin', (e) => { if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) document.body.classList.add('kb'); });
+  document.addEventListener('focusout', () => setTimeout(() => { if (!/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) document.body.classList.remove('kb'); }, 60));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !S.modal) { const t = document.querySelector('.composer textarea'); if (t) { e.preventDefault(); t.focus(); } }
+  });
+  document.addEventListener('scroll', (e) => {
+    if (!e.target || e.target.id !== 'scroll') return; const f = document.getElementById('to-latest');
+    if (f) f.classList.toggle('show', e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight > 240);
+  }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (S.modal) close(); else if (S.drawer) { S.drawer = false; syncOverlays(true); } } });
   async function init() {
     S.err = '';
+    if (window.matchMedia('(max-width: 1180px)').matches) S.panel = false;  // phones and tablets: the agent details are a sheet you open, not something that starts open
     try {
       const st = await api('/api/auth/status');
       S.setup = !!st.setup_required;

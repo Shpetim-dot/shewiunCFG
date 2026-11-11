@@ -17,7 +17,7 @@ const overlayRoot = (() => {
     council: '<circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M14 20c0-2 1.5-4 3.5-4s3.5 2 3.5 4"/>',
     grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
     flask: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/>', doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
-    x: '<path d="M6 6l12 12M18 6L6 18"/>', up: '<path d="M12 19V6M6 11l6-6 6 6"/>', panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/>',
+    x: '<path d="M6 6l12 12M18 6L6 18"/>', up: '<path d="M12 19V6M6 11l6-6 6 6"/>', back: '<path d="M15 5l-7 7 7 7"/>', panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>', user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3-6 7-6s7 2 7 6"/>',
     teams: '<rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="8" y="14" width="8" height="7" rx="2"/>', store: '<path d="M4 9l2-5h12l2 5"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/>',
     pen: '<path d="M4 20l1-4 11-11 3 3L8 19z"/><path d="M14 7l3 3"/>', rocket: '<path d="M12 3c3 2 5 5 5 9l-2 3H9l-2-3c0-4 2-7 5-9z"/><path d="M9 15l-3 4 4-1M15 15l3 4-4-1"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -228,7 +228,7 @@ const overlayRoot = (() => {
     if (view === 'settings') { openSettings(); return; }
     stopAct(); S.view = view; S.drawer = false; S.menu = false; S.err = ''; S.info = ''; if (view !== 'council') S.room = null; render();
     await run(async () => {
-      if (view === 'brain') { await loadNotes(); await loadBots(); S.graph = S.notes.length > 0; if (!S.note && S.notes[0]) await openNote(S.notes[0].id, true); S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
+      if (view === 'brain') { await loadNotes(); await loadBots(); S.graph = S.notes.length > 0; S.brainPane = isMobile() ? 'list' : S.brainPane; if (!S.note && S.notes[0]) await openNote(S.notes[0].id, true); S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
       if (view === 'council') S.calls = await api('/api/calls');
       if (view === 'research') { S.rlist = await api('/api/research'); try { S.health = await api('/api/health'); S.ssearch = await api('/api/search/status'); } catch {} }
       if (view === 'org') { await loadOrg(); if (S.cstream) { S.cstream.ctrl.abort(); S.cstream = null; } }
@@ -247,7 +247,7 @@ const overlayRoot = (() => {
   }
   async function openNote(id, quiet) {
     if (S.view !== 'brain') { stopAct(); S.view = 'brain'; S.actSince = (await api('/api/brain/activity?since=9999')).now; actTimer = setInterval(pollAct, 2500); }
-    S.drawer = false; S.newNote = false; S.edit = false;
+    S.drawer = false; S.newNote = false; S.edit = false; if (isMobile() && !quiet) S.brainPane = 'note';
     const f = async () => { if (!S.notes.length) await loadNotes(); S.note = await api('/api/brain/notes/' + id); S.versions = await api(`/api/brain/notes/${id}/versions`); };
     if (quiet) await f(); else await run(f);
   }
@@ -272,10 +272,15 @@ const overlayRoot = (() => {
     const items = [['Load the demo workspace', S.bots.length > 4, loadDemo, 'Load'], ['Run a council call', S.calls.length > 0, () => go('council'), 'Open'], ['Run the authorization self-test', !!(S.test && S.test.id), () => go('control'), 'Open'],
       ['Connect an app or MCP server', S.apps.some((a) => a.connected), openApps, 'Open'], ['Create a team', S.teams.length > 0, () => go('teams'), 'Open']];
     if (items.every((i) => i[1]) || S.skip) return null;
-    return h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, `Getting started: ${items.filter((i) => i[1]).length} of ${items.length}`), btn('Hide', () => { S.skip = true; render(); }, 'link')),
+    const next = items.find((i) => !i[1]), doneN = items.filter((i) => i[1]).length;
+    if (isMobile() && !S.checkOpen) return h('button', { type: 'button', class: 'check-sum', onclick: () => { S.checkOpen = true; render(); } },
+      h('span', { class: 'check-ring', style: `--p:${Math.round((doneN / items.length) * 100)}` }, String(doneN)), h('span', { class: 'check-txt' }, h('b', {}, `Getting started: ${doneN} of ${items.length}`), h('small', {}, `Next: ${next[0]}`)), icon('back', 16));
+    return h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, `Getting started: ${doneN} of ${items.length}`), isMobile() ? btn('Collapse', () => { S.checkOpen = false; render(); }, 'link') : null, btn('Hide', () => { S.skip = true; render(); }, 'link')),
       items.map(([t, done, f, l]) => h('div', { class: 'check' + (done ? ' done' : '') }, h('span', { class: 'tick' }, done ? icon('check', 14) : null), h('span', { style: 'flex:1' }, t), done ? null : btn(l, f, 'btn'))));
   }
   // ---------- calm feedback: small toasts instead of banners that stay on screen ----------
+  const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
+  const isCoarse = () => window.matchMedia('(pointer: coarse)').matches;
   const ago = (ts) => {
     const t = Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(ts || '') ? ts : (ts || '') + 'Z'); if (!t) return when(ts);
     const d = Math.max(0, (Date.now() - t) / 1000);
@@ -299,6 +304,7 @@ const overlayRoot = (() => {
       h('div', { class: 'msgmain' },
         cont ? null : h('div', { class: 'msghead' }, h('b', {}, b.name), h('span', { class: 'muted' }, b.role), m.created_at ? h('span', { class: 'muted mono' }, when(m.created_at)) : null),
         h('div', { class: 'msg agent' }, m.content),
+        h('button', { type: 'button', class: 'msg-copy', 'aria-label': 'Copy reply', title: 'Copy reply', onclick: (e) => { const t = e.currentTarget; (navigator.clipboard ? navigator.clipboard.writeText(m.content) : Promise.reject()).then(() => { t.classList.add('done'); toast('Copied to clipboard'); setTimeout(() => t.classList.remove('done'), 1500); }).catch(() => toast('Copy is not available here', 'bad')); } }, icon('doc', 14)),
         h('small', { class: 'muted msgsrc' }, m.used && m.used.length ? ['Based on: ', m.used.flatMap((u) => [btn(u.title, () => openNote(u.id), 'link'), ' '])] : 'Based on no verified notes'),
         m.note ? h('small', {}, btn('Saved to Brain as draft', () => openNote(m.note), 'link')) : null));
   }
@@ -337,15 +343,18 @@ const overlayRoot = (() => {
     const ta = h('textarea', { rows: 1, placeholder: `Message ${b.name}`, 'aria-label': `Message ${b.name}` }); ta.value = S.draft;
     const sb = h('button', { class: 'send', type: 'button', 'aria-label': 'Send', disabled: !S.draft.trim() || S.busy, onclick: send }, icon('up', 18));
     ta.addEventListener('input', () => { S.draft = ta.value; sb.disabled = !ta.value.trim() || S.busy; ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
-    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+    ta.setAttribute('enterkeyhint', 'send');
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !isCoarse()) { e.preventDefault(); send(); } });  // on a touch keyboard Enter is a new line; the arrow sends
     return h('div', { style: 'display:flex;flex-direction:column;min-height:0;flex:1' },
       h('div', { class: 'bar' }, tile(b, 34, { float: true, thinking: S.busy }), h('h1', {}, b.name), h('span', { class: 'muted' }, b.role), b.status === 'suspended' ? h('span', { class: 'chip warn' }, 'suspended') : null, h('span', { class: 'sp' }), S.bill && S.bill.enabled && S.bill.plan === 'free' ? btn('Upgrade', () => { track('upgrade_click'); go('plans'); }, 'btn primary') : null, h('span', { class: 'chip' }, b.model),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Toggle agent details', 'aria-pressed': S.panel, onclick: () => { S.panel = !S.panel; render(); } }, icon('panel'))),
       h('div', { class: 'body', id: 'scroll', 'aria-live': 'polite' }, h('div', { class: 'col' }, checklist(), h('div', { class: 'msgs' },
         S.msgs.length ? S.msgs.map((m, i) => chatRow(b, m, S.msgs[i - 1]))
-          : h('p', { class: 'empty muted' }, `Start a conversation with ${b.name}. Replies are scripted until a model key is set.`),
+          : h('div', { class: 'chat-empty' }, tile(b, 72, { float: true }), h('h2', {}, `Talk to ${b.name}`), h('p', { class: 'muted' }, `${b.role}. Replies are scripted until a model key is set.`),
+            h('div', { class: 'chat-sugg' }, [`What can you help me with?`, `Summarize the key notes in the Brain`, `What are the biggest risks you see?`].map((q) => btn(q, () => { S.draft = q; send(); }, 'chip sugg')))),
         S.busy ? chatTyping(b) : null))),
-      h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb)));
+      h('button', { type: 'button', class: 'to-latest', id: 'to-latest', 'aria-label': 'Jump to the latest message', onclick: () => { const sc = document.getElementById('scroll'); if (sc) sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' }); } }, icon('up', 16)),
+      h('div', { class: 'composer' }, h('div', { class: 'col', style: 'display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 18px' }, ta, sb), h('div', { class: 'composer-hint muted' }, 'Enter to send · Shift+Enter for a new line')));
   }
   function passport() {
     const b = S.bot; if (!b) return null;
@@ -362,7 +371,8 @@ const overlayRoot = (() => {
         h('span', { class: 'chip' }, b.team || 'General'),
         h('span', { class: 'chip ' + (b.status === 'suspended' ? 'warn' : 'ok') }, b.status === 'suspended' ? 'Suspended' : 'Active'),
         h('span', { class: 'chip agx-modelchip' + (modelOk ? '' : ' warn') }, agxModelLabel(b))),
-      btn([agxGear(15), 'Agent settings'], () => openAgentSettings('general'), 'btn agx-gearbtn'));
+      btn([agxGear(15), 'Agent settings'], () => openAgentSettings('general'), 'btn agx-gearbtn'),
+      h('button', { class: 'ibtn sheet-close', type: 'button', 'aria-label': 'Close details', onclick: () => { S.panel = false; render(); } }, icon('x', 18)));
     let body;
     if (S.tab === 'overview') body = agxOverviewTab(b);
     else if (S.tab === 'activity' || S.tab === 'screen') body = agxActivityTab(b);
@@ -622,7 +632,7 @@ const overlayRoot = (() => {
     const drop = h('div', { class: 'drop' }, icon('doc', 18), h('span', { style: 'flex:1' }, 'Drop a file or ', btn('upload', pickFile, 'link')), h('small', { class: 'muted' }, '.md .txt .csv .json .pdf'));
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); }); drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); uploadFile(e.dataTransfer.files[0]); });
-    const left = h('div', {}, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Graph'], () => { S.graph = !S.graph; S.newNote = false; render(); })), drop,
+    const left = h('div', { class: 'brain-left' }, h('div', { class: 'row2', style: 'margin-bottom:8px' }, btn([icon('plus', 16), 'Note'], () => { S.newNote = true; S.graph = false; S.brainPane = 'note'; render(); }), btn([icon('graph', 16), S.graph ? 'Notes' : 'Graph'], () => { S.graph = !S.graph; S.newNote = false; render(); }, 'btn brain-toggle')), drop,
       h('div', { style: 'height:8px' }), q, h('div', { class: 'row2', style: 'margin:8px 0' }, h('select', { class: 'field brain-sel', 'aria-label': 'Status filter', onchange: (e) => { S.filter = e.target.value; render(); } }, [['', 'All statuses'], ['draft', 'Drafts'], ['verified', 'Verified']].map(([v, l]) => h('option', { value: v, selected: (S.filter || '') === v }, l))), S.space ? btn(`space: ${S.space} ×`, () => { S.space = ''; render(); }, 'chip ok') : null),
       h('div', { class: 'row2', style: 'margin:6px 0;flex-wrap:wrap' }, kindChips, btn(S.orphans ? 'Orphans on' : 'Orphans', () => { S.orphans = !S.orphans; render(); }, 'chip' + (S.orphans ? ' ok' : ''), { 'aria-pressed': !!S.orphans }), sortSel),
       list.length ? tree : (S.notes.length ? h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'No note matches the current filters.'), btn('Reset filters', () => { S.kindFilter = ''; S.filter = ''; S.orphans = false; S.space = ''; S.q = ''; S.sortBy = ''; render(); }, 'btn')) : h('p', { class: 'muted' }, 'No notes yet.')));
@@ -660,7 +670,12 @@ const overlayRoot = (() => {
         h('details', { style: 'margin-top:20px' }, h('summary', { class: 'muted' }, `Version history (${S.versions.length})`), S.versions.map((v) => h('div', { class: 'card', style: 'margin:8px 0' }, h('span', { class: 'mono' }, `v${v.version} · ${when(v.created_at)} · ${v.actor} · ${v.reason} · ${v.status}`), h('div', { class: 'muted' }, v.body.slice(0, 120)),
           btn('Roll back to this version', () => run(async () => { S.note = await api(`/api/brain/notes/${n.id}/rollback`, { method: 'POST', body: { version: v.version } }); await reload(); }), 'link')))));
     } else mid = S.notes.length ? h('p', { class: 'muted' }, 'Select a note.') : emptyState('graph', 'Your Brain is empty', 'Create notes or load the demo workspace to see the agents memory.', btn([icon('plus', 16), 'New note'], () => { S.newNote = true; render(); }, 'btn primary'));
-    return h('div', { class: 'brain' }, left, h('div', {}, mid), h('div', { id: 'brain-side' }, noteSide(S.note)));
+    const pane = S.brainPane || (isMobile() ? 'list' : (S.graph ? 'graph' : 'list'));
+    const setPane = (p) => { S.brainPane = p; if (p === 'graph') { S.graph = true; S.newNote = false; } if (p === 'list') S.graph = false; render(); };
+    const seg = h('div', { class: 'brain-seg', role: 'tablist', 'aria-label': 'Brain view' }, [['list', 'Notes'], ['graph', 'Graph']].concat(S.note || S.newNote ? [['note', S.newNote ? 'New note' : 'Note']] : []).map(([p, l]) =>
+      h('button', { type: 'button', role: 'tab', class: 'brain-segbtn', 'aria-selected': pane === p ? 'true' : 'false', onclick: () => setPane(p) }, l)));
+    return h('div', { class: 'brain', 'data-pane': pane }, seg, left, h('div', { class: 'brain-mid' }, mid),
+      h('div', { id: 'brain-side', class: 'brain-side' }, h('button', { type: 'button', class: 'btn brain-back', onclick: () => setPane(S.graph ? 'graph' : 'list') }, icon('back', 16), 'Back'), noteSide(S.note)));
   }
 
   // ---------- research ----------
@@ -2278,7 +2293,18 @@ const overlayRoot = (() => {
   }
   function mobileBar() {
     return h('div', { class: 'mbar' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', onclick: () => { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
+      h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
       h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Connect apps', onclick: openApps }, icon('grid')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus')));
+  }
+  // Bottom tab bar for phones: the places people use most, one tap away. "Agents" opens the agent list when you are
+  // already in a chat; "More" opens the full menu. Hidden by CSS above 760px and while the keyboard is open.
+  function mobileTabs() {
+    const tab = (v, label, ic) => h('button', { type: 'button', class: 'mtab', 'aria-current': S.view === v ? 'page' : false,
+      onclick: () => { S.panel = false; if (v === 'chat' && S.view === 'chat') { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } else { S.drawer = false; go(v); } } }, icon(ic, 22), h('span', {}, label));
+    const pend = (S.sum && S.sum.approvals) || 0;
+    return h('nav', { class: 'mtabs', 'aria-label': 'Main navigation' }, tab('chat', 'Agents', 'chat'), tab('council', 'Council', 'scales'), tab('brain', 'Brain', 'graph'),
+      h('button', { type: 'button', class: 'mtab', 'aria-current': S.view === 'control' ? 'page' : false, onclick: () => { S.panel = false; S.drawer = false; go('control'); } }, icon('shield', 22), h('span', {}, 'Control'), pend ? h('i', { class: 'mtab-dot', 'aria-label': pend + ' pending' }) : null),
+      h('button', { type: 'button', class: 'mtab', 'aria-expanded': S.drawer, onclick: () => { S.drawer = !S.drawer; render(); if (S.drawer) refreshSum(); } }, icon('menu', 22), h('span', {}, 'More')));
   }
   // model editor shared by the agent panel and the agent settings overlay.
   // An agent with no live model says "Model must be configured" instead of pretending.
@@ -3405,6 +3431,12 @@ const overlayRoot = (() => {
     S.orgKeep = true;
     render();
   }
+  async function loadInsights() {
+    S.org.insights = 'loading'; render();
+    try { const [sum, leads] = await Promise.all([api('/api/events/summary'), api('/api/leads')]); S.org.insights = { sum, leads }; }
+    catch (e) { S.org.insights = { sum: { operator: false, funnel: [] }, leads: [], err: e.message }; }
+    render();
+  }
   async function loadOrgInvoices() {
     S.org.invoices = 'loading'; render();
     try { S.org.invoices = (await api('/api/billing/invoices')).invoices || []; } catch (e) { S.org.invoices = []; S.org.invErr = e.message; }
@@ -3417,8 +3449,8 @@ const overlayRoot = (() => {
     const canAdmin = ['owner', 'admin', 'super_admin'].indexOf(role) >= 0, isOwner = role === 'owner';
     const ROLES = ['viewer', 'developer', 'security_manager', 'admin', 'owner'];
     const tab = S.orgTab || 'overview', rev = o.revenue, met = o.metrics;
-    const sections = [['overview', 'Overview', 'grid'], ['members', 'Members', 'user'], ['announcements', 'Announcements', 'chat'], ['billing', 'Billing', 'coins'], ['data', 'Data', 'doc']].concat(isOwner ? [['danger', 'Danger zone', 'shield']] : []);
-    const openTab = (id) => { S.orgTab = id; if (id === 'billing' && canAdmin && o.invoices == null) loadOrgInvoices(); else render(); };
+    const sections = [['overview', 'Overview', 'grid'], ['members', 'Members', 'user'], ['announcements', 'Announcements', 'chat'], ['billing', 'Billing', 'coins'], ['data', 'Data', 'doc']].concat(canAdmin ? [['insights', 'Insights', 'chart']] : [], isOwner ? [['danger', 'Danger zone', 'shield']] : []);
+    const openTab = (id) => { S.orgTab = id; if (id === 'billing' && canAdmin && o.invoices == null) loadOrgInvoices(); else if (id === 'insights' && canAdmin && o.insights == null) loadInsights(); else render(); };
     const nav = h('nav', { class: 'org2-nav', 'aria-label': 'Organisation sections' },
       h('div', { class: 'org2-ws' }, h('span', { class: 'org2-mark' }, ((me.org && me.org.name) || 'W').slice(0, 1).toUpperCase()),
         h('div', { class: 'org2-wsname' }, h('b', {}, me.org ? me.org.name : 'Workspace'), h('small', {}, (rev ? rev.plan_name + ' plan · ' : '') + (role || 'open mode')))),
@@ -3472,6 +3504,22 @@ const overlayRoot = (() => {
           h('b', {}, money(i.amount_due, i.currency)), h('span', { class: 'chip' }, i.status || ''), i.hosted_invoice_url ? h('a', { class: 'link', href: i.hosted_invoice_url, target: '_blank', rel: 'noopener' }, 'View') : h('span', { class: 'org2-gap' }))))
           : h('p', { class: 'muted' }, o.invErr || 'No invoices yet. They appear here once Stripe has billed this organisation.')];
 
+    // Insights: the public site funnel (first organisation only) and the enquiries that came in through the website
+    const ins = o.insights, sum = ins && ins !== 'loading' ? ins.sum : null;
+    const insights = [head('Insights', 'Visits, sign-ups and enquiries from the public website. Counts are anonymous daily totals and only include visitors who accepted analytics.', btn('Refresh', () => loadInsights(), 'btn')),
+      ins === 'loading' ? h('div', { class: 'skel-lines' }, [1, 2, 3, 4].map(() => h('span', { class: 'skel-line tall' })))
+        : !sum || !sum.operator ? emptyState('chart', 'Only the operator sees site analytics', ins && ins.err ? ins.err : 'The first organisation of this installation owns the website statistics.')
+          : [h('div', { class: 'org2-stats' }, stat('Enquiries', sum.leads_total, 'all time'), stat('Visits', sum.last_30_days.landing_view || 0, 'last 30 days'), stat('Workspaces', sum.last_30_days.signup_done || 0, 'last 30 days'), stat('Activated', sum.last_30_days.first_chat || 0, 'first conversation')),
+            h('h3', { class: 'org2-h3' }, 'Funnel, last 30 days'),
+            h('div', { class: 'org2-list funnel' }, sum.funnel.map((f, i) => { const top = Math.max(1, sum.funnel[0].n || 1);
+              return h('div', { class: 'org2-row funnel-row' }, h('div', { class: 'funnel-main' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, f.label), h('span', { class: 'mono' }, String(f.n)), h('span', { class: 'chip' }, f.pct_of_previous == null ? 'start' : f.pct_of_previous + '% of previous')),
+                h('div', { class: 'funnel-bar' }, h('i', { style: `width:${Math.max(2, Math.round((f.n / top) * 100))}%` }))));
+            })),
+            h('h3', { class: 'org2-h3' }, 'Enquiries'),
+            ins.leads.length ? h('div', { class: 'org2-list' }, ins.leads.slice(0, 20).map((l) => h('div', { class: 'org2-card' }, h('div', { class: 'row2' }, h('b', { style: 'flex:1' }, l.name + (l.company ? ' · ' + l.company : '')), h('span', { class: 'muted mono' }, when(l.created_at))),
+              h('p', { class: 'muted' }, l.message), h('div', { style: 'margin-top:6px' }, h('a', { class: 'link', href: 'mailto:' + l.email }, l.email)))))
+              : h('p', { class: 'muted' }, 'No enquiries yet. The contact form on the website lands here.')]];
+
     // Data
     const data = [head('Data & export', 'Everything this organisation holds. Secrets are never included.'),
       h('div', { class: 'org2-card' }, h('p', { class: 'muted' }, S.xsum ? (S.xsum.rows + ' rows across ' + S.xsum.tables + ' tables are exportable.') : 'Full JSON export of agents, notes, calls and the audit log.'),
@@ -3486,7 +3534,7 @@ const overlayRoot = (() => {
           if (typed.trim().toLowerCase() === slug) run(async () => { await api('/api/org?confirm=' + encodeURIComponent(slug), { method: 'DELETE' }); location.reload(); });
           else S.info = typed ? 'Cancelled: slug does not match.' : 'Cancelled.'; render(); }, 'btn mcp3-danger'))];
 
-    const content = { overview, members, announcements, billing, data, danger }[tab] || overview;
+    const content = { overview, members, announcements, billing, data, insights, danger }[tab] || overview;
     return h('div', { class: 'body org2' }, h('div', { class: 'org2-shell' }, nav, h('div', { class: 'org2-content' }, content)));
   }
 
@@ -3669,17 +3717,28 @@ const overlayRoot = (() => {
     const hasPanel = S.view === 'chat' && S.panel && S.bot, warn = (hd.warnings || []).length && S.view === 'chat' && !S.err && !S.info;
     root.replaceChildren(h('div', { class: 'shell' + (hasPanel ? ' has-panel' : '') }, side,
       h('main', { class: 'main' }, mobileBar(), S.err && !S.modal ? h('div', { class: 'banner', role: 'alert', style: 'color:var(--bad)' }, S.err) : null,
-        warn ? h('div', { class: 'banner', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
-      );
+        warn ? h('div', { class: 'banner warnbar', title: hd.warnings.join('\n') }, `${hd.warnings.length} setup warning(s): ${hd.warnings[0]}`) : null, view), hasPanel ? passport() : null),
+      hasPanel ? h('div', { class: 'sheet-scrim', onclick: () => { S.panel = false; render(); } }) : null, mobileTabs());
+    document.title = (S.notifs && S.notifs.unread ? `(${S.notifs.unread}) ` : '') + (S.view === 'chat' && S.bot ? `${S.bot.name} · Shewiun` : 'Shewiun');
     restoreScrollState(scrollMem);
     const sc = document.getElementById('scroll');
     if (sc && !(scrollMem && scrollMem.some((m) => m.sel === '#scroll'))) sc.scrollTop = sc.scrollHeight;
     ensureScreen();
     syncOverlays();
   }
+  document.addEventListener('focusin', (e) => { if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) document.body.classList.add('kb'); });
+  document.addEventListener('focusout', () => setTimeout(() => { if (!/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) document.body.classList.remove('kb'); }, 60));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !S.modal) { const t = document.querySelector('.composer textarea'); if (t) { e.preventDefault(); t.focus(); } }
+  });
+  document.addEventListener('scroll', (e) => {
+    if (!e.target || e.target.id !== 'scroll') return; const f = document.getElementById('to-latest');
+    if (f) f.classList.toggle('show', e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight > 240);
+  }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (S.modal) close(); else if (S.drawer) { S.drawer = false; syncOverlays(true); } } });
   async function init() {
     S.err = '';
+    if (window.matchMedia('(max-width: 1180px)').matches) S.panel = false;  // phones and tablets: the agent details are a sheet you open, not something that starts open
     try {
       const st = await api('/api/auth/status');
       S.setup = !!st.setup_required;

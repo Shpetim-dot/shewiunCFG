@@ -11,7 +11,7 @@ Shewiun runs on SQLite by default. Set `CFA_DATABASE_URL` and the same code runs
 1. `./tools/backup.sh` (SQLite backup) and keep that file: it is your fallback.
 2. `docker compose stop cfa` so that nothing writes during the copy.
 3. `docker compose up -d db`, then
-   `docker compose run --rm cfa python tools/sqlite_to_postgres.py --sqlite /data/cfa.db --pg "$CFA_DATABASE_URL"`
+   `docker compose run --rm cfa python tools/sqlite_to_postgres.py --sqlite /data/cfa.db`
    The tool creates the schema, copies every table in foreign-key order, resets sequences, compares row counts per table
    and checks that the audit chain still verifies. Exit code 0 means every table matches. It refuses to overwrite a
    PostgreSQL database that already holds an organisation unless you pass `--force`.

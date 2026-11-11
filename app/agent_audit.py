@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from app import dbx
 from typing import Any
 from uuid import uuid4
 
@@ -54,6 +55,7 @@ def append(bot_id: str, kind: str, actor: str, summary: str, payload: dict[str, 
         org_id, ts, entry_id = pf.org(), pf._m().now(), str(uuid4())
         body = payload or {}
         with pf.db() as con:
+            dbx.chain_lock(con, f"agent_audit:{org_id}:{bot_id}")
             previous = _prev(con, org_id, bot_id)
             material = {"id": entry_id, "org_id": org_id, "bot_id": bot_id, "ts": ts, "kind": kind[:40],
                         "actor": (actor or "")[:120], "summary": (summary or "")[:500],

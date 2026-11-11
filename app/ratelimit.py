@@ -22,8 +22,8 @@ from fastapi import HTTPException
 from app import cfa_core as pf
 
 TABLE = """CREATE TABLE IF NOT EXISTS rate_limits(
-    org_id TEXT NOT NULL, window INTEGER NOT NULL, n INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY(org_id, window))"""
+    org_id TEXT NOT NULL, "window" INTEGER NOT NULL, n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(org_id, "window"))"""
 
 DEFAULT_LIMIT = 10_000
 # Requests per minute and organisation; a plan is a commercial promise, not a suggestion.
@@ -81,10 +81,10 @@ def check(org_id: str | None) -> dict[str, Any] | None:
     window = int(time.time() // 60)
     with _con() as con:
         if window % 30 == 0:  # opportunistic pruning, ~twice per hour
-            con.execute("DELETE FROM rate_limits WHERE window < ?", (window - 5,))
-        con.execute("INSERT INTO rate_limits (org_id,window,n) VALUES (?,?,1) "
-                    "ON CONFLICT(org_id, window) DO UPDATE SET n = n + 1", (org, window))
-        used = con.execute("SELECT n FROM rate_limits WHERE org_id=? AND window=?", (org, window)).fetchone()["n"]
+            con.execute("DELETE FROM rate_limits WHERE \"window\" < ?", (window - 5,))
+        con.execute("INSERT INTO rate_limits (org_id,\"window\",n) VALUES (?,?,1) "
+                    "ON CONFLICT(org_id, \"window\") DO UPDATE SET n = n + 1", (org, window))
+        used = con.execute("SELECT n FROM rate_limits WHERE org_id=? AND \"window\"=?", (org, window)).fetchone()["n"]
     if used > limit:
         return {"code": "rate_limited", "limit": limit, "window_seconds": 60,
                 "message": f"Rate limit of {limit} requests per minute reached for this workspace."}
@@ -95,5 +95,5 @@ def usage(org_id: str) -> dict[str, Any]:
     """Current window usage, for the operator metrics endpoint."""
     window = int(time.time() // 60)
     with _con() as con:
-        row = con.execute("SELECT n FROM rate_limits WHERE org_id=? AND window=?", (org_id, window)).fetchone()
+        row = con.execute("SELECT n FROM rate_limits WHERE org_id=? AND \"window\"=?", (org_id, window)).fetchone()
     return {"org_id": org_id, "window": window, "used": row["n"] if row else 0, "limit": limit_for(org_id)}

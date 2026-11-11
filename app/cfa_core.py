@@ -10,6 +10,8 @@ import hashlib
 import hmac
 import json
 import sqlite3
+
+from app import dbx
 import logging
 import os
 import re
@@ -415,7 +417,7 @@ DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 def csp() -> str:
     cdn = os.getenv("CFA_LOGO_CDN", "https://cdn.simpleicons.org")  # app logos; set empty to disable
-    return f"default-src 'self'; img-src 'self' data:{(' ' + cdn) if cdn else ''}; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    return f"default-src 'self'; img-src 'self' data:{(' ' + cdn) if cdn else ''}; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'" + ("; upgrade-insecure-requests" if os.getenv("CFA_ENV") == "production" else "")
 log = logging.getLogger("cfa.access")
 
 
@@ -585,8 +587,10 @@ def install(app: FastAPI) -> None:
         for k, v in HEADERS.items():
             resp.headers.setdefault(k, v)
         resp.headers.setdefault("Content-Security-Policy", csp())
-        if request.url.path.startswith("/static/") or request.url.path in ("/", "/welcome", "/trust"):
+        if request.url.path.startswith("/static/") or request.url.path in ("/", "/app", "/welcome", "/trust", "/contact", "/privacy", "/terms", "/imprint", "/thank-you"):
             resp.headers["Cache-Control"] = "no-cache"  # always revalidate, so a new release shows up
+        if request.url.path.startswith("/static/site/img/"):
+            resp.headers["Cache-Control"] = "public, max-age=604800"  # compressed landing images: cache for a week
         if request.url.path.startswith("/api/"):
             resp.headers.setdefault("Cache-Control", "no-store")
         if os.getenv("CFA_ENV") == "production":
@@ -642,7 +646,7 @@ FTS_SQL = [
 def _init_fts(con) -> None:
     """The keyword index needs SQLite's FTS5 module. Some runtimes (for example serverless images) are built without it, so a failure here must never stop the app:
     search then falls back to a plain scan and still works. CFA_DISABLE_FTS=1 forces that fallback."""
-    if os.getenv("CFA_DISABLE_FTS") == "1":
+    if os.getenv("CFA_DISABLE_FTS") == "1" or dbx.is_pg():  # PostgreSQL: plain-scan search in brain.py
         return
     try:
         for q in FTS_SQL:
@@ -786,6 +790,15 @@ class MsgIn(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
+def track_site(name: str) -> None:
+    """Funnel step for the operator's site analytics (lazy import: billing imports this module)."""
+    try:
+        from app import billing
+        billing.track(name)
+    except Exception:
+        pass
+
+
 @router.post("/api/bots/{bot_id}/messages")
 async def send_message(bot_id: str, item: MsgIn, request: Request) -> dict[str, Any]:
     p = _principal(request)
@@ -823,6 +836,9 @@ async def send_message(bot_id: str, item: MsgIn, request: Request) -> dict[str, 
             nid, _ = add_note(con, f"Chat: {bot['name']} {ts[:19]}", f"Q: {item.content}\nA: {reply}", "chat", bot_id, "chat", space=bot["spaces"][-1])
     from app import agent_audit
     agent_audit.append(bot_id, "message", p["name"], item.content[:200], {"mode": "live" if model_live(bot["model"]) else "demo"})
+    with db() as con:
+        if con.execute("SELECT COUNT(*) FROM bot_messages WHERE org_id=?", (org(),)).fetchone()[0] <= 2:
+            track_site("first_chat")  # the first exchange of an organisation is the activation step of the funnel
     agent_audit.append(bot_id, "reply", p["name"], reply[:200],
                        {"mode": "live" if model_live(bot["model"]) else "demo", "draft_note_id": nid,
                         "notes_used": [r["id"] for r in rows]})

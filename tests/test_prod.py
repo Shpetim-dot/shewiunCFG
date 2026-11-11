@@ -2,9 +2,12 @@ import json
 import logging
 import sqlite3
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app import main
+from app import dbx
 
 
 def client(tmp_path, monkeypatch, keys=""):
@@ -25,7 +28,8 @@ def test_database_keys_are_hashed_roles_work_and_last_admin_is_protected(tmp_pat
     assert c.get("/api/bots").status_code == 401
     h = {"Authorization": f"Bearer {token}"}
     assert c.get("/api/bots", headers=h).status_code == 200
-    raw = sqlite3.connect(main.DB_PATH).execute("SELECT name,role,token_hash,created_by FROM api_keys").fetchall()
+    with main.connect() as raw_con:
+        raw = [tuple(row) for row in raw_con.execute("SELECT name,role,token_hash,created_by FROM api_keys").fetchall()]
     assert token not in json.dumps(raw) and len(raw[0][2]) == 64
     bob = c.post("/api/admin/keys", json={"name": "Bob", "role": "member"}, headers=h).json()
     hb = {"Authorization": f"Bearer {bob['token']}"}
@@ -73,6 +77,8 @@ def test_request_ids_json_logs_and_no_store(tmp_path, monkeypatch, caplog):
 
 
 def test_wal_mode_and_online_backup_restore(tmp_path, monkeypatch):
+    if dbx.is_pg():
+        pytest.skip("SQLite WAL and SQLite-file restore are not PostgreSQL backup tests")
     c = client(tmp_path, monkeypatch)
     assert main.connect().execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     c.post("/api/brain/notes", json={"title": "Keep me", "body": "important"})
@@ -91,7 +97,7 @@ def test_wal_mode_and_online_backup_restore(tmp_path, monkeypatch):
 def test_retention_purges_old_data_but_never_the_audit_log(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
     c.post("/api/bots/strategist/messages", json={"content": "old question"})
-    con = sqlite3.connect(main.DB_PATH)
+    con = main.connect()
     con.execute("UPDATE bot_messages SET created_at='2020-01-01T00:00:00+00:00'")
     con.execute("UPDATE agent_activity SET ts='2020-01-01T00:00:00+00:00'")
     con.commit()

@@ -1,7 +1,7 @@
 """Real-browser checks for the phone layout (skipped when Playwright/Chromium is not installed).
 
 A screenshot that looks right is not enough: these tests tap, type and scroll at phone, tablet and desktop widths.
-Run: pip install playwright && playwright install chromium && pytest tests/test_mobile.py
+Run: pip install playwright && playwright install chromium && python -m pytest test_mobile.py
 """
 import os
 import socket
@@ -13,7 +13,7 @@ import urllib.request
 import pytest
 
 pw = pytest.importorskip("playwright.sync_api")
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 @pytest.fixture(scope="module")

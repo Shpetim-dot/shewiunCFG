@@ -490,6 +490,7 @@ def register(item: RegisterIn, request: Request, response: Response) -> dict[str
     _set_cookies(response, token, csrf, max_age=int(float(os.getenv("CFA_SESSION_DAYS", "14")) * 86400))
     _audit_in_org(org_id, "org.created", email, {"org_id": org_id, "slug": slug})
     _audit_in_org(org_id, "auth.registered", email, {"user_id": user_id, "role": "owner"})
+    pf.track_site("signup_done")
     return {"user": _public_user(row), "org": {"id": org["id"], "name": org["name"], "slug": org["slug"], "plan": org["plan"]},
             "token": token, "csrf": csrf}
 

@@ -198,6 +198,7 @@ def rollback(note_id: str, item: RollbackIn, request: Request) -> dict[str, Any]
 @router.post("/api/selftest")
 async def selftest(request: Request) -> dict[str, Any]:
     p = pf.need_admin(request)
+    pf.track_site("selftest_run")
     m = pf._m()
     probes: list[dict[str, Any]] = []
 
@@ -808,6 +809,7 @@ def seed_demo(request: Request) -> dict[str, int]:
                 con.execute("INSERT OR IGNORE INTO grants (bot_id,app_id,tool,org_id) VALUES (?,?,?,?)", (ids[bot_name], aid, t, o))
         con.commit()
     pf._m().append_audit("demo.workspace.loaded", p["name"], made)
+    pf.track_site("demo_loaded")
     return made
 
 
@@ -902,7 +904,7 @@ def _screen_rows(bot_id: str, since: str) -> list[dict[str, Any]]:
     with pf.db() as con:
         o = pf.org()
         rows = con.execute("SELECT id,ts,kind,text FROM (SELECT id,ts,kind,text FROM agent_activity WHERE bot_id=? AND org_id=? UNION ALL "
-                           "SELECT e.id,e.ts,e.kind,COALESCE(n.title,'') FROM brain_events e LEFT JOIN notes n ON n.id=e.note_id AND n.org_id=? WHERE e.bot_id=? AND e.org_id=?) "
+                           "SELECT e.id,e.ts,e.kind,COALESCE(n.title,'') FROM brain_events e LEFT JOIN notes n ON n.id=e.note_id AND n.org_id=? WHERE e.bot_id=? AND e.org_id=?) AS activity_rows "
                            "WHERE ts >= ? ORDER BY ts ASC LIMIT 400", (bot_id, o, o, bot_id, o, since)).fetchall()
     return [dict(r) for r in rows]
 

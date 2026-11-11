@@ -20,9 +20,36 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from app import cfa_core as pf
+from app import dbx
 
 router = APIRouter()
-BACKUP_NAME = re.compile(r"^(cfa|emergency)-\d{8}-\d{6}\.db$")
+BACKUP_NAME = re.compile(r"^(cfa|emergency)-\d{8}-\d{6}\.(db|dump)$")
+
+
+def _snapshot(target: Path) -> None:
+    """SQLite: online backup API. PostgreSQL: pg_dump in custom format (restore with pg_restore)."""
+    if dbx.is_pg():
+        import shutil
+        import subprocess
+        if not shutil.which("pg_dump"):
+            raise HTTPException(501, "pg_dump is not installed on this host; use tools/backup_pg.sh from a machine with the PostgreSQL client")
+        res = subprocess.run(["pg_dump", "--format=custom", "--no-owner", "--schema", dbx.schema_name(pf._m().DB_PATH), "--file", str(target), dbx.url()], capture_output=True, text=True, timeout=300)
+        if res.returncode != 0:
+            target.unlink(missing_ok=True)
+            detail = res.stderr.strip().splitlines()[-1][:200] if res.stderr.strip() else "no error output"
+            raise HTTPException(500, "pg_dump failed: " + detail)
+        return
+    src = pf._m().connect()
+    dst = sqlite3.connect(target)
+    try:
+        src.backup(dst)  # consistent snapshot even while the app is writing
+    finally:
+        dst.close()
+        src.close()
+
+
+def _stamp(prefix: str) -> str:
+    return prefix + datetime.utcnow().strftime("%Y%m%d-%H%M%S") + (".dump" if dbx.is_pg() else ".db")
 
 
 # ---------- readiness ----------
@@ -50,15 +77,9 @@ def emergency_backup(request: Request) -> dict[str, Any]:
     """
     p = pf.need_admin(request)
     import hashlib
-    name = "emergency-" + datetime.utcnow().strftime("%Y%m%d-%H%M%S") + ".db"
+    name = _stamp("emergency-")
     target = _backup_dir() / name
-    src = pf._m().connect()
-    dst = sqlite3.connect(target)
-    try:
-        src.backup(dst)
-    finally:
-        dst.close()
-        src.close()
+    _snapshot(target)
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
     pf._m().append_audit("admin.emergency_backup", p["name"], {"file": name, "sha256": digest[:16]})
     return {"name": name, "bytes": target.stat().st_size, "sha256": digest,
@@ -78,7 +99,8 @@ def metrics(request: Request) -> dict[str, Any]:
     from app import ratelimit
     org = pf.org()
     with pf.db() as con:
-        size = Path(pf._m().DB_PATH).stat().st_size if Path(pf._m().DB_PATH).exists() else 0
+        size = (con.execute("SELECT pg_database_size(current_database())").fetchone()[0] if dbx.is_pg()
+                else (Path(pf._m().DB_PATH).stat().st_size if Path(pf._m().DB_PATH).exists() else 0))
 
         def one(sql: str, *params) -> int:
             return con.execute(sql, params).fetchone()[0]
@@ -158,15 +180,9 @@ def _files() -> list[Path]:
 @router.post("/api/admin/backup", status_code=201)
 def backup(request: Request) -> dict[str, Any]:
     p = pf.need_admin(request)
-    name = "cfa-" + datetime.utcnow().strftime("%Y%m%d-%H%M%S") + ".db"
+    name = _stamp("cfa-")
     target = _backup_dir() / name
-    src = pf._m().connect()
-    dst = sqlite3.connect(target)
-    try:
-        src.backup(dst)  # consistent snapshot even while the app is writing
-    finally:
-        dst.close()
-        src.close()
+    _snapshot(target)
     keep = int(os.getenv("CFA_BACKUP_KEEP", "14"))
     for old in _files()[keep:]:
         old.unlink(missing_ok=True)

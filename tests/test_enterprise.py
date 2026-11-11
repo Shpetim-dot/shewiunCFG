@@ -134,7 +134,7 @@ def test_live_mcp_server_end_to_end(tmp_path, monkeypatch):
     sid = r.json()["id"]
     assert {t["name"]: t["risk"] for t in r.json()["tools"]} == {"get_weather": "read", "send_email": "write", "read_api_key": "secret"}
     assert "s3cr3t-token" not in r.text + c.get("/api/apps").text
-    stored = sqlite3.connect(main.DB_PATH).execute("SELECT token_enc FROM mcp_servers").fetchone()[0]
+    stored = main.connect().execute("SELECT token_enc FROM mcp_servers").fetchone()[0]
     assert "s3cr3t-token" not in stored and "Bearer s3cr3t-token" in seen
     assert c.put(f"/api/bots/builder/apps/{sid}", json={"tools": ["read_api_key"]}).status_code == 422
     assert c.put(f"/api/bots/builder/apps/{sid}", json={"tools": ["get_weather", "send_email"]}).status_code == 200

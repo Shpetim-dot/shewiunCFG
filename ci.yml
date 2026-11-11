@@ -23,7 +23,7 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m compileall -q app
       - name: API, runtime and website tests (SQLite)
-        run: pytest -q --ignore=tests/test_mobile.py
+        run: python -m pytest -q --ignore=test_mobile.py
 
   test-postgres:
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install -r requirements-dev.txt
       - name: Same suite on PostgreSQL
-        run: pytest -q --ignore=tests/test_mobile.py
+        run: python -m pytest -q --ignore=test_mobile.py
 
   browser:
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -r requirements-dev.txt playwright && python -m playwright install --with-deps chromium
       - name: Phone, tablet and desktop layouts in a real browser
-        run: pytest -q tests/test_mobile.py
+        run: python -m pytest -q test_mobile.py
 
   dependency-audit:
     runs-on: ubuntu-latest
