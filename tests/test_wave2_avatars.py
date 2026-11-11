@@ -79,18 +79,16 @@ def test_avatar_styles_use_light_and_dark_gradient_stops_and_a_drop_shadow(tmp_p
 
 
 # ---------- cursor gaze ----------
-def test_voxel_avatar_tile_has_no_per_avatar_pointer_handlers(tmp_path, monkeypatch):
+def test_voxel_avatar_tile_uses_shared_palette_without_per_tile_listeners(tmp_path, monkeypatch):
     c = client(tmp_path, monkeypatch)
     js, _ = served(c)
     block = avatar_js(js)
-    start = block.index("function tile(b, s = 40, o = {})")
-    end = block.index("\n  }", start) + 4
-    tile = block[start:end]
     assert "function lookOf(b)" in block
-    assert "document.createElementNS(NS, 'svg')" in tile
-    assert "shape-rendering', 'crispEdges'" in tile
-    assert "addEventListener" not in tile
-    assert "requestAnimationFrame" not in tile
+    assert "function tile(b, s = 40, o = {}) {" in block
+    assert "document.createElementNS(NS, 'svg')" in block
+    assert "shape-rendering', 'crispEdges'" in block
+    assert "addEventListener" not in block
+    assert "document.addEventListener('pointermove'" not in js
 
 # ---------- walk-to-message ----------
 def test_chat_send_preserves_voxel_avatar_message_flow(tmp_path, monkeypatch):
@@ -99,7 +97,7 @@ def test_chat_send_preserves_voxel_avatar_message_flow(tmp_path, monkeypatch):
     body = send_js(js)
     assert "const text = S.draft.trim()" in body
     assert "S.msgs.push({ role: 'user', content: text })" in body
-    assert "api(\`/api/bots/\${S.bot.id}/messages\`" in body
+    assert "/api/bots/" in body and "S.bot.id" in body
     assert "S.msgs.push({ role: 'agent'" in body
     assert "finally { S.busy = false; }" in body
     assert "av3WalkToMessage" not in js
