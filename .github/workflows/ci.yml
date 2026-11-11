@@ -53,6 +53,39 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - name: Same suite on PostgreSQL
         run: python -m pytest -q --ignore=test_mobile.py
+      - name: SQLite-to-PostgreSQL migration rehearsal
+        run: |
+          set -eu
+          tmp="$(mktemp -d)"
+          src="$tmp/source.db"
+          env -u CFA_DATABASE_URL -u CFA_DB_SCHEMA_FROM_PATH -u CFA_PG_SCHEMA CFA_DATABASE_PATH="$src" python - <<'PY'
+          from datetime import datetime, timezone
+          from app import auth, cfa_core as pf, main
+
+          main.init_db()
+          now = datetime.now(timezone.utc).isoformat()
+          with auth.db() as con:
+              con.execute(
+                  "INSERT INTO orgs (id,name,slug,created_at,updated_at) VALUES (?,?,?,?,?)",
+                  ("default", "Migration rehearsal", "migration-rehearsal", now, now),
+              )
+          with pf.db() as con:
+              con.execute(
+                  "INSERT INTO notes (id,title,body,kind,status,owner,source,created_at,updated_at,space,flags,org_id) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("migration-note", "Migration rehearsal", "preserve this row", "note", "verified",
+                   "ci", "migration-test", now, now, "shared", "[]", "default"),
+              )
+              con.execute(
+                  "INSERT INTO mcp_servers (id,name,url,token_enc,tools,created_by,created_at,org_id) "
+                  "VALUES (?,?,?,?,?,?,?,?)",
+                  ("migration-server", "Migration server", "https://mcp.example.test/mcp", "encrypted-test-token",
+                   "[]", "ci", now, "default"),
+              )
+              con.commit()
+          PY
+          python tools/sqlite_to_postgres.py --sqlite "$src" --schema ci_migration
+
 
   browser:
     runs-on: ubuntu-latest
