@@ -13,6 +13,8 @@ jobs:
   test-sqlite:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CFA_POSTS_PER_MINUTE: "10000"  # shared in-memory limiter must not couple independent tests
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,6 +42,7 @@ jobs:
     env:
       CFA_DATABASE_URL: postgresql://postgres:cfa@localhost:5432/cfa
       CFA_DB_SCHEMA_FROM_PATH: "1"
+      CFA_POSTS_PER_MINUTE: "10000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

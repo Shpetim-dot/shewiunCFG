@@ -57,6 +57,13 @@ if not DB_PATH.is_absolute():
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Shewiun CFA", version="0.2.0", description="Control & Focus Architecture")
+
+@app.middleware("http")
+async def no_cache_app_assets(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path == "/app" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 if STATIC.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 app.include_router(agent_launch_router)
@@ -219,7 +226,7 @@ def home() -> HTMLResponse:
     if not (STATIC / "index.html").is_file():  # say what is wrong instead of failing with a bare 500
         return HTMLResponse("<h1>Shewiun CFA</h1><p>The API is running, but the <code>static</code> folder was not deployed. Upload the whole project folder (app, static, requirements.txt).</p>", status_code=503)
     # The version in the asset URLs makes browsers fetch the new files after every release.
-    return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8").replace("__V__", cfa_platform.VERSION))
+    return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8").replace("__V__", cfa_platform.VERSION), headers={"Cache-Control": "no-cache"})
 
 
 site.install(app, home)  # landing page, legal pages, contact form, sitemap, robots, 404
@@ -254,7 +261,7 @@ def health() -> dict[str, Any]:
         "build": (os.getenv("VERCEL_GIT_COMMIT_SHA") or os.getenv("CFA_BUILD") or "")[:7],
         "search_configured": bool(os.getenv("CFA_SEARCH_API_KEY")),
         "secret_key_configured": bool(os.getenv("CFA_SECRET_KEY")),
-        "storage": "ephemeral_sqlite" if IS_VERCEL else "sqlite",
+        "storage": "ephemeral_sqlite" if IS_VERCEL and not dbx.is_pg() else dbx.backend(),
         "storage_warning": (
             "Vercel /tmp storage is ephemeral; data may be lost between instances or deployments."
             if IS_VERCEL else None
