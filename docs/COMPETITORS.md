@@ -1,98 +1,48 @@
-# Competitive analysis — deep research and agent platforms
+# Competitors: evidence and comparison protocol
 
-Snapshot: November 2026. Sources: [Presenc AI Deep Research comparison (May 2026)](https://presenc.ai/research/deep-research-mode-comparison-2026),
-[CrewAI review](https://geekflare.com/open-source/crewai/), [agent framework analysis (CrewAI)](https://raw.githubusercontent.com/larsderidder/framework-analysis/refs/heads/main/tier-1/crewai.md),
-[agent observability comparison](https://www.morphllm.com/ai-agent-observability-tools), [Langfuse vs LangSmith](https://github.com/langfuse/langfuse-docs/blob/8ffb78684e3c135320683101531aa714f8c2cd60/content/compare/langsmith.mdx),
-[OWASP Top 10 for Agentic Apps 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/).
+Reviewed 2026-11-12. This supersedes earlier unsupported rankings, fixed source counts, prices and claims that competitors lack governance. No comparative superiority has been demonstrated.
 
-## 1. Deep research modes (what "ChatGPT Deep Research" means)
+## Official sources retrieved
 
-| Mode | Runtime | Sources | Strength | Weakness |
-|---|---|---|---|---|
-| OpenAI Deep Research | 10–30 min | 50–200 | Most comprehensive, longest synthesis | Slow, over-cites, needs $200 Pro tier |
-| Gemini Deep Research | 5–15 min | 30–150 | Fast, best freshness, Google index | Weaker academic synthesis |
-| Perplexity Deep Research | 3–10 min | 40–100 | Best citation-first UX, click-through verification | Summary over synthesis |
-| Claude Research | 5–20 min | 20–100 | Best reasoning over contradictions | Fewer sources, expensive |
-| Grok DeepSearch | 3–12 min | 30–80 | Real-time / X sources | Citation rigor inconsistent |
+These sources were retrieved successfully in this review. They describe vendor capabilities, not independent performance measurements; main-branch documents can change.
 
-**What they all do well:** long-running background job, visible progress, structured report, inline citations, follow-up questions.
-**What none of them does:** prove that the *agent* behaved correctly while researching, or let you govern it (approvals, memory gating, audit). That is exactly Shewiun's lane.
-
-### What Shewiun's research needs to match (gap list)
-
-| # | Gap in `app/research.py` today | What the leaders do | Effort |
+| Product | Official source | Documented capabilities | Implication |
 |---|---|---|---|
-| R1 | Single planning call, 2–6 fixed sub-questions | Iterative re-planning from gaps between rounds | M |
-| R2 | Search only via Brave + own Brain | Source diversity check, domain dedupe, recency weighting | M |
-| R3 | Report is prose + sources, no per-claim mapping | Claim → source binding, "unsupported" flags | L |
-| R4 | No contradiction handling | Explicit conflict section (Claude's strength) | M |
-| R5 | Fixed depth presets | Budget-aware depth (time/token cap per run) | S |
-| R6 | Progress is a stream, not resumable | Durable runs (the runtime queue already exists) | S |
-| R7 | No reader/citation UI | Source list with snippets and links | S |
-| R8 | **Unique chance** | No competitor ties research to a governed agent (per-agent audit + approvals + memory gating) | — |
+| CrewAI | [README](https://github.com/crewAIInc/crewAI/blob/main/README.md), Control Plane / AMP / Crews and Flows | Crews, event-driven Flows, memory, knowledge, checkpointing, MCP/A2A; commercial AMP advertises deployment, observability, governance and security; Control Plane free entry point | Multiple agents and governance alone do not differentiate Shewiun. Plan-specific limits need separate verification. |
+| OpenClaw | [README](https://github.com/openclaw/openclaw/blob/main/README.md), overview / Security | Personal/shared gateway, messaging channels, local state/memory, model/harness plugins. Explicitly warns that main-session tools run on the host unless sandboxing is configured | Learn from continuity and channel access; keep policy outside agent instructions and untrusted execution isolated. Self-hosting alone does not guarantee safety. |
+| OpenAI Agents SDK | [README](https://github.com/openai/openai-agents-python/blob/main/README.md), Core concepts | Provider-agnostic agents, handoffs, tools/MCP, guardrails, human-in-the-loop, sessions, tracing and sandbox agents | Do not claim it lacks human review or is necessarily vendor-locked. Developer SDK comparisons differ from finished workspace comparisons. |
 
-## 2. Agent frameworks
+## Evidence gaps
 
-| Framework | Does well | Does badly | Shewiun position |
-|---|---|---|---|
-| **CrewAI** | Fastest from idea to working crew; role/goal/task vocabulary; big template gallery; large community | Governance is not the product: no approval queue tied to payloads, no per-agent audit chain; durability and resume are bolt-ons; enterprise features (control plane, RBAC) are paid/managed | We are slower to prototype, but we ship what a fintech needs: propose-only actions, approval binding, audit |
-| **LangGraph** | Real durable graphs, checkpoints, human-in-the-loop interrupts, LangSmith integration | Steep learning curve, heavy config, governance left to the builder; nothing out of the box for policy or evidence | Our runtime queue is simpler, but we own the governance semantics |
-| **AutoGen / AG2** | Research-friendly multi-agent conversation, good for experiments | Production story weak (state, observability, deployment) | Not our market |
-| **OpenAI Agents SDK** | Clean primitives, tracing, handoffs | Vendor lock-in, no EU-first governance, no approval evidence | We are model-agnostic |
-| **n8n / low-code** | Integrations, non-developers | No agent governance semantics | Partner, not competitor |
-
-**Read:** every framework optimises *building* agents. Nobody optimises *proving* what an agent did and *stopping* it at the right moment. Shewiun should not compete on "build faster" — it should compete on "sign off without reading logs".
-
-## 3. Observability and governance players
-
-| Player | Strength | Weakness Shewiun can exploit |
+| Requested product | Observed evidence | Outstanding verification |
 |---|---|---|
-| LangSmith / Langfuse / AgentOps | Traces, evals, cost per call | They observe; they do not *decide*. No approval queue, no memory quarantine |
-| TrueFoundry / Kong / Portkey | MCP/LLM gateway, policy at the proxy, scale | Platform teams only; no per-agent memory governance, no evidence report |
-| HumanLayer | Human-in-the-loop approvals | Approval without memory model or audit evidence |
-| Modulos / Saidot / Trustible / Monitaur / VerifyWise | Regulatory frameworks, control mapping, agent inventory | Heavy compliance tooling, little day-to-day agent operation |
+| Grok Bots | User screenshots show navigation, chat, details and computer/voice controls. Official x.ai/grok retrieval blocked by proxy, 403 | Current capabilities, availability, plans, pricing, execution isolation. Screenshots are design references, not reliability benchmarks. |
+| CrewAI managed platform | Commercial positioning confirmed in official project README; docs.crewai.com retrieval blocked, 403 | Plan-specific approvals, governance, tenancy and pricing. |
+| ChatGPT | openai.com/chatgpt/overview retrieval blocked, 403 | Current product features and comparable workflow evaluation. Agents SDK findings do not establish ChatGPT features. |
+| OpenAI Dots | Official product identity/URL not established | Authoritative reference required; do not silently substitute another OpenAI product. |
+| Openmausbot | Name ambiguous; OpenClaw official source reviewed separately | Confirm whether this refers to OpenClaw or another product. |
+| Town / Townies | Official product identity/URL not established | Authoritative reference required before assigning capabilities or weaknesses. |
 
-## 4. Where Shewiun wins (and must stay)
+No competitor account, paid plan, pricing, privacy certification, quality ranking or measured latency was verified. Unknown does not mean absent. Consult FEATURE_STATUS.md for Shewiun's actual implementation.
 
-1. **Evidence, not logs.** The 44-probe self-test plus a shareable report is a sales artefact, not a dashboard.
-2. **Approval bound to the action** (payload hash + policy version + TTL + atomic claim). Most competitors approve a *tool name*, not a *payload*.
-3. **Memory governance** — draft → verified, spaces, instruction quarantine, versioning, rollback. Nobody in the comparison has this as a product surface.
-4. **Per-agent audit chain (new).** Every agent has its own hash-linked log with export. Frameworks give you traces; we give you a chain you can hand to an auditor.
-5. **EU-first, single-tenant deployable.** Finance and security buyers cannot put agent traces into a US SaaS on day one.
+## Differentiation hypothesis
 
-## 5. Where Shewiun loses today
+Specialised agents plus a project-to-deliverable workspace: brief, project knowledge, plan, evidence, editable result, human review and a record of authorised actions. An independent control plane governs permissions while the runtime performs work. This is a customer-value hypothesis, not proof competitors cannot do it.
 
-| Weakness | Consequence | Fix |
-|---|---|---|
-| Research quality below the big five | "Why not just use ChatGPT?" | R1–R5 above, plus a "verified sources only" mode |
-| No SDK / no proxy into *existing* agents | Customer must rebuild agents here | `/v1` OpenAI-compatible proxy + MCP proxy (planned) |
-| No SSO/SAML, no SOC 2 | Enterprise procurement blocks | Roadmap 6–9 months |
-| Single-node SQLite | Scale ceiling ~50 orgs | Postgres + durable queue |
-| No eval harness | Cannot prove quality over time | Reuse the self-test runner for prompt evals |
+Validate one initial workflow with design partners: client proposal, project status report or software review. Compare the customer's current process and relevant products, not only agent frameworks.
 
-## 6. Production gaps (what an app like this still needs)
+## Fair evaluation protocol
 
-**Blocking a paid production customer**
-1. Durable rate limiting (per org/API key), currently in-process per IP.
-2. Backup/restore drill + documented RPO/RTO; backups are instance-wide.
-3. Observability: structured logs are there, no metrics/traces, no alerting.
-4. Stripe live walkthrough (test mode only so far), dunning mails, invoice emails.
-5. GDPR: deletion endpoint that also covers audit/agent logs under a retention policy.
-6. Email delivery (SMTP exists, no templates, no bounce handling).
-7. SSO/SAML + SCIM for ≥50 seats.
-8. Status page + incident process + SLA text.
-9. Postgres migration path + horizontal worker.
-10. Security review: external pentest, dependency scanning in CI, secret scanning.
+Use identical synthetic project packets, dated source snapshots, prompts, model/budget constraints and predefined acceptance criteria. Run at least five independent repetitions. Record product/version, plan, settings, date, failed attempts and human interventions. Do not use private customer data without authorisation.
 
-**Differentiating but not blocking**
-11. Eval harness with regression gates per agent.
-12. Cost forecasting per org (trend + budget alerts).
-13. Agent-to-agent message signing (OWASP inter-agent risk).
-14. Computer-use provider (contract exists, no implementation).
-15. Marketplace with versioning and signatures.
+| Dimension | Measure |
+|---|---|
+| Completion | Fraction meeting acceptance criteria; complete, partial and failed separately |
+| Evidence | Supported material claims / checked material claims; inspect original source passages |
+| Quality | Blind review of correctness, usefulness, assumptions and required rework |
+| Efficiency | Wall-clock time, active human minutes and total cost per accepted result including retries |
+| Control | Correct allow/deny decisions for changed payload, expired approval, revoked grant and cross-tenant requests |
+| Reliability | Interrupt/restart, cancellation, provider failure and duplicate external action outcomes |
+| UX | Time to first useful output, task completion across phone/tablet/desktop, accessibility defects |
 
-## 7. Announcements (implemented)
-
-`app/announcements.py`: platform-wide notices for super admins, organisation notices for admins,
-audiences `engineering`/`all`, expiry, no HTML, audit event on create. This is the notice board an
-engineering team expects inside the tool ("we changed the approval TTL", "new model available").
+Results pending. Do not publish invented scores, agent certifications or best-model claims.

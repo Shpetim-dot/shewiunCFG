@@ -1956,3 +1956,36 @@ h1, h2, h3 { text-wrap: balance; }
 .funnel-main { flex: 1; min-width: 0; }
 .funnel-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 16%, transparent); margin-top: 8px; overflow: hidden; }
 .funnel-bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+
+/* Business workspace: familiar agent rail, direct routes to the work around it. */
+.workspace-nav { display: flex; flex-direction: column; gap: 3px; margin: 0 12px 10px; padding: 9px 0 14px; border-bottom: 1px solid var(--line); }
+.workspace-link { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 39px; padding: 8px 11px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); text-align: left; font-size: 13px; font-weight: 550; }
+.workspace-link:hover { color: var(--ink); background: var(--surface); }
+.workspace-link[aria-current="page"] { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); color: var(--accent); }
+.workspace-count { margin-left: auto; min-width: 20px; padding: 1px 6px; border-radius: 6px; font-size: 11px; background: var(--surface); color: var(--accent); text-align: center; }
+.side .agents { min-height: 100px; }
+.bar h1 { letter-spacing: -.02em; }
+.ctl2 { padding: 8px 2px 28px; }
+.ctl2-head { margin-bottom: 24px; }
+.ctl2-title { font-size: clamp(23px, 2.2vw, 30px); letter-spacing: -.035em; line-height: 1.2; }
+.ctl2-sub { max-width: 65ch; line-height: 1.65; margin-top: 9px; }
+.ctl2-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ctl2-kpi { padding: 18px; border-top: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.ctl2-kpi-value { margin-top: 10px; }
+.ctl2-charts, .ctl2-mid { gap: 16px; margin-top: 16px; }
+.ctl2-card { padding: 17px; }
+.ctl2-kpis, .ctl2-charts, .ctl2-mid, .ctl2-two, .org2-content, .org2-shell { min-width: 0; }
+.modal, .drawer, .agx-panel { overscroll-behavior: contain; }
+.tbl-wrap { max-width: 100%; }
+@media (min-width: 761px) and (max-width: 1180px) {
+  .ctl2-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ctl2-charts { grid-template-columns: 1fr; }
+  .ctl2-mid, .ctl2-two { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .workspace-nav { display: none; }
+  .ctl2 { padding: 3px 0 24px; }
+  .ctl2-head { margin-bottom: 18px; }
+  .ctl2-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ctl2-kpi, .ctl2-card { padding: 14px; }
+}

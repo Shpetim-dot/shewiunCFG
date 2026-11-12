@@ -47,7 +47,7 @@
   }
 
   // ---- product tabs ----
-  var tabs = doc.querySelectorAll('[role=tab]'), panels = doc.querySelectorAll('[role=tabpanel]');
+  var tabs = doc.querySelectorAll('#product [role=tab]'), panels = doc.querySelectorAll('#product [role=tabpanel]');
   function selectTab(t) {
     Array.prototype.forEach.call(tabs, function (x) { var on = x === t; x.setAttribute('aria-selected', on ? 'true' : 'false'); x.tabIndex = on ? 0 : -1; });
     Array.prototype.forEach.call(panels, function (p) { p.hidden = p.id !== t.getAttribute('aria-controls'); });
@@ -55,11 +55,103 @@
   Array.prototype.forEach.call(tabs, function (t, i) {
     t.addEventListener('click', function () { selectTab(t); });
     t.addEventListener('keydown', function (e) {
-      var n = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : -1;
-      if (n < 0) return; n = (n + tabs.length) % tabs.length; tabs[n].focus(); selectTab(tabs[n]); e.preventDefault();
+      var n;
+      if (e.key === 'ArrowRight') n = i + 1;
+      else if (e.key === 'ArrowLeft') n = i - 1;
+      else if (e.key === 'Home') n = 0;
+      else if (e.key === 'End') n = tabs.length - 1;
+      else return;
+      n = (n + tabs.length) % tabs.length; tabs[n].focus(); selectTab(tabs[n]); e.preventDefault();
     });
   });
   if (tabs.length) selectTab(tabs[0]);
+
+
+  // ---- read-only product demo: local fixtures only; no API or model calls ----
+  var demo = doc.getElementById('workspace-preview');
+  if (demo) {
+    var demoButtons = Array.prototype.slice.call(demo.querySelectorAll('[data-demo-agent]'));
+    var conversation = doc.getElementById('demo-conversation');
+    var messages = doc.getElementById('demo-chat-scroll');
+    var scrollPositions = {}, activeAgent = 'strategist';
+    var conversations = {
+      strategist: {
+        name: 'Strategist', role: 'Planning · project context', knowledge: 'Client brief · draft', permission: 'Read context, suggest a plan',
+        messages: [
+          ['You', 'We’re preparing a website launch for Northstar Studio. Help me turn the brief into a plan the team can review.'],
+          ['Strategist', 'I’d start with the decision we need to make: what belongs in the first release? The brief names three goals: explain the offer, show the work and make it easy to get in touch.'],
+          ['Strategist', 'Proposed first release: positioning and audience, three focused project stories, and a short enquiry flow.'],
+          ['You', 'What should we check before we commit?'],
+          ['Strategist', 'Ask the Researcher to compare the client’s notes with the current website. Keep assumptions separate from confirmed requirements. Then have the Builder turn the agreed scope into a delivery checklist.'],
+          ['Strategist', 'The deadline and content owner are still unknown. I’d resolve those before promising a launch date.']
+        ]
+      },
+      researcher: {
+        name: 'Researcher', role: 'Research · source review', knowledge: 'Brief + workshop notes · samples', permission: 'Read context, identify evidence gaps',
+        messages: [
+          ['You', 'Review the launch brief. What do we know, and what are we assuming?'],
+          ['Researcher', 'The sample brief says the studio serves small product teams. The workshop notes ask for clearer project stories and a simpler enquiry form. Those are inputs, not proof of customer demand.'],
+          ['Researcher', 'Confirmed in the sample brief: three services, two available case studies and one primary contact. The third case study still needs client permission.'],
+          ['You', 'What would you ask the client next?'],
+          ['Researcher', 'Which service should lead? Who can approve case-study content? What counts as a useful enquiry? I would record the answers with a source and review status in Brain.'],
+          ['Researcher', 'Assumption to validate: fewer form fields will improve enquiries. We have no measured baseline yet, so I would not promise a conversion uplift.'],
+          ['You', 'Keep the open questions with the plan.'],
+          ['Researcher', 'In this example, the handoff contains confirmed inputs, unresolved questions and assumptions. No websites were fetched and no live research ran in this demo.']
+        ]
+      },
+      builder: {
+        name: 'Builder', role: 'Delivery · implementation planning', knowledge: 'Proposed release scope · sample', permission: 'Read context, propose a checklist',
+        messages: [
+          ['You', 'Turn the proposed scope into a checklist we can review.'],
+          ['Builder', 'Here’s a suggested sequence: agree the page outline, prepare approved case-study content, build the enquiry flow, then review accessibility and mobile layouts.'],
+          ['Builder', 'For each item I’d name an owner, define an acceptance check and attach the relevant context. The missing third case study should stay an open dependency.'],
+          ['You', 'What needs a person’s decision?'],
+          ['Builder', 'The final scope, client-facing copy and launch approval. A proposed checklist is not a completed implementation. We should verify the actual pages and form before calling the work done.'],
+          ['Builder', 'Example acceptance checks: navigation works with a keyboard; the form explains validation errors; the layout fits phone, tablet and desktop widths.'],
+          ['You', 'Can you publish it now?'],
+          ['Builder', 'Not from this preview. It only illustrates a conversation. In the workspace, connected actions need the correct permissions and any required human approval.']
+        ]
+      }
+    };
+    function selectAgent(button) {
+      scrollPositions[activeAgent] = messages.scrollTop;
+      activeAgent = button.getAttribute('data-demo-agent');
+      var data = conversations[activeAgent];
+      demoButtons.forEach(function (item) {
+        var selected = item === button;
+        item.setAttribute('aria-selected', selected ? 'true' : 'false');
+        item.tabIndex = selected ? 0 : -1;
+      });
+      conversation.setAttribute('aria-labelledby', button.id);
+      doc.getElementById('demo-agent-name').textContent = data.name;
+      doc.getElementById('demo-agent-role').textContent = data.role;
+      doc.getElementById('demo-context-knowledge').textContent = data.knowledge;
+      doc.getElementById('demo-context-permission').textContent = data.permission;
+      messages.replaceChildren();
+      var date = doc.createElement('div'); date.className = 'demo-date'; date.textContent = 'EXAMPLE · CLIENT LAUNCH'; messages.appendChild(date);
+      data.messages.forEach(function (message) {
+        var row = doc.createElement('div'); row.className = 'demo-message' + (message[0] === 'You' ? ' demo-message-user' : '');
+        var author = doc.createElement('span'); author.textContent = message[0];
+        var text = doc.createElement('p'); text.textContent = message[1];
+        row.appendChild(author); row.appendChild(text); messages.appendChild(row);
+      });
+      messages.scrollTop = scrollPositions[activeAgent] || 0;
+    }
+    demoButtons.forEach(function (button, index) {
+      button.addEventListener('click', function () { selectAgent(button); });
+      button.addEventListener('keydown', function (e) {
+        var next;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = index + 1;
+        else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = index - 1;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = demoButtons.length - 1;
+        else return;
+        e.preventDefault();
+        next = (next + demoButtons.length) % demoButtons.length;
+        demoButtons[next].focus(); selectAgent(demoButtons[next]);
+      });
+    });
+  }
 
   // ---- FAQ analytics ----
   Array.prototype.forEach.call(doc.querySelectorAll('.faq details'), function (d) { d.addEventListener('toggle', function () { if (d.open) track('faq_open'); }); });

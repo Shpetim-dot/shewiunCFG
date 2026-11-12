@@ -1900,8 +1900,8 @@ const overlayRoot = (() => {
     const header = h('div', { class: 'ctl2-head' },
       h('div', { class: 'ctl2-headtext' },
         h('div', { class: 'ctl2-eyebrow' }, 'Governance'),
-        h('h2', { class: 'ctl2-title' }, 'Control'),
-        h('p', { class: 'muted ctl2-sub' }, 'Live posture for this organisation: approvals, agent risk, coverage and the hash-linked audit trail. Every value comes from the server.')),
+        h('h2', { class: 'ctl2-title' }, 'Agent control plane'),
+        h('p', { class: 'muted ctl2-sub' }, 'Review agent activity, permissions and approvals in one place. Figures reflect this workspace; coverage is a self-assessment, not certification.')),
       h('div', { class: 'ctl2-headactions' }, btn('Refresh', () => { go('control'); }, 'btn'), btn('Open inventory', () => go('inventory'), 'btn')));
     const auditDays = ctl2AuditDays(), auditDaysUsed = auditDays.filter((d) => d.n).length;
     const auditCaption = 'Events per day from the loaded audit window (' + (S.audit || []).length + ' of up to 200 newest events).'
@@ -3544,7 +3544,7 @@ const overlayRoot = (() => {
     // Settings has its own section/loading/status state; include it so a section switch rebuilds the dialog.
     const setSig = S.modal === 'settings' ? '|set:' + (S.setSection || '') + (S.setLoading ? ':L' : '') + (S.setLoadErr ? ':E' : '') + (S.setInfo ? ':I' : '') + (S.setArm ? ':A' : '') + (S.err ? ':X' : '') : '';
     const sig = (S.drawer ? 'drawer' : '') + '|' + (S.modal || '') + '|' + (S.ctx ? S.ctx.id : '') + '|' + (S.tmodal ? 'team' : '') + upSig + agxSig + setSig;
-    if (!force && sig === S._ovlSig) return;  // unchanged overlay state: no DOM churn, no flicker
+    if (!force && sig === S._ovlSig) { syncLayerAccess(); return; }  // unchanged overlay state: no DOM churn, no flicker
     S._ovlSig = sig;
     const parts = [];
     if (S.drawer) parts.push(...drawer());
@@ -3561,7 +3561,49 @@ const overlayRoot = (() => {
     if (S.ctx) parts.push(...agentCtx());
     if (S.tmodal) parts.push(teamModal());
     if (parts.length || overlayRoot.childElementCount) overlayRoot.replaceChildren(...parts);
+    syncLayerAccess();
   }
+  // Keep keyboard interaction inside modal layers, including responsive agent sheets.
+  // The desktop details column remains a normal complementary panel.
+  let activeLayer = null, pendingLayerTrigger = null, layerReturnTarget = null, layerReturnLabel = null, layerReturnText = null;
+  const layerFocusable = (layer) => [...layer.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]')]
+    .filter((el) => el.getClientRects().length && !el.closest('[inert]'));
+  function syncLayerAccess() {
+    const layers = [...overlayRoot.querySelectorAll('.modal, .drawer, .nt-panel')];
+    const overlay = layers[layers.length - 1] || null;
+    const panel = root.querySelector('.agx-panel');
+    const sheet = window.matchMedia('(max-width: 1180px)').matches ? panel : null;
+    if (panel && !sheet) { panel.removeAttribute('role'); panel.removeAttribute('aria-modal'); panel.removeAttribute('tabindex'); }
+    const layer = overlay || sheet;
+    root.inert = !!overlay;
+    root.querySelectorAll('.shell > .side, .shell > .main').forEach((el) => { el.inert = !!sheet; });
+    if (sheet) { sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-modal', 'true'); }
+    if (overlay) { overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); }
+    if (layer) {
+      if (!activeLayer) {
+        layerReturnTarget = pendingLayerTrigger || document.activeElement;
+        layerReturnLabel = layerReturnTarget && layerReturnTarget.getAttribute('aria-label');
+        layerReturnText = layerReturnTarget && layerReturnTarget.tagName === 'BUTTON' ? layerReturnTarget.textContent.trim() : null;
+      }
+      layer.setAttribute('tabindex', '-1');
+      if (!layer.contains(document.activeElement)) (layerFocusable(layer)[0] || layer).focus({ preventScroll: true });
+    } else if (activeLayer) {
+      const target = layerReturnTarget && layerReturnTarget.isConnected ? layerReturnTarget :
+        [...root.querySelectorAll('button, a[href]')].find((el) => el.getClientRects().length &&
+          ((layerReturnLabel && el.getAttribute('aria-label') === layerReturnLabel) || (layerReturnText && el.textContent.trim() === layerReturnText)));
+      if (target) target.focus({ preventScroll: true });
+      layerReturnTarget = null; layerReturnLabel = null; layerReturnText = null;
+    }
+    activeLayer = layer; pendingLayerTrigger = null;
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab' || !activeLayer) return;
+    const focusable = layerFocusable(activeLayer), first = focusable[0], last = focusable[focusable.length - 1];
+    if (!first) { event.preventDefault(); activeLayer.focus(); }
+    else if (event.shiftKey && (document.activeElement === first || !activeLayer.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || !activeLayer.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+  });
+  window.matchMedia('(max-width: 1180px)').addEventListener('change', syncLayerAccess);
   async function loadNotifs() {
     try { S.notifs = await api('/api/notifications'); } catch {}
   }
@@ -3676,6 +3718,7 @@ const overlayRoot = (() => {
     }
   }
   function render() {
+    if (!activeLayer) pendingLayerTrigger = document.activeElement;
     stopSim(); hideHover();
     if (S.auth) { stopScreen(); root.replaceChildren(loginView()); return; } const hd = S.health, groups = [...new Set(S.bots.map((b) => b.team))];
     const viewChanged = S._v !== S.view;
@@ -3685,7 +3728,11 @@ const overlayRoot = (() => {
       h('div', { class: 'side-top' }, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Menu', 'aria-expanded': S.drawer, onclick: (e) => { e.preventDefault(); e.stopPropagation(); S.drawer = !S.drawer; if (S.drawer) S._drawerOpened = Date.now(); syncOverlays(true); if (S.drawer) refreshSum(); } }, icon('menu')), h('div', { class: 'logo' }, 'Shewiun'), h('span', { class: 'sp' }),
         h('button', { class: 'ibtn bell', type: 'button', 'aria-label': 'Notifications', onclick: openNotifs }, icon('bell') || icon('chat'), S.notifs && S.notifs.unread ? h('span', { class: 'badge' }, String(S.notifs.unread)) : null),
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Search notes', onclick: () => go('brain') }, icon('search')), h('button', { class: 'ibtn', type: 'button', 'aria-label': 'New agent', onclick: openAgent }, icon('plus'))),
-      h('div', { class: 'agents av3-agents' }, groups.map((g) => {
+      h('nav', { class: 'workspace-nav', 'aria-label': 'Workspace navigation' },
+        [['chat', 'Agents', 'chat'], ['council', 'Council', 'council'], ['brain', 'Knowledge', 'graph'], ['research', 'Research', 'lens'], ['control', 'Control', 'shield']].map(([view, label, glyph]) =>
+          h('button', { class: 'workspace-link', type: 'button', 'aria-current': S.view === view ? 'page' : false, onclick: () => go(view) }, icon(glyph, 17), h('span', {}, label),
+            view === 'control' && S.sum.pending_approvals ? h('span', { class: 'workspace-count', 'aria-label': S.sum.pending_approvals + ' pending approvals' }, String(S.sum.pending_approvals)) : null))),
+      h('div', { class: 'agents av3-agents', 'aria-label': 'Your agents' }, groups.map((g) => {
         const list = S.bots.filter((b) => b.team === g).sort((a, b) => (S.pinned[b.id] ? 1 : 0) - (S.pinned[a.id] ? 1 : 0));
         return [h('div', { class: 'group av3-group' }, h('span', { class: 'av3-glabel' }, g), h('span', { class: 'av3-gcount', 'aria-hidden': 'true' }, String(list.length))),
           list.map((b) => h('button', { class: 'agent av3-agent', type: 'button', 'aria-current': S.view === 'chat' && S.bot && S.bot.id === b.id ? 'true' : false,
@@ -3735,7 +3782,13 @@ const overlayRoot = (() => {
     if (!e.target || e.target.id !== 'scroll') return; const f = document.getElementById('to-latest');
     if (f) f.classList.toggle('show', e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight > 240);
   }, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (S.modal) close(); else if (S.drawer) { S.drawer = false; syncOverlays(true); } } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') {
+    if (S.ctx) closeCtx();
+    else if (S.tmodal) { S.tmodal = false; S.tedit = null; syncOverlays(true); }
+    else if (S.modal) close();
+    else if (S.drawer) { S.drawer = false; syncOverlays(true); }
+    else if (S.panel && window.matchMedia('(max-width: 1180px)').matches) { S.panel = false; render(); }
+  } });
   async function init() {
     S.err = '';
     if (window.matchMedia('(max-width: 1180px)').matches) S.panel = false;  // phones and tablets: the agent details are a sheet you open, not something that starts open
