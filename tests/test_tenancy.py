@@ -48,6 +48,27 @@ def two_orgs(tmp_path, monkeypatch):
 
 
 # ---------- brain ----------
+def test_other_organisation_grants_do_not_invalidate_approval_policy(two_orgs):
+    """Shared seed-agent IDs must not connect the tenants' approval policies."""
+    from app import cfa_core as pf, mcp_apps
+
+    _a, _b, org_a, org_b = two_orgs
+    token = pf.TENANT.set(org_a["org"]["id"])
+    try:
+        with pf.db() as con:
+            con.execute("INSERT INTO grants (bot_id,app_id,tool,org_id) VALUES (?,?,?,?)",
+                        ("strategist", "github", "create_issue", org_a["org"]["id"]))
+            original = mcp_apps.policy_version(con, "strategist", "github", "create_issue", "write")
+            con.execute("INSERT INTO grants (bot_id,app_id,tool,org_id) VALUES (?,?,?,?)",
+                        ("strategist", "github", "read_repo", org_b["org"]["id"]))
+            assert mcp_apps.policy_version(con, "strategist", "github", "create_issue", "write") == original
+            con.execute("DELETE FROM grants WHERE bot_id=? AND app_id=? AND org_id=?",
+                        ("strategist", "github", org_a["org"]["id"]))
+            assert mcp_apps.policy_version(con, "strategist", "github", "create_issue", "write") != original
+    finally:
+        pf.TENANT.reset(token)
+
+
 def test_notes_do_not_leak_between_organisations(two_orgs):
     a, b, _oa, _ob = two_orgs
     note = a.post("/api/brain/notes", json={"title": "Acme secret", "body": "acme-only"}, headers=csrf(a)).json()

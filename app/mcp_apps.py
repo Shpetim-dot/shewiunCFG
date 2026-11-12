@@ -95,7 +95,8 @@ def payload_hash(bot_id: str, app_id: str, tool: str, args: Any) -> str:
 
 def policy_version(con, bot_id: str, app_id: str, tool: str, risk: str | None) -> str:
     """Changes when the permission picture for this action changes (grant set on the app, or the tool's risk class)."""
-    granted = sorted(r["tool"] for r in con.execute("SELECT tool FROM grants WHERE bot_id=? AND app_id=?", (bot_id, app_id)))
+    granted = sorted(r["tool"] for r in con.execute(
+        "SELECT tool FROM grants WHERE bot_id=? AND app_id=? AND org_id=?", (bot_id, app_id, pf.org())))
     return hashlib.sha256(json.dumps({"granted": granted, "tool": tool, "risk": risk}, sort_keys=True).encode()).hexdigest()[:16]
 
 
